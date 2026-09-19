@@ -1,10 +1,24 @@
 "use client";
 
 import { useState } from "react";
-import { checkBackend } from "@/src/lib/api";
+import { checkBackend, downloadVideo } from "@/src/lib/api";
 
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [downloadStatus, setDownloadStatus] = useState("");
+
+  const handleDownload = async () => {
+    setDownloadStatus("Downloading...");
+
+    try {
+      const result = await downloadVideo(youtubeUrl);
+      setDownloadStatus(`Saved ${result.file} in ${result.project_id}`);
+    } catch (error) {
+      setDownloadStatus(
+        error instanceof Error ? error.message : "Video download failed",
+      );
+    }
+  };
 
   const testBackend = async () => {
     try {
@@ -42,9 +56,16 @@ export default function Home() {
           Current URL: {youtubeUrl}
         </p>
 
-        <button className="mt-4 rounded-lg bg-white px-5 py-3 font-medium text-black hover:bg-zinc-200">
+        <button
+          onClick={handleDownload}
+          className="mt-4 rounded-lg bg-white px-5 py-3 font-medium text-black hover:bg-zinc-200"
+        >
           Generate Clips
         </button>
+
+        {downloadStatus && (
+          <p className="mt-3 text-sm text-zinc-400">{downloadStatus}</p>
+        )}
 
         <button
           onClick={testBackend}
