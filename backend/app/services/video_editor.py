@@ -1,10 +1,28 @@
 import shutil
 import subprocess
+import os
 from pathlib import Path
 
 
 class VideoEditorError(Exception):
     """Raised when FFmpeg cannot create a clip."""
+
+
+def find_ffmpeg() -> str:
+    executable = shutil.which("ffmpeg")
+    if executable:
+        return executable
+
+    if os.name == "nt":
+        winget_packages = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
+        matches = winget_packages.glob("Gyan.FFmpeg.Shared*/*/bin/ffmpeg.exe")
+        for match in matches:
+            if match.is_file():
+                return str(match)
+
+    raise VideoEditorError(
+        "FFmpeg was not found. Install FFmpeg and restart the backend."
+    )
 
 
 def create_clip(
@@ -17,14 +35,11 @@ def create_clip(
         raise VideoEditorError("Clip start must be before clip end")
     if not source_path.is_file():
         raise VideoEditorError("Source video not found")
-    if shutil.which("ffmpeg") is None:
-        raise VideoEditorError(
-            "FFmpeg was not found on PATH. Install FFmpeg and restart the backend."
-        )
+    ffmpeg_path = find_ffmpeg()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
-        "ffmpeg",
+        ffmpeg_path,
         "-y",
         "-ss",
         str(start_time),
