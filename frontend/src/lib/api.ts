@@ -6,6 +6,14 @@ export type DownloadResponse = {
   file: string;
 };
 
+export type TranscriptionResponse = {
+  project_id: string;
+  status: string;
+  text_file: string;
+  json_file: string;
+  segments: number;
+};
+
 export async function checkBackend() {
   const response = await fetch(`${API_URL}/api/health`);
 
@@ -27,6 +35,21 @@ export async function downloadVideo(url: string): Promise<DownloadResponse> {
 
   if (!response.ok) {
     throw new Error("Video download failed");
+  }
+
+  return response.json();
+}
+
+export async function transcribeVideo(
+  projectId: string,
+): Promise<TranscriptionResponse> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/transcribe`,
+    { method: "POST" },
+  );
+
+  if (!response.ok) {
+    throw new Error("Video transcription failed");
   }
 
   return response.json();
