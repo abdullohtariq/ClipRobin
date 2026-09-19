@@ -37,19 +37,19 @@ export default function RootLayout({
                 Projects
               </Link>
 
-              <a
+              <Link
                 href="/clips"
                 className="block rounded-lg px-4 py-3 text-zinc-400 hover:bg-zinc-800 hover:text-white"
               >
                 Clips
-              </a>
+              </Link>
 
-              <a
+              <Link
                 href="/settings"
                 className="block rounded-lg px-4 py-3 text-zinc-400 hover:bg-zinc-800 hover:text-white"
               >
                 Settings
-              </a>
+              </Link>
             </nav>
           </aside>
 

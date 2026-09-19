@@ -6,9 +6,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
 from app.services.downloader import download_video
+from app.services.project_manager import create_project
 
 router = APIRouter(prefix="/api")
-PROJECTS_DIR = Path(__file__).resolve().parents[2] / "data" / "projects"
 
 
 class DownloadRequest(BaseModel):
@@ -34,17 +34,7 @@ class DownloadResponse(BaseModel):
 
 
 def create_project_directory() -> tuple[str, Path]:
-    PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
-    project_number = 1
-
-    while True:
-        project_id = f"project_{project_number:03d}"
-        project_directory = PROJECTS_DIR / project_id
-        try:
-            project_directory.mkdir()
-            return project_id, project_directory
-        except FileExistsError:
-            project_number += 1
+    return create_project()
 
 
 @router.post("/download", response_model=DownloadResponse)

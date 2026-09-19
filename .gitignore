@@ -55,5 +55,5 @@ frontend/src-tauri/gen/schemas/
 *.webm
 clips/
 exports/
-data/projects/*
-!data/projects/.gitkeep
+backend/data/projects/*
+!backend/data/projects/.gitkeep
