@@ -87,27 +87,54 @@ No application can make an upload private once a user chooses to send it to a pr
 
 ## Development Status
 
-Clip Robin is in early development.
+Clip Robin is in early development, but the first end-to-end filesystem pipeline is now in place.
 
-### Working foundation
+### Working now
 
 - Next.js interface scaffolded.
 - Tauri desktop project initialized inside `frontend`.
 - Windows MSVC and Windows SDK environment configured for native Rust builds.
-- Initial dashboard and projects view in progress.
-- Tauri Rust dependencies compile successfully.
-- Unified repository structure pushed to GitHub.
+- FastAPI backend connected to the desktop UI with CORS support.
+- YouTube URL download flow using `yt-dlp`.
+- Local video drag-and-drop and Windows file-picker flow.
+- Local timestamped transcription using `faster-whisper`.
+- Filesystem project storage under `backend/data/projects`.
+- Mock transcript analysis that creates `analysis.json`.
+- FFmpeg clip-generation service and MP4 clip serving API.
+- Clips page with native HTML video previews.
+- Projects and basic Settings pages.
+- OpenAI, DeepSeek, and Gemini analyzer adapters are implemented but not called by the mock clip-generation flow.
 
-### Next milestones
+### Current pipeline
 
-- Define the local Python backend contract.
-- Connect Tauri commands to local processing services.
-- Add media import and project management.
-- Integrate FFmpeg inspection, cutting, and rendering.
-- Add local transcription support.
-- Add replaceable adapters for paid AI providers.
-- Expose privacy, provider, and cost controls in the interface.
-- Add tests for jobs, project files, and provider boundaries.
+```text
+Source video
+	-> transcript.json
+	-> mock analysis.json
+	-> FFmpeg clip generation
+	-> clips API
+	-> Next.js video preview
+```
+
+The code is ready for the pipeline, but **FFmpeg must be installed separately** before actual MP4 clips can be generated. Verify the installation with:
+
+```powershell
+ffmpeg -version
+```
+
+If FFmpeg is unavailable, the backend returns an explicit setup error instead of silently using a different processor.
+
+### Still to do
+
+- Install and verify FFmpeg on supported machines.
+- Test real source videos through download, transcription, analysis, and cutting.
+- Replace mock analysis with an opt-in provider selected from OpenAI, DeepSeek, or Gemini.
+- Connect generated clips to richer project detail/history views.
+- Add clip naming, deletion, export, and open-folder actions.
+- Add reliable job progress and cancellation for long videos.
+- Add automated backend tests and frontend interaction tests.
+- Connect the settings UI to persisted local preferences.
+- Add optional vertical crops, captions, and other editing features later.
 - Package and distribute the Windows desktop application.
 
 ## Repository Layout
@@ -115,9 +142,8 @@ Clip Robin is in early development.
 ```text
 ClipRobin/
 |- frontend/   Next.js UI and Tauri desktop application
-|- backend/    Python processing services, in development
-|- README.md   Project overview, vision, architecture, and setup
-|- Guide.txt   Early workflow notes
+|- backend/    FastAPI routes and local processing services
+|- README.md   Project vision, progress, architecture, and setup
 ```
 
 ## Local Development
@@ -130,6 +156,15 @@ npm install
 npm run dev
 ```
 
+Install backend dependencies and start FastAPI:
+
+```powershell
+cd backend
+..\.venv\Scripts\activate
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
+```
+
 Run the Windows desktop application:
 
 ```powershell
@@ -138,6 +173,22 @@ npx.cmd tauri dev
 ```
 
 The Tauri build requires the Visual Studio C++ build tools and Windows SDK. The shared VS Code terminal profile in `frontend/.vscode/settings.json` initializes the native build environment.
+
+### API surface
+
+```text
+GET  /api/health
+POST /api/download
+POST /api/local-video/transcribe
+POST /api/projects/{id}/transcribe
+POST /api/projects/{id}/generate-clips
+GET  /api/projects/{id}/clips
+GET  /api/projects/{id}/clips/{file}
+GET  /api/projects
+POST /api/analyze
+```
+
+The analysis endpoint supports provider configuration through environment variables, but the current clip-generation workflow intentionally uses mock analysis while the local video pipeline is being verified.
 
 ## Contributing
 
