@@ -1,0 +1,19 @@
+{
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 5.2,
+      "text": "Most people learn Python completely backwards."
+    },
+    {
+      "start": 5.2,
+      "end": 12.8,
+      "text": "They start memorizing syntax instead of learning how programs actually work."
+    },
+    {
+      "start": 12.8,
+      "end": 20.4,
+      "text": "Here's the approach I recommend instead."
+    }
+  ]
+}
