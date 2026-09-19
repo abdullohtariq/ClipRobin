@@ -1,9 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { checkBackend } from "@/src/lib/api";
 
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
+
+  const testBackend = async () => {
+    try {
+      const result = await checkBackend();
+      console.log("Backend:", result);
+    } catch (error) {
+      console.error("Backend connection failed:", error);
+    }
+  };
 
   return (
     <main className="p-10">
@@ -34,6 +44,13 @@ export default function Home() {
 
         <button className="mt-4 rounded-lg bg-white px-5 py-3 font-medium text-black hover:bg-zinc-200">
           Generate Clips
+        </button>
+
+        <button
+          onClick={testBackend}
+          className="mt-4 ml-3 rounded-lg border border-zinc-700 px-5 py-3 font-medium text-white hover:bg-zinc-800"
+        >
+          Test Backend
         </button>
       </div>
     </main>
