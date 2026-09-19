@@ -116,7 +116,7 @@ Source video
 	-> Next.js video preview
 ```
 
-The code is ready for the pipeline, but **FFmpeg must be installed separately** before actual MP4 clips can be generated. Verify the installation with:
+FFmpeg 9.0.1 is installed locally and the real editor smoke test successfully generated an MP4 clip. On another machine, verify the dependency with:
 
 ```powershell
 ffmpeg -version
@@ -126,7 +126,7 @@ If FFmpeg is unavailable, the backend returns an explicit setup error instead of
 
 ### Still to do
 
-- Install and verify FFmpeg on supported machines.
+- Test the real source-video pipeline with FFmpeg now installed locally.
 - Test real source videos through download, transcription, analysis, and cutting.
 - Replace mock analysis with an opt-in provider selected from OpenAI, DeepSeek, or Gemini.
 - Connect generated clips to richer project detail/history views.
