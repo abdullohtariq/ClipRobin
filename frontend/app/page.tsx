@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { checkBackend, downloadVideo } from "@/src/lib/api";
+import { ChangeEvent, DragEvent, useRef, useState } from "react";
+import { downloadVideo, transcribeLocalVideo } from "@/src/lib/api";
 
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadStatus, setDownloadStatus] = useState("");
+  const [localVideoName, setLocalVideoName] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDownload = async () => {
     setDownloadStatus("Downloading...");
@@ -20,12 +22,36 @@ export default function Home() {
     }
   };
 
-  const testBackend = async () => {
+  const handleLocalVideo = async (video: File) => {
+    setLocalVideoName(video.name);
+    setDownloadStatus("Transcribing local video...");
+
     try {
-      const result = await checkBackend();
-      console.log("Backend:", result);
+      const result = await transcribeLocalVideo(video);
+      setDownloadStatus(
+        `Transcribed ${result.segments} segments in ${result.project_id}`,
+      );
     } catch (error) {
-      console.error("Backend connection failed:", error);
+      setDownloadStatus(
+        error instanceof Error
+          ? error.message
+          : "Local video transcription failed",
+      );
+    }
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const video = event.target.files?.[0];
+    if (video) {
+      void handleLocalVideo(video);
+    }
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const video = event.dataTransfer.files[0];
+    if (video) {
+      void handleLocalVideo(video);
     }
   };
 
@@ -63,16 +89,38 @@ export default function Home() {
           Generate Clips
         </button>
 
+        <div
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={handleDrop}
+          className="mt-6 rounded-lg border border-dashed border-zinc-700 bg-zinc-900/50 p-6 text-center"
+        >
+          <p className="text-sm text-zinc-400">
+            Drop a local video here to transcribe it directly
+          </p>
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="mt-3 rounded-lg border border-zinc-700 px-5 py-3 font-medium text-white hover:bg-zinc-800"
+          >
+            Choose Video File
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="video/*"
+            onChange={handleFileChange}
+            className="hidden"
+          />
+          {localVideoName && (
+            <p className="mt-3 truncate text-sm text-zinc-500">
+              Selected: {localVideoName}
+            </p>
+          )}
+        </div>
+
         {downloadStatus && (
           <p className="mt-3 text-sm text-zinc-400">{downloadStatus}</p>
         )}
-
-        <button
-          onClick={testBackend}
-          className="mt-4 ml-3 rounded-lg border border-zinc-700 px-5 py-3 font-medium text-white hover:bg-zinc-800"
-        >
-          Test Backend
-        </button>
       </div>
     </main>
   );

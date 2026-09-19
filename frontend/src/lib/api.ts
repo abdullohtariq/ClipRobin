@@ -14,16 +14,6 @@ export type TranscriptionResponse = {
   segments: number;
 };
 
-export async function checkBackend() {
-  const response = await fetch(`${API_URL}/api/health`);
-
-  if (!response.ok) {
-    throw new Error("Backend is not responding");
-  }
-
-  return response.json();
-}
-
 export async function downloadVideo(url: string): Promise<DownloadResponse> {
   const response = await fetch(`${API_URL}/api/download`, {
     method: "POST",
@@ -50,6 +40,24 @@ export async function transcribeVideo(
 
   if (!response.ok) {
     throw new Error("Video transcription failed");
+  }
+
+  return response.json();
+}
+
+export async function transcribeLocalVideo(
+  video: File,
+): Promise<TranscriptionResponse> {
+  const formData = new FormData();
+  formData.append("video", video);
+
+  const response = await fetch(`${API_URL}/api/local-video/transcribe`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error("Local video transcription failed");
   }
 
   return response.json();
