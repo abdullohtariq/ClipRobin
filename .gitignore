@@ -1,0 +1,57 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editors and operating system files
+.vscode/*
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Node and Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/coverage/
+frontend/.pnp
+frontend/.pnp.*
+frontend/.yarn/*
+!frontend/.yarn/patches/
+!frontend/.yarn/plugins/
+!frontend/.yarn/releases/
+!frontend/.yarn/versions/
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.vercel/
+
+# Tauri and Rust build output
+frontend/src-tauri/target/
+frontend/src-tauri/gen/schemas/
+**/target/
+
+# Generated media and local work products
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.wav
+*.mp3
+*.webm
+clips/
+exports/
