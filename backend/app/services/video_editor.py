@@ -1,6 +1,6 @@
+import os
 import shutil
 import subprocess
-import os
 from pathlib import Path
 
 
@@ -25,11 +25,96 @@ def find_ffmpeg() -> str:
     )
 
 
+def _escape_drawtext(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def _pick_font_file() -> str | None:
+    candidates: list[Path] = []
+    if os.name == "nt":
+        windows_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        candidates.extend([
+            windows_dir / "Fonts" / "segoeui.ttf",
+            windows_dir / "Fonts" / "arial.ttf",
+            windows_dir / "Fonts" / "Segoe UI.ttf",
+            windows_dir / "Fonts" / "Arial.ttf",
+        ])
+    else:
+        candidates.extend([
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+            Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
+        ])
+
+    for candidate in candidates:
+        if candidate.is_file():
+            font_path = str(candidate).replace("\\", "/")
+            return font_path.replace(":", "\\:")
+    return None
+
+
+def _build_filter_graph(
+    start_time: float,
+    end_time: float,
+    subtitle_segments: list[dict[str, float | str]] | None = None,
+    show_subtitles: bool = True,
+) -> str:
+    base_filter = (
+        "scale=720:1280:force_original_aspect_ratio=decrease,"
+        "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+    )
+    if not show_subtitles or not subtitle_segments:
+        return base_filter
+
+    font_path = _pick_font_file()
+    font_fragment = f"fontfile='{font_path}':" if font_path else ""
+    subtitle_filters = []
+    for segment in subtitle_segments:
+        if not isinstance(segment, dict):
+            continue
+        segment_start = float(segment.get("start", 0.0))
+        segment_end = float(segment.get("end", 0.0))
+        text = str(segment.get("text", "")).strip()
+        if not text or segment_end <= segment_start:
+            continue
+
+        overlapping_start = max(start_time, segment_start)
+        overlapping_end = min(end_time, segment_end)
+        if overlapping_end <= overlapping_start:
+            continue
+
+        local_start = max(0.0, overlapping_start - start_time)
+        local_end = max(local_start + 0.05, overlapping_end - start_time)
+        fade_out_start = max(local_start + 0.15, local_end - 0.2)
+        alpha_expression = (
+            f"if(lt(t,{local_start + 0.12}),(t-{local_start})/0.12,"
+            f"if(lt(t,{fade_out_start}),1,"
+            f"max(0,1-((t-{fade_out_start})/0.2))))"
+        )
+        escaped_text = _escape_drawtext(text)
+        subtitle_filters.append(
+            "drawtext=text='{}':{}fontsize=30:fontcolor=white:shadowcolor=black@0.9:"
+            "shadowx=2:shadowy=2:box=1:boxcolor=black@0.45:boxborderw=12:"
+            "x=(w-text_w)/2:y=h-th-40:alpha='{}':enable='between(t,{:.3f},{:.3f})'".format(
+                escaped_text,
+                font_fragment,
+                alpha_expression,
+                local_start,
+                local_end,
+            )
+        )
+
+    if not subtitle_filters:
+        return base_filter
+    return base_filter + "," + ",".join(subtitle_filters)
+
+
 def create_clip(
     source_path: Path,
     output_path: Path,
     start_time: float,
     end_time: float,
+    subtitle_segments: list[dict[str, float | str]] | None = None,
+    show_subtitles: bool = True,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -38,6 +123,12 @@ def create_clip(
     ffmpeg_path = find_ffmpeg()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    filter_graph = _build_filter_graph(
+        start_time,
+        end_time,
+        subtitle_segments,
+        show_subtitles=show_subtitles,
+    )
     command = [
         ffmpeg_path,
         "-y",
@@ -47,8 +138,20 @@ def create_clip(
         str(source_path),
         "-t",
         str(end_time - start_time),
-        "-c",
-        "copy",
+        "-vf",
+        filter_graph,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "23",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
         str(output_path),
     ]
     try:

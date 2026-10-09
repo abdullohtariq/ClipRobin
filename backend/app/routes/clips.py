@@ -21,10 +21,10 @@ def project_or_404(project_id: str) -> Path:
 
 
 @router.post("/{project_id}/generate-clips")
-def generate_project_clips(project_id: str) -> dict[str, Any]:
+def generate_project_clips(project_id: str, show_subtitles: bool = True) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
     try:
-        clips = generate_clips(project_directory)
+        clips = generate_clips(project_directory, show_subtitles=show_subtitles)
     except (FileNotFoundError, ValueError, VideoEditorError) as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     except Exception as error:

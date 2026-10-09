@@ -82,9 +82,12 @@ export async function transcribeLocalVideo(
   return response.json();
 }
 
-export async function generateClips(projectId: string): Promise<{ clips: Clip[] }> {
+export async function generateClips(
+  projectId: string,
+  showSubtitles: boolean = true,
+): Promise<{ clips: Clip[] }> {
   const response = await fetch(
-    `${API_URL}/api/projects/${projectId}/generate-clips`,
+    `${API_URL}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}`,
     { method: "POST" },
   );
   if (!response.ok) {
