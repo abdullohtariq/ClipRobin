@@ -53,7 +53,7 @@ frontend/src-tauri/gen/schemas/
 *.wav
 *.mp3
 *.webm
-clips/
+/clips/
 exports/
 backend/data/projects/*
 !backend/data/projects/.gitkeep

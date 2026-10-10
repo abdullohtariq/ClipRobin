@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -25,30 +26,24 @@ def find_ffmpeg() -> str:
     )
 
 
-def _escape_drawtext(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("'", "\\'")
-
-
-def _pick_font_file() -> str | None:
-    candidates: list[Path] = []
+def _copy_font_file(destination_directory: Path) -> str | None:
     if os.name == "nt":
         windows_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-        candidates.extend([
+        candidates = [
             windows_dir / "Fonts" / "segoeui.ttf",
             windows_dir / "Fonts" / "arial.ttf",
-            windows_dir / "Fonts" / "Segoe UI.ttf",
-            windows_dir / "Fonts" / "Arial.ttf",
-        ])
+        ]
     else:
-        candidates.extend([
+        candidates = [
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
             Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
-        ])
+        ]
 
     for candidate in candidates:
         if candidate.is_file():
-            font_path = str(candidate).replace("\\", "/")
-            return font_path.replace(":", "\\:")
+            font_file = destination_directory / "subtitle-font.ttf"
+            shutil.copyfile(candidate, font_file)
+            return font_file.name
     return None
 
 
@@ -57,16 +52,17 @@ def _build_filter_graph(
     end_time: float,
     subtitle_segments: list[dict[str, float | str]] | None = None,
     show_subtitles: bool = True,
+    subtitle_directory: Path | None = None,
+    font_file: str | None = None,
 ) -> str:
     base_filter = (
         "scale=720:1280:force_original_aspect_ratio=decrease,"
         "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
     )
-    if not show_subtitles or not subtitle_segments:
+    if not show_subtitles or not subtitle_segments or subtitle_directory is None:
         return base_filter
 
-    font_path = _pick_font_file()
-    font_fragment = f"fontfile='{font_path}':" if font_path else ""
+    font_fragment = f"fontfile='{font_file}':" if font_file else ""
     subtitle_filters = []
     for segment in subtitle_segments:
         if not isinstance(segment, dict):
@@ -90,12 +86,13 @@ def _build_filter_graph(
             f"if(lt(t,{fade_out_start}),1,"
             f"max(0,1-((t-{fade_out_start})/0.2))))"
         )
-        escaped_text = _escape_drawtext(text)
+        text_file = subtitle_directory / f"subtitle-{len(subtitle_filters)}.txt"
+        text_file.write_text(text, encoding="utf-8")
         subtitle_filters.append(
-            "drawtext=text='{}':{}fontsize=30:fontcolor=white:shadowcolor=black@0.9:"
+            "drawtext=textfile='{}':{}expansion=none:fontsize=30:fontcolor=white:shadowcolor=black@0.9:"
             "shadowx=2:shadowy=2:box=1:boxcolor=black@0.45:boxborderw=12:"
             "x=(w-text_w)/2:y=h-th-40:alpha='{}':enable='between(t,{:.3f},{:.3f})'".format(
-                escaped_text,
+                text_file.name,
                 font_fragment,
                 alpha_expression,
                 local_start,
@@ -123,40 +120,66 @@ def create_clip(
     ffmpeg_path = find_ffmpeg()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    filter_graph = _build_filter_graph(
-        start_time,
-        end_time,
-        subtitle_segments,
-        show_subtitles=show_subtitles,
-    )
-    command = [
-        ffmpeg_path,
-        "-y",
-        "-ss",
-        str(start_time),
-        "-i",
-        str(source_path),
-        "-t",
-        str(end_time - start_time),
-        "-vf",
-        filter_graph,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "medium",
-        "-crf",
-        "23",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
+    source_path = source_path.resolve()
+    output_path = output_path.resolve()
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        with tempfile.TemporaryDirectory(
+            prefix="cliprobin-subtitles-",
+            dir=output_path.parent,
+        ) as temporary_directory:
+            subtitle_directory = Path(temporary_directory)
+            filter_graph = _build_filter_graph(
+                start_time,
+                end_time,
+                subtitle_segments,
+                show_subtitles=show_subtitles,
+                subtitle_directory=subtitle_directory,
+                font_file=(
+                    _copy_font_file(subtitle_directory)
+                    if show_subtitles and subtitle_segments
+                    else None
+                ),
+            )
+            command = [
+                ffmpeg_path,
+                "-y",
+                "-ss",
+                str(start_time),
+                "-i",
+                str(source_path),
+                "-t",
+                str(end_time - start_time),
+                "-vf",
+                filter_graph,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "23",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ]
+            subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                cwd=Path(temporary_directory),
+            )
     except subprocess.CalledProcessError as error:
-        detail = error.stderr.strip() or "FFmpeg failed to create the clip"
+        stderr_lines = (error.stderr or "").strip().splitlines()
+        useful_lines = [
+            line.strip()
+            for line in stderr_lines
+            if any(marker in line for marker in ("Error", "Stray %", "Conversion failed"))
+        ]
+        detail = "\n".join(useful_lines[-5:]) or "\n".join(stderr_lines[-8:])
+        detail = detail or "FFmpeg failed to create the clip"
         raise VideoEditorError(detail) from error
     return output_path
