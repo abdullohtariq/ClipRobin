@@ -124,6 +124,7 @@ ffmpeg -version
 ```
 
 If FFmpeg is unavailable, the backend returns an explicit setup error instead of silently using a different processor.
+Generated MP4s use H.264 video and MP3 audio so audio is available in Clip Robin's embedded browser.
 
 ### Still to do
 
