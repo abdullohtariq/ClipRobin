@@ -41,6 +41,17 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
     }
   };
 
+  const togglePlaybackSound = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (isPlaying && !video.muted) {
+      video.muted = true;
+      setMuted(true);
+      return;
+    }
+    void playWithSound();
+  };
+
   const handleVolumeChange = (nextVolume: number) => {
     setVolume(nextVolume);
     const video = videoRef.current;
@@ -56,7 +67,6 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
         ref={videoRef}
         controls
         crossOrigin="anonymous"
-        muted={muted}
         preload="metadata"
         className="aspect-[9/16] w-full max-w-xs rounded-md bg-black"
         onLoadedMetadata={() => {
@@ -80,10 +90,10 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
       <div className="mt-3 flex max-w-xs items-center gap-3">
         <button
           type="button"
-          onClick={() => void playWithSound()}
+          onClick={togglePlaybackSound}
           className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-sm text-white hover:bg-zinc-800"
         >
-          {isPlaying && !muted ? "Restart with sound" : "Play with sound"}
+          {isPlaying && !muted ? "Mute audio" : "Play with sound"}
         </button>
         <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-zinc-400">
           <span>Volume</span>
