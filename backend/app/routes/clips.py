@@ -9,10 +9,12 @@ from fastapi.responses import FileResponse
 
 from app.services.clip_generator import generate_clips
 from app.services.project_manager import get_clips_directory, get_project_directory
+from app.services.video_editor import ClipGenerationCancelled
 
 router = APIRouter(prefix="/api/projects")
 logger = logging.getLogger(__name__)
 GENERATION_JOBS: dict[str, dict[str, Any]] = {}
+CANCEL_EVENTS: dict[str, threading.Event] = {}
 JOBS_LOCK = threading.Lock()
 
 
@@ -23,6 +25,29 @@ def project_or_404(project_id: str) -> Path:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+def finish_cancelled_job(job_id: str, project_id: str) -> None:
+    try:
+        clips_directory = get_clips_directory(project_id)
+        for generated_clip in clips_directory.glob("*.mp4"):
+            generated_clip.unlink()
+    except OSError as error:
+        logger.exception("Could not remove generated clips after cancelling project %s", project_id)
+        with JOBS_LOCK:
+            GENERATION_JOBS[job_id].update({
+                "status": "failed",
+                "step": "Cancellation cleanup failed",
+                "error": str(error) or error.__class__.__name__,
+            })
+            CANCEL_EVENTS.pop(job_id, None)
+        return
+    with JOBS_LOCK:
+        GENERATION_JOBS[job_id].update({
+            "status": "cancelled",
+            "step": "Cancelled; generated clips removed",
+        })
+        CANCEL_EVENTS.pop(job_id, None)
 
 
 @router.post("/{project_id}/generate-clips")
@@ -37,7 +62,8 @@ def generate_project_clips(
         active_job = next(
             (
                 job for job in GENERATION_JOBS.values()
-                if job["project_id"] == project_id and job["status"] in {"queued", "processing"}
+                if job["project_id"] == project_id
+                and job["status"] in {"queued", "processing", "cancelling"}
             ),
             None,
         )
@@ -46,6 +72,7 @@ def generate_project_clips(
                 status_code=409,
                 detail="Clip generation is already running for this project",
             )
+        cancel_event = threading.Event()
         GENERATION_JOBS[job_id] = {
             "job_id": job_id,
             "project_id": project_id,
@@ -55,6 +82,7 @@ def generate_project_clips(
             "completed_clips": 0,
             "total_clips": 0,
         }
+        CANCEL_EVENTS[job_id] = cancel_event
 
     background_tasks.add_task(
         run_clip_generation,
@@ -62,6 +90,7 @@ def generate_project_clips(
         project_id,
         project_directory,
         show_subtitles,
+        cancel_event,
     )
     return {"job_id": job_id}
 
@@ -71,8 +100,11 @@ def run_clip_generation(
     project_id: str,
     project_directory: Path,
     show_subtitles: bool,
+    cancel_event: threading.Event,
 ) -> None:
     def report_progress(step: str, completed_clips: int, total_clips: int) -> None:
+        if cancel_event.is_set():
+            return
         if step == "Preparing clip analysis":
             progress = 5
         elif step == "Analyzing transcript":
@@ -97,8 +129,15 @@ def run_clip_generation(
             project_directory,
             show_subtitles=show_subtitles,
             progress_callback=report_progress,
+            cancel_event=cancel_event,
         )
+    except ClipGenerationCancelled:
+        finish_cancelled_job(job_id, project_id)
+        return
     except Exception as error:
+        if cancel_event.is_set():
+            finish_cancelled_job(job_id, project_id)
+            return
         logger.exception("Clip generation failed for project %s", project_id)
         with JOBS_LOCK:
             GENERATION_JOBS[job_id].update({
@@ -106,17 +145,25 @@ def run_clip_generation(
                 "step": "Clip generation failed",
                 "error": str(error) or error.__class__.__name__,
             })
+            CANCEL_EVENTS.pop(job_id, None)
         return
 
     with JOBS_LOCK:
-        GENERATION_JOBS[job_id].update({
-            "status": "completed",
-            "step": "Complete",
-            "progress": 100,
-            "completed_clips": len(clips),
-            "total_clips": len(clips),
-            "clips": clips,
-        })
+        if cancel_event.is_set():
+            was_cancelled = True
+        else:
+            was_cancelled = False
+            GENERATION_JOBS[job_id].update({
+                "status": "completed",
+                "step": "Complete",
+                "progress": 100,
+                "completed_clips": len(clips),
+                "total_clips": len(clips),
+                "clips": clips,
+            })
+            CANCEL_EVENTS.pop(job_id, None)
+    if was_cancelled:
+        finish_cancelled_job(job_id, project_id)
 
 
 @router.get("/{project_id}/generation-jobs/{job_id}")
@@ -126,6 +173,26 @@ def get_clip_generation_job(project_id: str, job_id: str) -> dict[str, Any]:
         job = GENERATION_JOBS.get(job_id)
         if job is None or job["project_id"] != project_id:
             raise HTTPException(status_code=404, detail="Clip generation job not found")
+        return dict(job)
+
+
+@router.post("/{project_id}/generation-jobs/{job_id}/cancel")
+def cancel_clip_generation(project_id: str, job_id: str) -> dict[str, Any]:
+    project_or_404(project_id)
+    with JOBS_LOCK:
+        job = GENERATION_JOBS.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            raise HTTPException(status_code=404, detail="Clip generation job not found")
+        if job["status"] not in {"queued", "processing", "cancelling"}:
+            return dict(job)
+        cancel_event = CANCEL_EVENTS.get(job_id)
+        if cancel_event is None:
+            raise HTTPException(status_code=409, detail="Clip generation can no longer be cancelled")
+        cancel_event.set()
+        job.update({
+            "status": "cancelling",
+            "step": "Cancelling and removing generated clips",
+        })
         return dict(job)
 
 

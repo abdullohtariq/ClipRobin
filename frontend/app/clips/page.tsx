@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import {
   Clip,
   ClipGenerationJob,
+  cancelClipGeneration,
   clipDownloadUrl,
   clipUrl,
   generateClips,
@@ -156,9 +157,12 @@ function ProjectClips({ projectId }: { projectId: string }) {
           JSON.stringify(current) === JSON.stringify(result.clips) ? current : result.clips,
         );
         setGenerationProgress(job);
-        if (job?.status === "queued" || job?.status === "processing") {
+        if (job?.status === "queued" || job?.status === "processing" || job?.status === "cancelling") {
           setGenerating(true);
           setStatus("");
+        } else if (job?.status === "cancelled") {
+          setGenerating(false);
+          setStatus(job.step);
         } else if (job?.status === "failed") {
           setGenerating(false);
           setStatus(job.error ?? `Clip generation failed for ${projectId}.`);
@@ -166,7 +170,9 @@ function ProjectClips({ projectId }: { projectId: string }) {
           setGenerating(false);
           setStatus(result.clips.length ? "" : `No clips generated yet for ${projectId}.`);
         }
-        const isGenerating = job?.status === "queued" || job?.status === "processing";
+        const isGenerating = job?.status === "queued"
+          || job?.status === "processing"
+          || job?.status === "cancelling";
         if (isGenerating && interval === undefined) {
           interval = window.setInterval(() => void loadProgressAndClips(), 1200);
         } else if (!isGenerating && interval !== undefined) {
@@ -190,6 +196,7 @@ function ProjectClips({ projectId }: { projectId: string }) {
     event.preventDefault();
     if (!projectId || generating) return;
     setGenerating(true);
+    setClips([]);
     setStatus("");
     setGenerationProgress({
       job_id: "",
@@ -203,7 +210,9 @@ function ProjectClips({ projectId }: { projectId: string }) {
     try {
       const result = await generateClips(projectId, showSubtitles, setGenerationProgress);
       setClips(result.clips);
-      setStatus(`${result.clips.length} clips generated for ${projectId}.`);
+      setStatus(result.cancelled
+        ? "Generation cancelled. Generated clips were removed."
+        : `${result.clips.length} clips generated for ${projectId}.`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Clip generation failed");
       setGenerationProgress((current) => current
@@ -211,6 +220,21 @@ function ProjectClips({ projectId }: { projectId: string }) {
         : null);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleCancel = async () => {
+    const job = generationProgress;
+    if (!projectId || !job?.job_id || job.status === "cancelling") return;
+    if (!window.confirm("Cancel generation and remove all generated clips for this project? The source video and transcript will be kept.")) {
+      return;
+    }
+    try {
+      const updatedJob = await cancelClipGeneration(projectId, job.job_id);
+      setGenerationProgress(updatedJob);
+      setStatus("Cancelling generation and removing generated clips...");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not cancel clip generation");
     }
   };
 
@@ -236,7 +260,7 @@ function ProjectClips({ projectId }: { projectId: string }) {
             disabled={generating}
             className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
           >
-            {generating ? "Generating..." : "Generate Clips"}
+            {generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}
           </button>
           <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-300">
             <input
@@ -251,7 +275,7 @@ function ProjectClips({ projectId }: { projectId: string }) {
         </form>
       )}
 
-      {generationProgress && ["queued", "processing"].includes(generationProgress.status) && (
+      {generationProgress && ["queued", "processing", "cancelling"].includes(generationProgress.status) && (
         <section aria-live="polite" className="mt-5 max-w-2xl rounded-lg border border-zinc-800 bg-zinc-900 p-4">
           <div className="flex items-center justify-between gap-4">
             <p className="text-sm font-medium text-zinc-200">{generationProgress.step}</p>
@@ -275,6 +299,14 @@ function ProjectClips({ projectId }: { projectId: string }) {
               ? `Rendered ${generationProgress.completed_clips} of ${generationProgress.total_clips} clips`
               : "Preparing transcript analysis"}
           </p>
+          <button
+            type="button"
+            onClick={() => void handleCancel()}
+            disabled={!generationProgress.job_id || generationProgress.status === "cancelling"}
+            className="mt-4 rounded-md border border-red-500/60 px-3 py-2 text-sm text-red-300 hover:bg-red-950/50 disabled:opacity-50"
+          >
+            {generationProgress.status === "cancelling" ? "Cancelling..." : "Cancel generation"}
+          </button>
         </section>
       )}
 

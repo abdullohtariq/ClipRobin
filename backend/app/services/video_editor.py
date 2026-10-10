@@ -2,11 +2,16 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 
 
 class VideoEditorError(Exception):
     """Raised when FFmpeg cannot create a clip."""
+
+
+class ClipGenerationCancelled(Exception):
+    """Raised when clip rendering is cancelled by the user."""
 
 
 def find_ffmpeg() -> str:
@@ -112,6 +117,7 @@ def create_clip(
     end_time: float,
     subtitle_segments: list[dict[str, float | str]] | None = None,
     show_subtitles: bool = True,
+    cancel_event: threading.Event | None = None,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -165,13 +171,41 @@ def create_clip(
                 "+faststart",
                 str(output_path),
             ]
-            subprocess.run(
+            if cancel_event is not None and cancel_event.is_set():
+                raise ClipGenerationCancelled("Clip generation was cancelled")
+            process = subprocess.Popen(
                 command,
-                check=True,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 cwd=Path(temporary_directory),
             )
+            while True:
+                try:
+                    _, stderr = process.communicate(timeout=0.2)
+                    break
+                except subprocess.TimeoutExpired:
+                    if cancel_event is None or not cancel_event.is_set():
+                        continue
+                    process.terminate()
+                    try:
+                        _, stderr = process.communicate(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        _, stderr = process.communicate()
+                    if output_path.exists():
+                        output_path.unlink()
+                    raise ClipGenerationCancelled("Clip generation was cancelled")
+            if cancel_event is not None and cancel_event.is_set():
+                if output_path.exists():
+                    output_path.unlink()
+                raise ClipGenerationCancelled("Clip generation was cancelled")
+            if process.returncode:
+                raise subprocess.CalledProcessError(
+                    process.returncode,
+                    command,
+                    stderr=stderr,
+                )
     except subprocess.CalledProcessError as error:
         stderr_lines = (error.stderr or "").strip().splitlines()
         useful_lines = [

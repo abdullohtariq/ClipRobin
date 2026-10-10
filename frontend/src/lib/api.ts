@@ -37,7 +37,7 @@ export type Clip = {
 export type ClipGenerationJob = {
   job_id: string;
   project_id: string;
-  status: "queued" | "processing" | "completed" | "failed";
+  status: "queued" | "processing" | "cancelling" | "cancelled" | "completed" | "failed";
   step: string;
   progress: number;
   completed_clips: number;
@@ -135,7 +135,7 @@ export async function generateClips(
   projectId: string,
   showSubtitles: boolean = true,
   onProgress?: (job: ClipGenerationJob) => void,
-): Promise<{ clips: Clip[] }> {
+): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const response = await fetch(
     `${API_URL}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}`,
     { method: "POST" },
@@ -145,6 +145,15 @@ export async function generateClips(
     throw new Error(detail?.detail ?? "Clip generation failed");
   }
   const { job_id: jobId } = await response.json() as { job_id: string };
+  onProgress?.({
+    job_id: jobId,
+    project_id: projectId,
+    status: "queued",
+    step: "Preparing clip analysis",
+    progress: 0,
+    completed_clips: 0,
+    total_clips: 0,
+  });
   let job: ClipGenerationJob;
   do {
     const jobResponse = await fetch(
@@ -159,12 +168,30 @@ export async function generateClips(
     if (job.status === "failed") {
       throw new Error(job.error ?? "Clip generation failed");
     }
+    if (job.status === "cancelled") {
+      return { clips: [], cancelled: true };
+    }
     if (job.status !== "completed") {
       await new Promise((resolve) => window.setTimeout(resolve, 700));
     }
   } while (job.status !== "completed");
 
-  return { clips: job.clips ?? [] };
+  return { clips: job.clips ?? [], cancelled: false };
+}
+
+export async function cancelClipGeneration(
+  projectId: string,
+  jobId: string,
+): Promise<ClipGenerationJob> {
+  const response = await fetch(
+    `${API_URL}/api/projects/${projectId}/generation-jobs/${jobId}/cancel`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.detail ?? "Could not cancel clip generation");
+  }
+  return response.json();
 }
 
 export async function getLatestClipGenerationJob(

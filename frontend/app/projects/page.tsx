@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ClipGenerationJob,
+  cancelClipGeneration,
   deleteProject,
   generateClips,
   getProjects,
@@ -49,6 +50,9 @@ export default function Projects() {
 
   const handleGenerate = async (projectId: string) => {
     setGeneratingProject(projectId);
+    setProjects((current) => current.map((project) => project.project_id === projectId
+      ? { ...project, clips: 0 }
+      : project));
     setGenerationProgress({
       job_id: "",
       project_id: projectId,
@@ -65,8 +69,15 @@ export default function Projects() {
         subtitleOptions[projectId] ?? true,
         setGenerationProgress,
       );
-      setStatus(`${result.clips.length} clips generated for ${projectId}.`);
-      router.push(`/clips?project=${encodeURIComponent(projectId)}`);
+      setProjects((current) => current.map((project) => project.project_id === projectId
+        ? { ...project, clips: result.clips.length }
+        : project));
+      if (result.cancelled) {
+        setStatus(`Generation cancelled. Clips for ${projectId} were removed.`);
+      } else {
+        setStatus(`${result.clips.length} clips generated for ${projectId}.`);
+        router.push(`/clips?project=${encodeURIComponent(projectId)}`);
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : `Could not generate clips for ${projectId}`);
       setGenerationProgress((current) => current
@@ -74,6 +85,20 @@ export default function Projects() {
         : null);
     } finally {
       setGeneratingProject(null);
+    }
+  };
+
+  const handleCancel = async (projectId: string) => {
+    const job = generationProgress;
+    if (job?.project_id !== projectId || !job.job_id || job.status === "cancelling") return;
+    if (!window.confirm(`Cancel generation and remove all generated clips for ${projectId}? The source video and transcript will be kept.`)) {
+      return;
+    }
+    try {
+      const updatedJob = await cancelClipGeneration(projectId, job.job_id);
+      setGenerationProgress(updatedJob);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not cancel clip generation");
     }
   };
 
@@ -111,7 +136,9 @@ export default function Projects() {
                 disabled={generatingProject !== null || deletingProject !== null || project.source_type === "Unknown"}
                 className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
               >
-                {generatingProject === project.project_id ? "Generating..." : "Generate Clips"}
+                {generatingProject === project.project_id
+                  ? "Generating..."
+                  : project.clips > 0 ? "Regenerate Clips" : "Generate Clips"}
               </button>
               <Link href={`/clips?project=${encodeURIComponent(project.project_id)}`} className="text-sm text-white underline">View Clips</Link>
               <button
@@ -152,6 +179,16 @@ export default function Projects() {
                   </span>
                   <span>Saving clips</span>
                 </div>
+                {["queued", "processing", "cancelling"].includes(generationProgress.status) && (
+                  <button
+                    type="button"
+                    onClick={() => void handleCancel(project.project_id)}
+                    disabled={!generationProgress.job_id || generationProgress.status === "cancelling"}
+                    className="mt-4 rounded-md border border-red-500/60 px-3 py-2 text-sm text-red-300 hover:bg-red-950/50 disabled:opacity-50"
+                  >
+                    {generationProgress.status === "cancelling" ? "Cancelling..." : "Cancel generation"}
+                  </button>
+                )}
               </section>
             )}
           </article>

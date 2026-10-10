@@ -100,7 +100,7 @@ Clip Robin is in early development, but the first end-to-end filesystem pipeline
 - Background local timestamped transcription using `faster-whisper`, with upload and transcription progress.
 - Filesystem project storage under `backend/data/projects`.
 - Mock transcript analysis that creates `analysis.json`.
-- Background FFmpeg clip generation with progress reporting and incremental clip publishing.
+- Background FFmpeg clip generation with progress reporting, cancellation with generated-clip cleanup, and regeneration that replaces existing clips.
 - Optional animated captions burned into generated clips.
 - Project-specific clip previews, playback controls, and MP4 downloads.
 - Project listing and deletion, plus basic Settings pages.
@@ -133,7 +133,7 @@ Generated MP4s use H.264 video and MP3 audio so audio is available in Clip Robin
 - Replace mock analysis with an opt-in provider selected from OpenAI, DeepSeek, or Gemini.
 - Connect generated clips to richer project detail/history views.
 - Add clip naming, export, and open-folder actions.
-- Add cancellation and durable job tracking for long-running tasks.
+- Add durable job tracking for long-running tasks.
 - Add automated backend tests and frontend interaction tests.
 - Connect the settings UI to persisted local preferences.
 - Expand crop and caption customization.
@@ -187,6 +187,7 @@ POST /api/projects/{id}/transcribe
 POST /api/projects/{id}/generate-clips?show_subtitles=true
 GET  /api/projects/{id}/generation-jobs
 GET  /api/projects/{id}/generation-jobs/{job_id}
+POST /api/projects/{id}/generation-jobs/{job_id}/cancel
 GET  /api/projects/{id}/clips
 GET  /api/projects/{id}/clips/{file}
 GET  /api/projects
@@ -195,6 +196,7 @@ POST /api/analyze
 ```
 
 The analysis endpoint supports provider configuration through environment variables, but the current clip-generation workflow intentionally uses mock analysis. Transcription and clip-generation job status is held in backend memory, so active job state is not durable across a backend restart.
+Starting clip generation replaces the project's current generated MP4s. Cancelling a generation stops the active render and removes generated clips while preserving the source video and transcript.
 
 ## Contributing
 
