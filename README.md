@@ -198,8 +198,50 @@ Open [http://localhost:3000](http://localhost:3000). The API is available at
 
 To run the Windows desktop application instead, use `npx.cmd tauri dev` from
 `frontend`. Tauri also requires the Rust toolchain, Visual Studio C++ build
-tools, and the Windows SDK. The shared VS Code terminal profile in
+tools, the Windows SDK, and Rust 1.90 or newer. The shared VS Code terminal profile in
 `frontend/.vscode/settings.json` initializes the native build environment.
+
+### Desktop versions and automatic updates
+
+The frontend, Tauri config, and Rust package share one app version. From
+`frontend`, update all version manifests together before a release:
+
+```powershell
+npm run version:set -- 0.1.1
+npm run version:check
+```
+
+Commit and push the version change, then create and push its matching version
+tag from the repository root. A `v0.1.1` tag builds and publishes the signed
+Windows installer and updater metadata as a GitHub Release:
+
+```powershell
+git tag v0.1.1
+git push origin main --tags
+```
+
+The Tauri desktop app checks for updates when it opens and every six hours.
+When a signed update is available, it shows an in-app prompt; choosing
+**Update and restart** installs it and relaunches the app.
+Update checks run in production desktop builds, not in the browser or the
+Tauri development build. The production desktop app has its own identifier
+(`com.cliprobin.desktop`); earlier scaffold builds using `com.tauri.dev` are
+separate installs and do not receive these updates.
+
+Updater releases require a signing key. Generate a keypair once from `frontend`
+and keep the private key out of the repository:
+
+```powershell
+npx.cmd tauri signer generate --ci --write-keys "$env:USERPROFILE\.tauri\cliprobin.key"
+```
+
+The checked-in Tauri configuration contains the corresponding public key. Add
+the contents of `%USERPROFILE%\.tauri\cliprobin.key` as the repository's
+`TAURI_SIGNING_PRIVATE_KEY` Actions secret under **Settings → Secrets and
+variables → Actions**. The release workflow checks that this secret exists
+before it signs and publishes installers. Never commit or share the private
+key. Releases built before signed updating is configured must be updated by
+reinstalling the signed release once; subsequent releases can update in-app.
 
 ### API surface
 

@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Clip Robin",
   "version": "0.1.0",
-  "identifier": "com.tauri.dev",
+  "identifier": "com.cliprobin.desktop",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
@@ -26,6 +26,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -35,6 +36,15 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY4OUU4RkM1NUQ0MEQyN0YKUldSLzBrQmR4WStlK0dMVEJ2L0FZbms3TTl6cSszWjlCNDhIMGtQRUpkRCsvTFp2UGRhbS90cWYK",
+      "requireSignedVersion": true,
+      "endpoints": [
+        "https://github.com/abdullohtariq/ClipRobin/releases/latest/download/latest.json"
+      ]
     }
   }
 }

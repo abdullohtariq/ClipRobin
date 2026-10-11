@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import UpdateNotice from "./update-notice";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -67,6 +68,7 @@ export default function RootLayout({
 
           {/* Page */}
           <div className="flex-1">
+            <UpdateNotice />
             {children}
           </div>
         </div>
