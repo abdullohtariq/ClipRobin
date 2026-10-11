@@ -143,36 +143,61 @@ If FFmpeg is unavailable, the backend returns an explicit setup error instead of
 ClipRobin/
 |- frontend/   Next.js UI and Tauri desktop application
 |- backend/    FastAPI routes and local processing services
+|- requirements/ Shared Python dependency lists
+|- setup.ps1   Windows dependency setup
 |- README.md   Project vision, progress, architecture, and setup
 ```
 
 ## Local Development
 
-Start the web interface:
+### One-time setup
 
 ```powershell
-cd frontend
-npm install
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+The setup script creates the root `.venv`, installs the Python packages from
+`requirements\backend.txt`, and installs the exact frontend dependencies from
+`frontend\package-lock.json`. It requires Python 3.10 or newer and Node.js
+20.9 or newer. If those runtimes are not installed yet, install them first:
+
+```powershell
+winget install --id Python.Python.3.12 --source winget
+winget install --id OpenJS.NodeJS.LTS --source winget
+```
+
+FFmpeg is required for generating clips. Install it if it is not already
+available on `PATH`:
+
+```powershell
+winget install --id Gyan.FFmpeg.Shared --source winget
+```
+
+### Run the web app
+
+Open two PowerShell terminals from the repository root.
+
+In the first terminal, start the API:
+
+```powershell
+Set-Location backend
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+
+In the second terminal, start the interface:
+
+```powershell
+Set-Location frontend
 npm run dev
 ```
 
-Install backend dependencies and start FastAPI:
+Open [http://localhost:3000](http://localhost:3000). The API is available at
+[http://127.0.0.1:8000](http://127.0.0.1:8000).
 
-```powershell
-cd backend
-..\.venv\Scripts\activate
-python -m pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8000
-```
-
-Run the Windows desktop application:
-
-```powershell
-cd frontend
-npx.cmd tauri dev
-```
-
-The Tauri build requires the Visual Studio C++ build tools and Windows SDK. The shared VS Code terminal profile in `frontend/.vscode/settings.json` initializes the native build environment.
+To run the Windows desktop application instead, use `npx.cmd tauri dev` from
+`frontend`. Tauri also requires the Rust toolchain, Visual Studio C++ build
+tools, and the Windows SDK. The shared VS Code terminal profile in
+`frontend/.vscode/settings.json` initializes the native build environment.
 
 ### API surface
 
