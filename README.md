@@ -97,12 +97,13 @@ Clip Robin is in early development, but the first end-to-end filesystem pipeline
 - FastAPI backend connected to the desktop UI with CORS support.
 - YouTube URL download flow using `yt-dlp`.
 - Local video drag-and-drop and Windows file-picker flow.
-- Local timestamped transcription using `faster-whisper`.
+- Background local timestamped transcription using `faster-whisper`, with upload and transcription progress.
 - Filesystem project storage under `backend/data/projects`.
 - Mock transcript analysis that creates `analysis.json`.
-- FFmpeg clip-generation service and MP4 clip serving API.
-- Clips page with native HTML video previews.
-- Projects and basic Settings pages.
+- Background FFmpeg clip generation with progress reporting, cancellation with generated-clip cleanup, and regeneration that replaces existing clips.
+- Optional animated captions burned into generated clips.
+- Project-specific clip previews, playback controls, and MP4 downloads.
+- Project listing and deletion, plus basic Settings pages.
 - OpenAI, DeepSeek, and Gemini analyzer adapters are implemented but not called by the mock clip-generation flow.
 
 ### Current pipeline
@@ -111,8 +112,8 @@ Clip Robin is in early development, but the first end-to-end filesystem pipeline
 Source video
 	-> transcript.json
 	-> mock analysis.json
-	-> FFmpeg clip generation
-	-> clips API
+	-> background FFmpeg clip generation (optional burned-in captions)
+	-> project-specific clips API and downloads
 	-> Next.js video preview
 ```
 
@@ -123,6 +124,7 @@ ffmpeg -version
 ```
 
 If FFmpeg is unavailable, the backend returns an explicit setup error instead of silently using a different processor.
+Generated MP4s use H.264 video and MP3 audio so audio is available in Clip Robin's embedded browser.
 
 ### Still to do
 
@@ -130,11 +132,11 @@ If FFmpeg is unavailable, the backend returns an explicit setup error instead of
 - Test real source videos through download, transcription, analysis, and cutting.
 - Replace mock analysis with an opt-in provider selected from OpenAI, DeepSeek, or Gemini.
 - Connect generated clips to richer project detail/history views.
-- Add clip naming, deletion, export, and open-folder actions.
-- Add reliable job progress and cancellation for long videos.
+- Add clip naming, export, and open-folder actions.
+- Add durable job tracking for long-running tasks.
 - Add automated backend tests and frontend interaction tests.
 - Connect the settings UI to persisted local preferences.
-- Add optional vertical crops, captions, and other editing features later.
+- Expand crop and caption customization.
 - Package and distribute the Windows desktop application.
 
 ## Repository Layout
@@ -205,15 +207,21 @@ tools, and the Windows SDK. The shared VS Code terminal profile in
 GET  /api/health
 POST /api/download
 POST /api/local-video/transcribe
+GET  /api/local-video/jobs/{project_id}
 POST /api/projects/{id}/transcribe
-POST /api/projects/{id}/generate-clips
+POST /api/projects/{id}/generate-clips?show_subtitles=true
+GET  /api/projects/{id}/generation-jobs
+GET  /api/projects/{id}/generation-jobs/{job_id}
+POST /api/projects/{id}/generation-jobs/{job_id}/cancel
 GET  /api/projects/{id}/clips
 GET  /api/projects/{id}/clips/{file}
 GET  /api/projects
+DELETE /api/projects/{id}
 POST /api/analyze
 ```
 
-The analysis endpoint supports provider configuration through environment variables, but the current clip-generation workflow intentionally uses mock analysis while the local video pipeline is being verified.
+The analysis endpoint supports provider configuration through environment variables, but the current clip-generation workflow intentionally uses mock analysis. Transcription and clip-generation job status is held in backend memory, so active job state is not durable across a backend restart.
+Starting clip generation replaces the project's current generated MP4s. Cancelling a generation stops the active render and removes generated clips while preserving the source video and transcript.
 
 ## Contributing
 
