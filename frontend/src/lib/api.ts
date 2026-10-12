@@ -1,4 +1,16 @@
-const API_URL = "http://127.0.0.1:8000";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
+const WEB_API_URL = "http://127.0.0.1:8000";
+let desktopApiUrl: Promise<string> | undefined;
+
+async function getApiUrl(): Promise<string> {
+  if (!isTauri()) {
+    return WEB_API_URL;
+  }
+  desktopApiUrl ??= invoke<number>("backend_port")
+    .then((port) => `http://127.0.0.1:${port}`);
+  return desktopApiUrl;
+}
 
 export type DownloadResponse = {
   project_id: string;
@@ -55,7 +67,8 @@ export type Project = {
 };
 
 export async function downloadVideo(url: string): Promise<DownloadResponse> {
-  const response = await fetch(`${API_URL}/api/download`, {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/download`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -73,8 +86,9 @@ export async function downloadVideo(url: string): Promise<DownloadResponse> {
 export async function transcribeVideo(
   projectId: string,
 ): Promise<TranscriptionResponse> {
+  const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${API_URL}/api/projects/${projectId}/transcribe`,
+    `${apiUrl}/api/projects/${projectId}/transcribe`,
     { method: "POST" },
   );
 
@@ -89,12 +103,13 @@ export async function transcribeLocalVideo(
   video: File,
   onUploadProgress: (progress: number) => void,
 ): Promise<LocalTranscriptionJob> {
+  const apiUrl = await getApiUrl();
   const formData = new FormData();
   formData.append("video", video);
 
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `${API_URL}/api/local-video/transcribe`);
+    request.open("POST", `${apiUrl}/api/local-video/transcribe`);
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) {
         onUploadProgress(Math.round((event.loaded / event.total) * 100));
@@ -123,7 +138,8 @@ export async function transcribeLocalVideo(
 export async function getLocalTranscriptionJob(
   projectId: string,
 ): Promise<LocalTranscriptionJob> {
-  const response = await fetch(`${API_URL}/api/local-video/jobs/${projectId}`);
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/local-video/jobs/${projectId}`);
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
     throw new Error(detail?.detail ?? "Could not check transcription progress");
@@ -136,8 +152,9 @@ export async function generateClips(
   showSubtitles: boolean = true,
   onProgress?: (job: ClipGenerationJob) => void,
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
+  const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${API_URL}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -157,7 +174,7 @@ export async function generateClips(
   let job: ClipGenerationJob;
   do {
     const jobResponse = await fetch(
-      `${API_URL}/api/projects/${projectId}/generation-jobs/${jobId}`,
+      `${apiUrl}/api/projects/${projectId}/generation-jobs/${jobId}`,
     );
     if (!jobResponse.ok) {
       const detail = await jobResponse.json().catch(() => null);
@@ -183,8 +200,9 @@ export async function cancelClipGeneration(
   projectId: string,
   jobId: string,
 ): Promise<ClipGenerationJob> {
+  const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${API_URL}/api/projects/${projectId}/generation-jobs/${jobId}/cancel`,
+    `${apiUrl}/api/projects/${projectId}/generation-jobs/${jobId}/cancel`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -197,7 +215,8 @@ export async function cancelClipGeneration(
 export async function getLatestClipGenerationJob(
   projectId: string,
 ): Promise<ClipGenerationJob | null> {
-  const response = await fetch(`${API_URL}/api/projects/${projectId}/generation-jobs`);
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/projects/${projectId}/generation-jobs`);
   if (!response.ok) {
     const detail = await response.json().catch(() => null);
     throw new Error(detail?.detail ?? "Could not check clip generation progress");
@@ -207,7 +226,8 @@ export async function getLatestClipGenerationJob(
 }
 
 export async function getClips(projectId: string): Promise<{ clips: Clip[] }> {
-  const response = await fetch(`${API_URL}/api/projects/${projectId}/clips`);
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/projects/${projectId}/clips`);
   if (!response.ok) {
     throw new Error("Could not load clips");
   }
@@ -215,7 +235,8 @@ export async function getClips(projectId: string): Promise<{ clips: Clip[] }> {
 }
 
 export async function getProjects(): Promise<{ projects: Project[] }> {
-  const response = await fetch(`${API_URL}/api/projects`);
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/projects`);
   if (!response.ok) {
     throw new Error("Could not load projects");
   }
@@ -223,7 +244,8 @@ export async function getProjects(): Promise<{ projects: Project[] }> {
 }
 
 export async function deleteProject(projectId: string): Promise<void> {
-  const response = await fetch(`${API_URL}/api/projects/${projectId}`, {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/projects/${projectId}`, {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -232,10 +254,11 @@ export async function deleteProject(projectId: string): Promise<void> {
   }
 }
 
-export function clipUrl(projectId: string, filename: string): string {
-  return `${API_URL}/api/projects/${projectId}/clips/${encodeURIComponent(filename)}`;
+export async function clipUrl(projectId: string, filename: string): Promise<string> {
+  const apiUrl = await getApiUrl();
+  return `${apiUrl}/api/projects/${projectId}/clips/${encodeURIComponent(filename)}`;
 }
 
-export function clipDownloadUrl(projectId: string, filename: string): string {
-  return `${clipUrl(projectId, filename)}?download=true`;
+export async function clipDownloadUrl(projectId: string, filename: string): Promise<string> {
+  return `${await clipUrl(projectId, filename)}?download=true`;
 }

@@ -20,6 +20,28 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
   const [muted, setMuted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [audioStatus, setAudioStatus] = useState("");
+  const [mediaUrls, setMediaUrls] = useState<{ clip: string; download: string } | null>(null);
+  const [mediaUrlError, setMediaUrlError] = useState("");
+
+  useEffect(() => {
+    let isActive = true;
+    void Promise.all([
+      clipUrl(projectId, clip.file),
+      clipDownloadUrl(projectId, clip.file),
+    ]).then(([clip, download]) => {
+      if (isActive) {
+        setMediaUrls({ clip, download });
+        setMediaUrlError("");
+      }
+    }).catch((error: unknown) => {
+      if (isActive) {
+        setMediaUrlError(error instanceof Error ? error.message : String(error));
+      }
+    });
+    return () => {
+      isActive = false;
+    };
+  }, [clip.file, projectId]);
 
   const playWithSound = async () => {
     const video = videoRef.current;
@@ -86,7 +108,7 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
         onPause={() => setIsPlaying(false)}
         onEnded={() => setIsPlaying(false)}
       >
-        <source src={clipUrl(projectId, clip.file)} type="video/mp4" />
+        {mediaUrls && <source src={mediaUrls.clip} type="video/mp4" />}
       </video>
       <div className="mt-3 flex max-w-xs items-center gap-3">
         <button
@@ -117,11 +139,16 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
         </p>
       )}
       <a
-        href={clipDownloadUrl(projectId, clip.file)}
+        href={mediaUrls?.download}
         className="mt-3 inline-block rounded-md border border-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-800"
       >
         Download video
       </a>
+      {mediaUrlError && (
+        <p role="status" className="mt-2 text-xs text-amber-300">
+          Could not load clip URL: {mediaUrlError}
+        </p>
+      )}
       <h3 className="mt-4 text-lg font-medium">{clip.title}</h3>
       <p className="mt-2 text-sm text-zinc-400">
         {clip.start.toFixed(2)}s → {clip.end.toFixed(2)}s · {clip.duration.toFixed(2)}s

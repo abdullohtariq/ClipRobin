@@ -1,3 +1,4 @@
+import logging
 import shutil
 import threading
 from pathlib import Path
@@ -10,6 +11,7 @@ from app.routes.download import create_project_directory
 from app.services.transcriber import transcribe_video
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 ALLOWED_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".m4v", ".webm"}
 TRANSCRIPTION_JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
@@ -44,6 +46,7 @@ def run_local_transcription(project_id: str, source_path: Path, project_director
             progress_callback=report_progress,
         )
     except Exception as error:
+        logger.exception("Local transcription failed for project %s", project_id)
         update_job(
             project_id,
             status="failed",
