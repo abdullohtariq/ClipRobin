@@ -207,16 +207,16 @@ The frontend, Tauri config, and Rust package share one app version. From
 `frontend`, update all version manifests together before a release:
 
 ```powershell
-npm run version:set -- 0.1.1
+npm run version:set -- 0.1.4
 npm run version:check
 ```
 
 Commit and push the version change, then create and push its matching version
-tag from the repository root. A `v0.1.1` tag builds and publishes the signed
+tag from the repository root. A `v0.1.4` tag builds and publishes the signed
 Windows installer and updater metadata as a GitHub Release:
 
 ```powershell
-git tag v0.1.1
+git tag v0.1.4
 git push origin main --tags
 ```
 
@@ -227,6 +227,14 @@ Update checks run in production desktop builds, not in the browser or the
 Tauri development build. The production desktop app has its own identifier
 (`com.cliprobin.desktop`); earlier scaffold builds using `com.tauri.dev` are
 separate installs and do not receive these updates.
+
+Windows installers bundle and start the local Python API automatically.
+Projects and the downloaded speech model are stored in the current user's
+Clip Robin application data folder. The first transcription downloads the
+Whisper model, so it needs an internet connection and may take longer than
+later runs. Backend startup and transcription errors are logged to `backend.log` in that
+application data folder (typically
+`%APPDATA%\com.cliprobin.desktop\backend.log`).
 
 Updater releases require a signing key. Generate a keypair once from `frontend`
 and keep the private key out of the repository:

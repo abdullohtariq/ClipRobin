@@ -1,9 +1,15 @@
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PROJECTS_DIR = Path(__file__).resolve().parents[2] / "data" / "projects"
+PROJECTS_DIR = Path(
+    os.environ.get(
+        "CLIPROBIN_PROJECTS_DIR",
+        str(Path(__file__).resolve().parents[2] / "data" / "projects"),
+    )
+)
 PROJECT_ID_PATTERN = re.compile(r"^project_\d+$")
 
 
