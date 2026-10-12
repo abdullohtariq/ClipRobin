@@ -207,22 +207,24 @@ The frontend, Tauri config, and Rust package share one app version. From
 `frontend`, update all version manifests together before a release:
 
 ```powershell
-npm run version:set -- 0.1.7
+npm run version:set -- 0.1.8
 npm run version:check
 ```
 
 Commit and push the version change, then create and push its matching version
-tag from the repository root. A `v0.1.7` tag builds and publishes the signed
+tag from the repository root. A `v0.1.8` tag builds and publishes the signed
 Windows installer and updater metadata as a GitHub Release:
 
 ```powershell
-git tag v0.1.7
+git tag v0.1.8
 git push origin main --tags
 ```
 
 The Tauri desktop app checks for updates when it opens and every six hours.
 When a signed update is available, it shows an in-app prompt; choosing
-**Update and restart** installs it and relaunches the app.
+**Update and restart** installs it and relaunches the app. If you leave the
+prompt without installing, it is shown again the next time the app opens and
+remains until the installed version includes that update.
 Update checks run in production desktop builds, not in the browser or the
 Tauri development build. The production desktop app has its own identifier
 (`com.cliprobin.desktop`); earlier scaffold builds using `com.tauri.dev` are

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Clip Robin",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "identifier": "com.cliprobin.desktop",
   "build": {
     "frontendDist": "../out",
@@ -27,6 +27,11 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installerHooks": "nsis/installer-hooks.nsh"
+      }
+    },
     "resources": {
       "../../backend/dist/cliprobin-api.exe": "cliprobin-api.exe"
     },
