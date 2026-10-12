@@ -71,7 +71,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Clip Robin ${{ github.ref_name }}
           releaseBody: |
-            [Download the Windows installer (.exe)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Clip%20Robin_${{ steps.app-version.outputs.version }}_x64-setup.exe)
+            [Download the Windows installer (.exe)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Clip.Robin_${{ steps.app-version.outputs.version }}_x64-setup.exe)
 
             GitHub automatically includes source-code archives on releases; they are not needed to install Clip Robin. Existing installations will be notified when this update is available.
           releaseDraft: false
