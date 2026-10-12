@@ -37,7 +37,7 @@ pub fn run() {
                 let backend_log = OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(log_path)?;
+                    .open(&log_path)?;
                 let backend = app.path().resource_dir()?.join("cliprobin-api.exe");
                 let mut child = Command::new(backend)
                     .env("CLIPROBIN_PROJECTS_DIR", projects_dir)
