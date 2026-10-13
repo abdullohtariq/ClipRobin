@@ -37,11 +37,27 @@ def _load_transcript_segments(project_directory: Path) -> list[dict[str, Any]]:
             continue
         if not isinstance(text, str) or not text.strip():
             continue
-        valid_segments.append({
+        valid_segment: dict[str, Any] = {
             "start": float(start),
             "end": float(end),
             "text": text.strip(),
-        })
+        }
+        words = segment.get("words")
+        if isinstance(words, list):
+            valid_segment["words"] = [
+                {
+                    "start": float(word["start"]),
+                    "end": float(word["end"]),
+                    "text": word["text"].strip(),
+                }
+                for word in words
+                if isinstance(word, dict)
+                and isinstance(word.get("start"), (int, float))
+                and isinstance(word.get("end"), (int, float))
+                and isinstance(word.get("text"), str)
+                and word["text"].strip()
+            ]
+        valid_segments.append(valid_segment)
     return sorted(valid_segments, key=lambda item: item["start"])
 
 

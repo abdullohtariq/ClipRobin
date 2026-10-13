@@ -101,7 +101,7 @@ Clip Robin is in early development, but the first end-to-end filesystem pipeline
 - Filesystem project storage under `backend/data/projects`.
 - Mock transcript analysis that creates `analysis.json`.
 - Background FFmpeg clip generation with progress reporting, cancellation with generated-clip cleanup, and regeneration that replaces existing clips.
-- Optional animated captions burned into generated clips.
+- Optional burned-in captions that wrap within the video, use bold text, and pop-highlight each spoken word in yellow.
 - Project-specific clip previews, playback controls, and MP4 downloads.
 - Project listing and deletion, plus basic Settings pages.
 - OpenAI, DeepSeek, and Gemini analyzer adapters are implemented but not called by the mock clip-generation flow.
@@ -207,16 +207,16 @@ The frontend, Tauri config, and Rust package share one app version. From
 `frontend`, update all version manifests together before a release:
 
 ```powershell
-npm run version:set -- 0.1.8
+npm run version:set -- 0.1.9
 npm run version:check
 ```
 
 Commit and push the version change, then create and push its matching version
-tag from the repository root. A `v0.1.8` tag builds and publishes the signed
+tag from the repository root. A `v0.1.9` tag builds and publishes the signed
 Windows installer and updater metadata as a GitHub Release:
 
 ```powershell
-git tag v0.1.8
+git tag v0.1.9
 git push origin main --tags
 ```
 

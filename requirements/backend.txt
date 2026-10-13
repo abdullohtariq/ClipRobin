@@ -3,5 +3,6 @@ uvicorn
 yt-dlp
 faster-whisper
 av>=11,<19
+pillow>=10
 python-multipart
 httpx

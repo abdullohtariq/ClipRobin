@@ -5,6 +5,8 @@ import tempfile
 import threading
 from pathlib import Path
 
+from PIL import ImageFont
+
 
 class VideoEditorError(Exception):
     """Raised when FFmpeg cannot create a clip."""
@@ -35,11 +37,15 @@ def _copy_font_file(destination_directory: Path) -> str | None:
     if os.name == "nt":
         windows_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
         candidates = [
+            windows_dir / "Fonts" / "segoeuib.ttf",
+            windows_dir / "Fonts" / "arialbd.ttf",
             windows_dir / "Fonts" / "segoeui.ttf",
             windows_dir / "Fonts" / "arial.ttf",
         ]
     else:
         candidates = [
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+            Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
             Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
             Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
         ]
@@ -52,10 +58,82 @@ def _copy_font_file(destination_directory: Path) -> str | None:
     return None
 
 
+def _layout_subtitle_words(
+    segment: dict[str, object],
+    start_time: float,
+    end_time: float,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: float,
+) -> list[dict[str, object]]:
+    segment_start = max(start_time, float(segment.get("start", start_time)))
+    segment_end = min(end_time, float(segment.get("end", end_time)))
+    if segment_end <= segment_start:
+        return []
+
+    source_words = segment.get("words")
+    timed_words = (
+        [
+            word
+            for word in source_words
+            if isinstance(word, dict)
+            and isinstance(word.get("start"), (int, float))
+            and isinstance(word.get("end"), (int, float))
+            and isinstance(word.get("text"), str)
+            and word["text"].strip()
+        ]
+        if isinstance(source_words, list)
+        else []
+    )
+    if timed_words:
+        caption_words = [
+            {
+                "text": word["text"].strip(),
+                "start": max(segment_start, float(word["start"])),
+                "end": min(segment_end, float(word["end"])),
+            }
+            for word in timed_words
+            if float(word["end"]) > segment_start
+            and float(word["start"]) < segment_end
+        ]
+    else:
+        text = str(segment.get("text", "")).strip()
+        fallback_words = text.split()
+        word_duration = (segment_end - segment_start) / max(len(fallback_words), 1)
+        caption_words = [
+            {
+                "text": word,
+                "start": segment_start + index * word_duration,
+                "end": segment_start + (index + 1) * word_duration,
+            }
+            for index, word in enumerate(fallback_words)
+        ]
+
+    lines: list[dict[str, object]] = []
+    line_words: list[dict[str, object]] = []
+    line_width = 0.0
+    space_width = float(font.getlength(" "))
+    for word in caption_words:
+        if word["end"] <= word["start"]:
+            continue
+        word_width = float(font.getlength(word["text"]))
+        next_width = line_width + (space_width if line_words else 0.0) + word_width
+        if line_words and next_width > max_width:
+            lines.append({"words": line_words, "width": line_width})
+            line_words = []
+            line_width = 0.0
+        word_x = line_width + (space_width if line_words else 0.0)
+        line_words.append({**word, "x": word_x, "width": word_width})
+        line_width = word_x + word_width
+
+    if line_words:
+        lines.append({"words": line_words, "width": line_width})
+    return lines
+
+
 def _build_filter_graph(
     start_time: float,
     end_time: float,
-    subtitle_segments: list[dict[str, float | str]] | None = None,
+    subtitle_segments: list[dict[str, object]] | None = None,
     show_subtitles: bool = True,
     subtitle_directory: Path | None = None,
     font_file: str | None = None,
@@ -69,41 +147,77 @@ def _build_filter_graph(
 
     font_fragment = f"fontfile='{font_file}':" if font_file else ""
     subtitle_filters = []
+    font_size = 34
+    font_path = subtitle_directory / font_file if font_file else None
+    try:
+        font = (
+            ImageFont.truetype(str(font_path), font_size)
+            if font_path
+            else ImageFont.load_default(size=font_size)
+        )
+    except OSError:
+        font = ImageFont.load_default(size=font_size)
+
     for segment in subtitle_segments:
         if not isinstance(segment, dict):
             continue
-        segment_start = float(segment.get("start", 0.0))
-        segment_end = float(segment.get("end", 0.0))
-        text = str(segment.get("text", "")).strip()
-        if not text or segment_end <= segment_start:
+        lines = _layout_subtitle_words(segment, start_time, end_time, font, max_width=640)
+        if not lines:
             continue
 
-        overlapping_start = max(start_time, segment_start)
-        overlapping_end = min(end_time, segment_end)
-        if overlapping_end <= overlapping_start:
-            continue
-
-        local_start = max(0.0, overlapping_start - start_time)
-        local_end = max(local_start + 0.05, overlapping_end - start_time)
-        fade_out_start = max(local_start + 0.15, local_end - 0.2)
-        alpha_expression = (
-            f"if(lt(t,{local_start + 0.12}),(t-{local_start})/0.12,"
-            f"if(lt(t,{fade_out_start}),1,"
-            f"max(0,1-((t-{fade_out_start})/0.2))))"
+        segment_start = max(
+            0.0,
+            max(start_time, float(segment.get("start", start_time))) - start_time,
         )
-        text_file = subtitle_directory / f"subtitle-{len(subtitle_filters)}.txt"
-        text_file.write_text(text, encoding="utf-8")
-        subtitle_filters.append(
-            "drawtext=textfile='{}':{}expansion=none:fontsize=30:fontcolor=white:shadowcolor=black@0.9:"
-            "shadowx=2:shadowy=2:box=1:boxcolor=black@0.45:boxborderw=12:"
-            "x=(w-text_w)/2:y=h-th-40:alpha='{}':enable='between(t,{:.3f},{:.3f})'".format(
-                text_file.name,
-                font_fragment,
-                alpha_expression,
-                local_start,
-                local_end,
+        segment_end = min(end_time, float(segment.get("end", end_time))) - start_time
+        line_height = 48
+        for line_index, line in enumerate(lines):
+            line_words = line["words"]
+            line_width = float(line["width"])
+            text = " ".join(str(word["text"]) for word in line_words)
+            text_file = subtitle_directory / f"subtitle-{len(subtitle_filters)}.txt"
+            text_file.write_text(text, encoding="utf-8")
+            y_position = f"h-150-{(len(lines) - line_index - 1) * line_height}"
+            subtitle_filters.append(
+                "drawtext=textfile='{}':{}expansion=none:fontsize={}:fontcolor=white:"
+                "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
+                "box=1:boxcolor=black@0.55:boxborderw=10:"
+                "x=(w-text_w)/2:y={}:enable='between(t,{:.3f},{:.3f})'".format(
+                    text_file.name,
+                    font_fragment,
+                    font_size,
+                    y_position,
+                    segment_start,
+                    max(segment_start + 0.05, segment_end),
+                )
             )
-        )
+            for word in line_words:
+                highlight_file = subtitle_directory / f"subtitle-word-{len(subtitle_filters)}.txt"
+                highlight_file.write_text(str(word["text"]), encoding="utf-8")
+                word_start = max(0.0, float(word["start"]) - start_time)
+                word_end = max(word_start + 0.03, float(word["end"]) - start_time)
+                pop_font_size = font_size + 7
+                word_x = (
+                    f"(w-{line_width:.3f})/2+{float(word['x']):.3f}"
+                    f"-(text_w-{float(word['width']):.3f})/2"
+                )
+                y_expression = f"{y_position}-(text_h-{font_size})"
+                subtitle_filters.append(
+                    "drawtext=textfile='{}':{}expansion=none:"
+                    "fontsize='if(lt(t,{:.3f}),{}, {})':fontcolor=yellow:"
+                    "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
+                    "x={}:y={}:enable='between(t,{:.3f},{:.3f})'".format(
+                        highlight_file.name,
+                        font_fragment,
+                        word_start + 0.12,
+                        pop_font_size,
+                        font_size,
+                        word_x,
+                        y_expression,
+                        word_start,
+                        word_end,
+                    )
+                )
 
     if not subtitle_filters:
         return base_filter
@@ -115,7 +229,7 @@ def create_clip(
     output_path: Path,
     start_time: float,
     end_time: float,
-    subtitle_segments: list[dict[str, float | str]] | None = None,
+    subtitle_segments: list[dict[str, object]] | None = None,
     show_subtitles: bool = True,
     cancel_event: threading.Event | None = None,
 ) -> Path:

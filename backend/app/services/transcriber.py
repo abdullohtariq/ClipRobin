@@ -17,7 +17,11 @@ def transcribe_video(
     if progress_callback:
         progress_callback("Loading speech model", 0)
     model = WhisperModel(MODEL_NAME, device="cpu", compute_type="int8")
-    segments, info = model.transcribe(str(video_path), vad_filter=True)
+    segments, info = model.transcribe(
+        str(video_path),
+        vad_filter=True,
+        word_timestamps=True,
+    )
 
     transcript_segments = []
     duration = max(info.duration, 0.001)
@@ -25,11 +29,22 @@ def transcribe_video(
         progress_callback("Transcribing audio", 0)
 
     for segment in segments:
-        transcript_segments.append({
+        transcript_segment: dict[str, Any] = {
             "start": round(segment.start, 3),
             "end": round(segment.end, 3),
             "text": segment.text.strip(),
-        })
+        }
+        if segment.words:
+            transcript_segment["words"] = [
+                {
+                    "start": round(word.start, 3),
+                    "end": round(word.end, 3),
+                    "text": word.word.strip(),
+                }
+                for word in segment.words
+                if word.start is not None and word.end is not None and word.word.strip()
+            ]
+        transcript_segments.append(transcript_segment)
         if progress_callback:
             progress_callback(
                 "Transcribing audio",
