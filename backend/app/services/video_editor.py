@@ -177,11 +177,11 @@ def _build_filter_graph(
             text = " ".join(str(word["text"]) for word in line_words)
             text_file = subtitle_directory / f"subtitle-{len(subtitle_filters)}.txt"
             text_file.write_text(text, encoding="utf-8")
-            y_position = f"h-150-{(len(lines) - line_index - 1) * line_height}"
+            y_position = f"h-340-{(len(lines) - line_index - 1) * line_height}"
             subtitle_filters.append(
                 "drawtext=textfile='{}':{}expansion=none:fontsize={}:fontcolor=white:"
                 "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
-                "box=1:boxcolor=black@0.55:boxborderw=10:"
+                "box=1:boxcolor=black@0.55:boxborderw=10:y_align=baseline:"
                 "x=(w-text_w)/2:y={}:enable='between(t,{:.3f},{:.3f})'".format(
                     text_file.name,
                     font_fragment,
@@ -201,19 +201,18 @@ def _build_filter_graph(
                     f"(w-{line_width:.3f})/2+{float(word['x']):.3f}"
                     f"-(text_w-{float(word['width']):.3f})/2"
                 )
-                y_expression = f"{y_position}-(text_h-{font_size})"
                 subtitle_filters.append(
                     "drawtext=textfile='{}':{}expansion=none:"
                     "fontsize='if(lt(t,{:.3f}),{}, {})':fontcolor=yellow:"
                     "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
-                    "x={}:y={}:enable='between(t,{:.3f},{:.3f})'".format(
+                    "x={}:y={}:y_align=baseline:enable='between(t,{:.3f},{:.3f})'".format(
                         highlight_file.name,
                         font_fragment,
                         word_start + 0.12,
                         pop_font_size,
                         font_size,
                         word_x,
-                        y_expression,
+                        y_position,
                         word_start,
                         word_end,
                     )
