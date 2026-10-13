@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  ActiveJob,
   ClipGenerationJob,
   cancelClipGeneration,
   deleteProject,
   generateClips,
+  getActiveJobs,
   getProjects,
   Project,
 } from "@/src/lib/api";
@@ -19,6 +21,7 @@ export default function Projects() {
   const [deletingProject, setDeletingProject] = useState<string | null>(null);
   const [generatingProject, setGeneratingProject] = useState<string | null>(null);
   const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
+  const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [subtitleOptions, setSubtitleOptions] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -28,6 +31,46 @@ export default function Projects() {
         setStatus(result.projects.length ? "" : "No projects yet.");
       })
       .catch((error) => setStatus(error instanceof Error ? error.message : "Could not load projects"));
+  }, []);
+
+  useEffect(() => {
+    let isCurrent = true;
+    let timeoutId: number | undefined;
+    let refreshCount = 0;
+
+    const refreshActiveJobs = async () => {
+      try {
+        const jobs = await getActiveJobs();
+        if (isCurrent) {
+          setActiveJobs(jobs);
+          refreshCount += 1;
+          if (refreshCount % 3 === 0) {
+            const result = await getProjects();
+            if (isCurrent) {
+              setProjects((current) => (
+                JSON.stringify(current) === JSON.stringify(result.projects)
+                  ? current
+                  : result.projects
+              ));
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Could not refresh project status", error);
+      } finally {
+        if (isCurrent) {
+          timeoutId = window.setTimeout(() => void refreshActiveJobs(), 1000);
+        }
+      }
+    };
+
+    void refreshActiveJobs();
+    return () => {
+      isCurrent = false;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, []);
 
   const handleDelete = async (projectId: string) => {
@@ -89,7 +132,21 @@ export default function Projects() {
   };
 
   const handleCancel = async (projectId: string) => {
-    const job = generationProgress;
+    const activeJob = activeJobs.find((item) =>
+      item.kind === "generation" && item.project_id === projectId);
+    const job = generationProgress?.project_id === projectId
+      ? generationProgress
+      : activeJob
+        ? {
+            job_id: activeJob.id,
+            project_id: activeJob.project_id,
+            status: activeJob.status,
+            step: activeJob.step,
+            progress: activeJob.progress,
+            completed_clips: activeJob.completed_clips ?? 0,
+            total_clips: activeJob.total_clips ?? 0,
+          }
+        : null;
     if (job?.project_id !== projectId || !job.job_id || job.status === "cancelling") return;
     if (!window.confirm(`Cancel generation and remove all generated clips for ${projectId}? The source video and transcript will be kept.`)) {
       return;
@@ -110,8 +167,28 @@ export default function Projects() {
 
       <p className="mt-2 text-zinc-400">{status}</p>
       <div className="mt-8 grid max-w-3xl gap-4">
-        {projects.map((project) => (
-          <article key={project.project_id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+        {projects.map((project) => {
+          const activeGeneration = activeJobs.find((job) =>
+            job.kind === "generation" && job.project_id === project.project_id);
+          const activeTranscription = activeJobs.find((job) =>
+            job.kind === "transcription" && job.project_id === project.project_id);
+          const projectProgress = generationProgress?.project_id === project.project_id
+            ? generationProgress
+            : activeGeneration
+              ? {
+                  job_id: activeGeneration.id,
+                  project_id: activeGeneration.project_id,
+                  status: activeGeneration.status,
+                  step: activeGeneration.step,
+                  progress: activeGeneration.progress,
+                  completed_clips: activeGeneration.completed_clips ?? 0,
+                  total_clips: activeGeneration.total_clips ?? 0,
+                }
+              : null;
+          const isGenerating = generatingProject === project.project_id || Boolean(activeGeneration);
+          const isTranscribing = Boolean(activeTranscription);
+          return (
+            <article key={project.project_id} className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
             <h2 className="text-xl font-medium">{project.project_id}</h2>
             <p className="mt-2 text-sm text-zinc-400">Source: {project.source_type}</p>
             <p className="text-sm text-zinc-400">Clips: {project.clips}</p>
@@ -124,7 +201,7 @@ export default function Projects() {
                   ...current,
                   [project.project_id]: event.target.checked,
                 }))}
-                disabled={generatingProject !== null}
+                disabled={generatingProject !== null || activeGeneration !== undefined || isTranscribing}
                 className="size-4 accent-white"
               />
               Burn animated captions into generated clips
@@ -133,66 +210,90 @@ export default function Projects() {
               <button
                 type="button"
                 onClick={() => void handleGenerate(project.project_id)}
-                disabled={generatingProject !== null || deletingProject !== null || project.source_type === "Unknown"}
+                disabled={generatingProject !== null || deletingProject !== null || activeGeneration !== undefined || isTranscribing || project.source_type === "Unknown"}
                 className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
               >
-                {generatingProject === project.project_id
+                {isGenerating
                   ? "Generating..."
+                  : isTranscribing ? "Transcribing..."
                   : project.clips > 0 ? "Regenerate Clips" : "Generate Clips"}
               </button>
               <Link href={`/clips?project=${encodeURIComponent(project.project_id)}`} className="text-sm text-white underline">View Clips</Link>
               <button
                 type="button"
                 onClick={() => void handleDelete(project.project_id)}
-                disabled={deletingProject !== null || generatingProject !== null}
+                disabled={deletingProject !== null || generatingProject !== null || activeGeneration !== undefined || isTranscribing}
                 className="text-sm text-red-400 underline hover:text-red-300 disabled:opacity-50"
               >
                 {deletingProject === project.project_id ? "Deleting..." : "Delete Project"}
               </button>
             </div>
-            {generationProgress?.project_id === project.project_id && (
+            {activeTranscription && (
               <section aria-live="polite" className="mt-5 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
                 <div className="flex items-center justify-between gap-4">
-                  <p className="text-sm font-medium text-zinc-200">{generationProgress.step}</p>
-                  <p className="text-sm tabular-nums text-zinc-400">{generationProgress.progress}%</p>
+                  <p className="text-sm font-medium text-zinc-200">{activeTranscription.step}</p>
+                  <p className="text-sm tabular-nums text-zinc-400">{activeTranscription.progress}%</p>
+                </div>
+                <div
+                  role="progressbar"
+                  aria-label={`Transcription progress for ${project.project_id}`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={activeTranscription.progress}
+                  className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-700"
+                >
+                  <div
+                    className="h-full rounded-full bg-emerald-400 transition-[width] duration-500"
+                    style={{ width: `${activeTranscription.progress}%` }}
+                  />
+                </div>
+                <p className="mt-3 text-xs text-zinc-400">Clip generation will start automatically when transcription finishes.</p>
+              </section>
+            )}
+            {projectProgress && (
+              <section aria-live="polite" className="mt-5 rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <p className="text-sm font-medium text-zinc-200">{projectProgress.step}</p>
+                  <p className="text-sm tabular-nums text-zinc-400">{projectProgress.progress}%</p>
                 </div>
                 <div
                   role="progressbar"
                   aria-label={`Clip generation progress for ${project.project_id}`}
                   aria-valuemin={0}
                   aria-valuemax={100}
-                  aria-valuenow={generationProgress.progress}
+                  aria-valuenow={projectProgress.progress}
                   className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-700"
                 >
                   <div
                     className="h-full rounded-full bg-emerald-400 transition-[width] duration-500"
-                    style={{ width: `${generationProgress.progress}%` }}
+                    style={{ width: `${projectProgress.progress}%` }}
                   />
                 </div>
                 <div className="mt-3 flex flex-wrap justify-between gap-2 text-xs text-zinc-500">
                   <span>Preparing analysis</span>
                   <span>
                     Rendering clips
-                    {generationProgress.total_clips > 0
-                      ? ` (${generationProgress.completed_clips}/${generationProgress.total_clips})`
+                    {projectProgress.total_clips > 0
+                      ? ` (${projectProgress.completed_clips}/${projectProgress.total_clips})`
                       : ""}
                   </span>
                   <span>Saving clips</span>
                 </div>
-                {["queued", "processing", "cancelling"].includes(generationProgress.status) && (
+                {["queued", "processing", "cancelling"].includes(projectProgress.status) && (
                   <button
                     type="button"
                     onClick={() => void handleCancel(project.project_id)}
-                    disabled={!generationProgress.job_id || generationProgress.status === "cancelling"}
+                    disabled={!projectProgress.job_id || projectProgress.status === "cancelling"}
                     className="mt-4 rounded-md border border-red-500/60 px-3 py-2 text-sm text-red-300 hover:bg-red-950/50 disabled:opacity-50"
                   >
-                    {generationProgress.status === "cancelling" ? "Cancelling..." : "Cancel generation"}
+                    {projectProgress.status === "cancelling" ? "Cancelling..." : "Cancel generation"}
                   </button>
                 )}
               </section>
             )}
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
     </main>
   );

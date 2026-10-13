@@ -98,6 +98,8 @@ Clip Robin is in early development, but the first end-to-end filesystem pipeline
 - YouTube URL download flow using `yt-dlp`.
 - Local video drag-and-drop and Windows file-picker flow.
 - Background local timestamped transcription using `faster-whisper`, with upload and transcription progress.
+- Persistent transcription and clip-generation progress while navigating between pages.
+- Local-video clip generation with selectable 15-, 30-, 60-, or 90-second clips and optional burned-in captions.
 - Filesystem project storage under `backend/data/projects`.
 - Mock transcript analysis that creates `analysis.json`.
 - Background FFmpeg clip generation with progress reporting, cancellation with generated-clip cleanup, and regeneration that replaces existing clips.
@@ -207,17 +209,18 @@ The frontend, Tauri config, and Rust package share one app version. From
 `frontend`, update all version manifests together before a release:
 
 ```powershell
-npm run version:set -- 0.1.11
+npm run version:set -- 0.1.12
 npm run version:check
 ```
 
 Commit and push the version change, then create and push its matching version
-tag from the repository root. A `v0.1.11` tag builds and publishes the signed
+tag from the repository root. A `v0.1.12` tag builds and publishes the signed
 Windows installer and updater metadata as a GitHub Release:
 
 ```powershell
-git tag v0.1.11
-git push origin main --tags
+git tag v0.1.12
+git push origin main
+git push origin v0.1.12
 ```
 
 The Tauri desktop app checks for updates when it opens and every six hours.

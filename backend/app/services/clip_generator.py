@@ -66,6 +66,7 @@ def generate_clips(
     show_subtitles: bool = True,
     progress_callback: Callable[[str, int, int], None] | None = None,
     cancel_event: threading.Event | None = None,
+    max_clip_seconds: float = 60.0,
 ) -> list[dict[str, Any]]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -98,7 +99,7 @@ def generate_clips(
     if not analysis:
         if progress_callback:
             progress_callback("Analyzing transcript", 0, 0)
-        analysis = create_mock_analysis(project_directory)
+        analysis = create_mock_analysis(project_directory, max_clip_seconds=max_clip_seconds)
 
     if cancel_event is not None and cancel_event.is_set():
         raise ClipGenerationCancelled("Clip generation was cancelled")

@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Image from "next/image";
-import Link from "next/link";
 import UpdateNotice from "./update-notice";
+import JobProgress from "./job-progress";
+import SidebarNav from "./sidebar-nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -35,35 +36,7 @@ export default function RootLayout({
               <h1 className="text-2xl font-bold">Clip Robin</h1>
             </div>
 
-            <nav className="space-y-3">
-              <Link
-                href="/"
-                className="block rounded-lg px-4 py-3 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-              >
-                Dashboard
-              </Link>
-
-              <Link
-                href="/projects"
-                className="block rounded-lg px-4 py-3 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-              >
-                Projects
-              </Link>
-
-              <Link
-                href="/clips"
-                className="block rounded-lg px-4 py-3 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-              >
-                Clips
-              </Link>
-
-              <Link
-                href="/settings"
-                className="block rounded-lg px-4 py-3 text-zinc-400 hover:bg-zinc-800 hover:text-white"
-              >
-                Settings
-              </Link>
-            </nav>
+            <SidebarNav />
           </aside>
 
           {/* Page */}
@@ -72,6 +45,7 @@ export default function RootLayout({
             {children}
           </div>
         </div>
+        <JobProgress />
       </body>
     </html>
   );

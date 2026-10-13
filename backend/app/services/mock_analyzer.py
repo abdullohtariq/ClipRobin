@@ -38,7 +38,10 @@ def _normalize_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized
 
 
-def create_mock_analysis(project_directory: Path) -> dict[str, Any]:
+def create_mock_analysis(
+    project_directory: Path,
+    max_clip_seconds: float = MAX_CLIP_SECONDS,
+) -> dict[str, Any]:
     transcript_path = project_directory / "transcription" / "transcript.json"
     if not transcript_path.is_file():
         transcript_path = project_directory / "transcript.json"
@@ -63,10 +66,10 @@ def create_mock_analysis(project_directory: Path) -> dict[str, Any]:
         while index < len(segments):
             candidate_end = segments[index]["end"]
             current_duration = candidate_end - start_time
-            if current_duration > MAX_CLIP_SECONDS:
+            if current_duration > max_clip_seconds:
                 break
             index += 1
-            if current_duration >= MAX_CLIP_SECONDS:
+            if current_duration >= max_clip_seconds:
                 break
 
         selected = segments[start_index:index]
@@ -75,7 +78,11 @@ def create_mock_analysis(project_directory: Path) -> dict[str, Any]:
             if index < len(segments)
             else 0
         )
-        if index < len(segments) and remaining_duration < MIN_CLIP_SECONDS:
+        if (
+            index < len(segments)
+            and remaining_duration < MIN_CLIP_SECONDS
+            and segments[index - 1]["end"] - start_time + remaining_duration <= max_clip_seconds
+        ):
             selected.extend(segments[index:])
             index = len(segments)
 

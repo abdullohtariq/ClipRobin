@@ -3,6 +3,26 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 const WEB_API_URL = "http://127.0.0.1:8000";
 let desktopApiUrl: Promise<string> | undefined;
 
+function getApiErrorMessage(payload: unknown, fallback: string): string {
+  if (typeof payload !== "object" || payload === null || !("detail" in payload)) {
+    return fallback;
+  }
+  const detail = payload.detail;
+  if (typeof detail === "string") {
+    return detail;
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((item) => {
+      if (typeof item !== "object" || item === null || !("msg" in item)) {
+        return [];
+      }
+      return typeof item.msg === "string" ? [item.msg] : [];
+    });
+    return messages.length > 0 ? messages.join("; ") : fallback;
+  }
+  return fallback;
+}
+
 async function getApiUrl(): Promise<string> {
   if (!isTauri()) {
     return WEB_API_URL;
@@ -58,6 +78,17 @@ export type ClipGenerationJob = {
   clips?: Clip[];
 };
 
+export type ActiveJob = {
+  id: string;
+  kind: "transcription" | "generation";
+  project_id: string;
+  status: "queued" | "processing" | "cancelling";
+  step: string;
+  progress: number;
+  completed_clips?: number;
+  total_clips?: number;
+};
+
 export type Project = {
   project_id: string;
   created_at: string;
@@ -65,6 +96,17 @@ export type Project = {
   clips: number;
   status: string;
 };
+
+export async function getActiveJobs(): Promise<ActiveJob[]> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/jobs/active`);
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not check active job progress"));
+  }
+  const result = await response.json() as { jobs: ActiveJob[] };
+  return result.jobs;
+}
 
 export async function downloadVideo(url: string): Promise<DownloadResponse> {
   const apiUrl = await getApiUrl();
@@ -124,7 +166,7 @@ export async function transcribeLocalVideo(
         return;
       }
       if (request.status < 200 || request.status >= 300) {
-        reject(new Error(result.detail ?? "Local video upload failed"));
+        reject(new Error(getApiErrorMessage(result, "Local video upload failed")));
         return;
       }
       resolve(result);
@@ -141,8 +183,8 @@ export async function getLocalTranscriptionJob(
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/local-video/jobs/${projectId}`);
   if (!response.ok) {
-    const detail = await response.json().catch(() => null);
-    throw new Error(detail?.detail ?? "Could not check transcription progress");
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not check transcription progress"));
   }
   return response.json();
 }
@@ -151,15 +193,16 @@ export async function generateClips(
   projectId: string,
   showSubtitles: boolean = true,
   onProgress?: (job: ClipGenerationJob) => void,
+  clipDurationSeconds: 15 | 30 | 60 | 90 = 60,
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}`,
     { method: "POST" },
   );
   if (!response.ok) {
-    const detail = await response.json().catch(() => null);
-    throw new Error(detail?.detail ?? "Clip generation failed");
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Clip generation failed"));
   }
   const { job_id: jobId } = await response.json() as { job_id: string };
   onProgress?.({
@@ -177,8 +220,8 @@ export async function generateClips(
       `${apiUrl}/api/projects/${projectId}/generation-jobs/${jobId}`,
     );
     if (!jobResponse.ok) {
-      const detail = await jobResponse.json().catch(() => null);
-      throw new Error(detail?.detail ?? "Could not check clip generation progress");
+      const payload: unknown = await jobResponse.json().catch(() => null);
+      throw new Error(getApiErrorMessage(payload, "Could not check clip generation progress"));
     }
     job = await jobResponse.json() as ClipGenerationJob;
     onProgress?.(job);
@@ -206,8 +249,8 @@ export async function cancelClipGeneration(
     { method: "POST" },
   );
   if (!response.ok) {
-    const detail = await response.json().catch(() => null);
-    throw new Error(detail?.detail ?? "Could not cancel clip generation");
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not cancel clip generation"));
   }
   return response.json();
 }
@@ -218,8 +261,8 @@ export async function getLatestClipGenerationJob(
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/projects/${projectId}/generation-jobs`);
   if (!response.ok) {
-    const detail = await response.json().catch(() => null);
-    throw new Error(detail?.detail ?? "Could not check clip generation progress");
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not check clip generation progress"));
   }
   const result = await response.json() as { job: ClipGenerationJob | null };
   return result.job;
@@ -249,8 +292,8 @@ export async function deleteProject(projectId: string): Promise<void> {
     method: "DELETE",
   });
   if (!response.ok) {
-    const detail = await response.json().catch(() => null);
-    throw new Error(detail?.detail ?? "Could not delete project");
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not delete project"));
   }
 }
 
