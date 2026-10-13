@@ -260,6 +260,8 @@ def create_clip(
                     else None
                 ),
             )
+            filter_script = subtitle_directory / "video-filters.txt"
+            filter_script.write_text(filter_graph, encoding="utf-8")
             command = [
                 ffmpeg_path,
                 "-y",
@@ -269,8 +271,8 @@ def create_clip(
                 str(source_path),
                 "-t",
                 str(end_time - start_time),
-                "-vf",
-                filter_graph,
+                "-/filter:v",
+                filter_script.name,
                 "-c:v",
                 "libx264",
                 "-preset",
