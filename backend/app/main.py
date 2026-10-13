@@ -4,6 +4,7 @@ from app.routes.analysis import router as analysis_router
 from app.routes.clips import router as clips_router
 from app.routes.download import router as download_router
 from app.routes.health import router as health_router
+from app.routes.jobs import router as jobs_router
 from app.routes.local_video import router as local_video_router
 from app.routes.projects import router as projects_router
 from app.routes.transcription import router as transcription_router
@@ -25,6 +26,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(jobs_router)
 app.include_router(analysis_router)
 app.include_router(clips_router)
 app.include_router(download_router)

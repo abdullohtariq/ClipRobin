@@ -55,7 +55,13 @@ def generate_project_clips(
     project_id: str,
     background_tasks: BackgroundTasks,
     show_subtitles: bool = True,
+    clip_duration_seconds: int = 60,
 ) -> dict[str, str]:
+    if clip_duration_seconds not in {15, 30, 60, 90}:
+        raise HTTPException(
+            status_code=422,
+            detail="Clip duration must be 15, 30, 60, or 90 seconds",
+        )
     project_directory = project_or_404(project_id)
     job_id = uuid.uuid4().hex
     with JOBS_LOCK:
@@ -91,6 +97,7 @@ def generate_project_clips(
         project_directory,
         show_subtitles,
         cancel_event,
+        clip_duration_seconds,
     )
     return {"job_id": job_id}
 
@@ -101,6 +108,7 @@ def run_clip_generation(
     project_directory: Path,
     show_subtitles: bool,
     cancel_event: threading.Event,
+    clip_duration_seconds: int = 60,
 ) -> None:
     def report_progress(step: str, completed_clips: int, total_clips: int) -> None:
         if cancel_event.is_set():
@@ -130,6 +138,7 @@ def run_clip_generation(
             show_subtitles=show_subtitles,
             progress_callback=report_progress,
             cancel_event=cancel_event,
+            max_clip_seconds=clip_duration_seconds,
         )
     except ClipGenerationCancelled:
         finish_cancelled_job(job_id, project_id)

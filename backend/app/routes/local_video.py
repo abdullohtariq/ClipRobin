@@ -60,7 +60,7 @@ def run_local_transcription(project_id: str, source_path: Path, project_director
         status="completed",
         step="Complete",
         progress=100,
-        result=result,
+        result={**result, "project_id": project_id},
     )
 
 
