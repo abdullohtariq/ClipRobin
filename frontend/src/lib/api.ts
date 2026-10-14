@@ -27,8 +27,14 @@ async function getApiUrl(): Promise<string> {
   if (!isTauri()) {
     return WEB_API_URL;
   }
-  desktopApiUrl ??= invoke<number>("backend_port")
-    .then((port) => `http://127.0.0.1:${port}`);
+  if (!desktopApiUrl) {
+    desktopApiUrl = invoke<number>("backend_port")
+      .then((port) => `http://127.0.0.1:${port}`)
+      .catch((error) => {
+        desktopApiUrl = undefined;
+        throw error;
+      });
+  }
   return desktopApiUrl;
 }
 

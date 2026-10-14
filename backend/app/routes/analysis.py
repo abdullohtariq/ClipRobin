@@ -10,9 +10,9 @@ from app.services.ai_analyzer import (
     save_analysis,
     validate_transcript,
 )
+from app.services.project_manager import get_project_directory
 
 router = APIRouter(prefix="/api")
-PROJECTS_DIR = Path(__file__).resolve().parents[2] / "data" / "projects"
 
 
 class AnalyzeRequest(BaseModel):
@@ -36,9 +36,10 @@ def analyze(request: AnalyzeRequest) -> dict[str, Any]:
         raise HTTPException(status_code=status_code, detail=message) from error
 
     if request.project_id:
-        project_directory = (PROJECTS_DIR / request.project_id).resolve()
-        if project_directory.parent != PROJECTS_DIR.resolve() or not project_directory.is_dir():
-            raise HTTPException(status_code=404, detail="Project not found")
+        try:
+            project_directory = get_project_directory(request.project_id)
+        except (ValueError, FileNotFoundError) as error:
+            raise HTTPException(status_code=404, detail="Project not found") from error
         save_analysis(project_directory, analysis)
 
     return analysis

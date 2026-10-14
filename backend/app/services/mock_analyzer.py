@@ -29,10 +29,12 @@ def _normalize_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
         })
 
     normalized.sort(key=lambda segment: segment["start"])
-    previous_end = -1.0
+    previous_end = 0.0
     for segment in normalized:
         if segment["start"] < previous_end:
-            raise ValueError("Transcript segments must be in chronological order")
+            segment["start"] = previous_end
+            if segment["end"] <= segment["start"]:
+                segment["end"] = segment["start"] + 0.05
         previous_end = segment["end"]
 
     return normalized

@@ -74,8 +74,6 @@ def generate_clips(
     source_path = source_files[0]
     clips_directory = project_directory / "clips"
     clips_directory.mkdir(exist_ok=True)
-    for existing_clip in clips_directory.glob("*.mp4"):
-        existing_clip.unlink()
 
     if progress_callback:
         progress_callback("Preparing clip analysis", 0, 0)
@@ -113,11 +111,12 @@ def generate_clips(
 
     with tempfile.TemporaryDirectory(prefix=".clips-staging-", dir=project_directory) as staging:
         staging_directory = Path(staging)
+        staged_outputs: list[tuple[Path, dict[str, Any]]] = []
         for index, clip in enumerate(analysis_clips, start=1):
             if cancel_event is not None and cancel_event.is_set():
                 raise ClipGenerationCancelled("Clip generation was cancelled")
             try:
-                clip_id = clip["id"]
+                clip_id = clip.get("id") or f"clip_{index:03d}"
                 output_path = staging_directory / f"{clip_id}.mp4"
                 subtitle_segments = [
                     segment for segment in transcript_segments
@@ -134,17 +133,29 @@ def generate_clips(
                 )
                 if cancel_event is not None and cancel_event.is_set():
                     raise ClipGenerationCancelled("Clip generation was cancelled")
-                shutil.move(str(output_path), clips_directory / output_path.name)
-                generated.append({
+                staged_outputs.append((output_path, {
                     **clip,
+                    "id": clip_id,
                     "duration": round(clip["end"] - clip["start"], 3),
                     "file": output_path.name,
                     "status": "ready",
-                })
+                }))
             except (KeyError, TypeError, ValueError, VideoEditorError) as error:
                 raise VideoEditorError(f"Could not render clip {index} of {len(analysis_clips)}: {error}") from error
             if progress_callback:
                 progress_callback("Rendering clips", index, len(analysis_clips))
+
+        # Atomic commit: all clips rendered without error or cancellation!
+        for existing_clip in clips_directory.glob("*.mp4"):
+            try:
+                existing_clip.unlink()
+            except OSError:
+                pass
+
+        for staged_path, clip_metadata in staged_outputs:
+            destination = clips_directory / staged_path.name
+            shutil.move(str(staged_path), destination)
+            generated.append(clip_metadata)
 
     if progress_callback:
         progress_callback("Finishing up", len(generated), len(generated))

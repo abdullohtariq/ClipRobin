@@ -42,7 +42,7 @@ Look for:
 - a satisfying conclusion/payoff
 
 Return ONLY valid JSON matching this schema:
-{"clips":[{"title":"short title","start":0.0,"end":20.4,"reason":"brief explanation"}]}
+{"clips":[{"id":"clip_001","title":"short title","start":0.0,"end":20.4,"reason":"brief explanation"}]}
 
 Do not rewrite the transcript.
 Do not create timestamps that do not exist.
@@ -83,8 +83,15 @@ def validate_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
         text = segment.get("text")
         if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
             raise AIAnalyzerError("Transcript timestamps must be numbers")
-        if start < 0 or start >= end or start < previous_end:
+        if start < 0 or start >= end:
             raise AIAnalyzerError("Transcript timestamps must be ordered and valid")
+        if start < previous_end:
+            # Clamp slight overlaps between consecutive speech segments
+            start = previous_end
+            if start >= end:
+                end = start + 0.05
+            segment["start"] = start
+            segment["end"] = end
         if not isinstance(text, str) or not text.strip():
             raise AIAnalyzerError("Transcript segment text must be non-empty")
         previous_end = end
@@ -182,9 +189,18 @@ def validate_analysis(analysis: dict[str, Any], segments: list[dict[str, Any]]) 
     if not isinstance(clips, list):
         raise AIAnalyzerError("AI response must contain a clips array")
 
-    valid_boundaries = {value for segment in segments for value in (segment["start"], segment["end"])}
+    sorted_boundaries = sorted({float(value) for segment in segments for value in (segment["start"], segment["end"])})
+    if not sorted_boundaries:
+        raise AIAnalyzerError("Transcript has no valid boundaries")
+
+    def snap_to_boundary(timestamp: float, tolerance: float = 3.0) -> float:
+        closest = min(sorted_boundaries, key=lambda boundary: abs(boundary - timestamp))
+        if abs(closest - timestamp) <= tolerance:
+            return closest
+        return timestamp
+
     validated_clips = []
-    for clip in clips:
+    for index, clip in enumerate(clips, start=1):
         if not isinstance(clip, dict):
             raise AIAnalyzerError("Each clip must be an object")
         title = clip.get("title")
@@ -195,14 +211,25 @@ def validate_analysis(analysis: dict[str, Any], segments: list[dict[str, Any]]) 
             raise AIAnalyzerError("Each clip needs a title")
         if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
             raise AIAnalyzerError("Clip timestamps must be numbers")
-        if start >= end or start not in valid_boundaries or end not in valid_boundaries:
+
+        snapped_start = snap_to_boundary(float(start))
+        snapped_end = snap_to_boundary(float(end))
+
+        if snapped_start >= snapped_end:
+            raise AIAnalyzerError("Clip timestamps must have a valid positive duration")
+
+        valid_boundaries_set = set(sorted_boundaries)
+        if snapped_start not in valid_boundaries_set or snapped_end not in valid_boundaries_set:
             raise AIAnalyzerError("Clip timestamps must match transcript boundaries")
         if not isinstance(reason, str) or not reason.strip():
             raise AIAnalyzerError("Each clip needs a reason")
+
+        clip_id = clip.get("id") or f"clip_{index:03d}"
         validated_clips.append({
+            "id": str(clip_id),
             "title": title.strip(),
-            "start": start,
-            "end": end,
+            "start": snapped_start,
+            "end": snapped_end,
             "reason": reason.strip(),
         })
 

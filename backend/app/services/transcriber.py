@@ -1,4 +1,5 @@
 import json
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
@@ -6,6 +7,17 @@ from faster_whisper import WhisperModel
 
 
 MODEL_NAME = "tiny"
+_MODEL_INSTANCE: WhisperModel | None = None
+_MODEL_LOCK = threading.Lock()
+
+
+def get_whisper_model(model_name: str = MODEL_NAME) -> WhisperModel:
+    global _MODEL_INSTANCE
+    if _MODEL_INSTANCE is None:
+        with _MODEL_LOCK:
+            if _MODEL_INSTANCE is None:
+                _MODEL_INSTANCE = WhisperModel(model_name, device="cpu", compute_type="int8")
+    return _MODEL_INSTANCE
 
 
 def transcribe_video(
@@ -16,7 +28,7 @@ def transcribe_video(
     output_directory.mkdir(parents=True, exist_ok=True)
     if progress_callback:
         progress_callback("Loading speech model", 0)
-    model = WhisperModel(MODEL_NAME, device="cpu", compute_type="int8")
+    model = get_whisper_model()
     segments, info = model.transcribe(
         str(video_path),
         vad_filter=True,

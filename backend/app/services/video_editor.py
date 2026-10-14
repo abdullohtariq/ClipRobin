@@ -33,6 +33,20 @@ def find_ffmpeg() -> str:
     )
 
 
+def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-i", str(source_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        return "Audio:" in result.stderr
+    except Exception:
+        return True
+
+
 def _copy_font_file(destination_directory: Path) -> str | None:
     if os.name == "nt":
         windows_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
@@ -261,6 +275,7 @@ def create_clip(
             )
             filter_script = subtitle_directory / "video-filters.txt"
             filter_script.write_text(filter_graph, encoding="utf-8")
+            has_audio = has_audio_stream(source_path, ffmpeg_path)
             command = [
                 ffmpeg_path,
                 "-y",
@@ -278,14 +293,21 @@ def create_clip(
                 "medium",
                 "-crf",
                 "23",
-                "-c:a",
-                "libmp3lame",
-                "-b:a",
-                "192k",
+            ]
+            if has_audio:
+                command.extend([
+                    "-c:a",
+                    "libmp3lame",
+                    "-b:a",
+                    "192k",
+                ])
+            else:
+                command.extend(["-an"])
+            command.extend([
                 "-movflags",
                 "+faststart",
                 str(output_path),
-            ]
+            ])
             if cancel_event is not None and cancel_event.is_set():
                 raise ClipGenerationCancelled("Clip generation was cancelled")
             process = subprocess.Popen(
