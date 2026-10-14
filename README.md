@@ -104,7 +104,7 @@ Clip Robin is in early development, but the first end-to-end filesystem pipeline
 - Mock transcript analysis that creates `analysis.json`.
 - Background FFmpeg clip generation with progress reporting, cancellation with generated-clip cleanup, and regeneration that replaces existing clips.
 - Optional burned-in captions that wrap within the video, use bold text, and pop-highlight each spoken word in yellow.
-- Project-specific clip previews, playback controls, and MP4 downloads.
+- Project-specific clip previews, playback controls, individual MP4 downloads, and a ZIP download of all clips.
 - Project listing and deletion, plus basic Settings pages.
 - OpenAI, DeepSeek, and Gemini analyzer adapters are implemented but not called by the mock clip-generation flow.
 
@@ -209,18 +209,18 @@ The frontend, Tauri config, and Rust package share one app version. From
 `frontend`, update all version manifests together before a release:
 
 ```powershell
-npm run version:set -- 0.1.12
+npm run version:set -- 0.1.13
 npm run version:check
 ```
 
 Commit and push the version change, then create and push its matching version
-tag from the repository root. A `v0.1.12` tag builds and publishes the signed
+tag from the repository root. A `v0.1.13` tag builds and publishes the signed
 Windows installer and updater metadata as a GitHub Release:
 
 ```powershell
-git tag v0.1.12
+git tag v0.1.13
 git push origin main
-git push origin v0.1.12
+git push origin v0.1.13
 ```
 
 The Tauri desktop app checks for updates when it opens and every six hours.

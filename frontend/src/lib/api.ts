@@ -305,3 +305,8 @@ export async function clipUrl(projectId: string, filename: string): Promise<stri
 export async function clipDownloadUrl(projectId: string, filename: string): Promise<string> {
   return `${await clipUrl(projectId, filename)}?download=true`;
 }
+
+export async function clipsArchiveDownloadUrl(projectId: string): Promise<string> {
+  const apiUrl = await getApiUrl();
+  return `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/download-all`;
+}
