@@ -170,6 +170,7 @@ function ProjectClips({ projectId }: { projectId: string }) {
     projectId ? `Loading clips for ${projectId}...` : "Choose a project to view its clips.",
   );
   const [showSubtitles, setShowSubtitles] = useState(true);
+  const [showWatermark, setShowWatermark] = useState(true);
   const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
   const [generating, setGenerating] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
@@ -242,7 +243,13 @@ function ProjectClips({ projectId }: { projectId: string }) {
       total_clips: 0,
     });
     try {
-      const result = await generateClips(projectId, showSubtitles, setGenerationProgress);
+      const result = await generateClips(
+        projectId,
+        showSubtitles,
+        setGenerationProgress,
+        60,
+        showWatermark,
+      );
       setClips(result.clips);
       setStatus(result.cancelled
         ? "Generation cancelled. Generated clips were removed."
@@ -335,6 +342,16 @@ function ProjectClips({ projectId }: { projectId: string }) {
                 className="size-4 rounded border-[#232326] bg-zinc-900 accent-[#10b981]"
               />
               Burn animated captions into clips
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={showWatermark}
+                onChange={(event) => setShowWatermark(event.target.checked)}
+                disabled={generating}
+                className="size-4 rounded border-[#232326] bg-zinc-900 accent-[#10b981]"
+              />
+              Add a watermark: Made with Clip Robin
             </label>
           </form>
         )}

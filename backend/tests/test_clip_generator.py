@@ -108,3 +108,28 @@ def test_generate_clips_successful_atomic_swap(tmp_path: Path, monkeypatch: pyte
     assert new_clip.is_file()
     assert new_clip.read_bytes() == b"new clip content"
 
+
+def test_generate_clips_passes_show_watermark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 10.0, "reason": "Test"}
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    captured_kwargs = {}
+
+    def mock_create_clip(source, output, start, end, **kwargs):
+        captured_kwargs.update(kwargs)
+        output.write_bytes(b"content")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    generate_clips(tmp_path, show_watermark=True)
+    assert captured_kwargs.get("show_watermark") is True
+
+

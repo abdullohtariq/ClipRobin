@@ -64,6 +64,7 @@ def _load_transcript_segments(project_directory: Path) -> list[dict[str, Any]]:
 def generate_clips(
     project_directory: Path,
     show_subtitles: bool = True,
+    show_watermark: bool = False,
     progress_callback: Callable[[str, int, int], None] | None = None,
     cancel_event: threading.Event | None = None,
     max_clip_seconds: float = 60.0,
@@ -129,6 +130,7 @@ def generate_clips(
                     clip["end"],
                     subtitle_segments=subtitle_segments if show_subtitles else None,
                     show_subtitles=show_subtitles,
+                    show_watermark=show_watermark,
                     cancel_event=cancel_event,
                 )
                 if cancel_event is not None and cancel_event.is_set():

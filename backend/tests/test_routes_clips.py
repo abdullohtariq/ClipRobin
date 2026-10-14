@@ -56,3 +56,16 @@ def test_download_all_no_clips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     response = client.get(f"/api/projects/{project_id}/clips/download-all")
     assert response.status_code == 404
+
+
+def test_generate_clips_accepts_show_watermark_param(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_id, _ = create_project()
+
+    response = client.post(
+        f"/api/projects/{project_id}/generate-clips",
+        params={"show_watermark": "true", "clip_duration_seconds": 60},
+    )
+    assert response.status_code == 200
+    assert "job_id" in response.json()
+

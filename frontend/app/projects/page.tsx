@@ -23,6 +23,7 @@ export default function Projects() {
   const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [subtitleOptions, setSubtitleOptions] = useState<Record<string, boolean>>({});
+  const [watermarkOptions, setWatermarkOptions] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     getProjects()
@@ -111,6 +112,8 @@ export default function Projects() {
         projectId,
         subtitleOptions[projectId] ?? true,
         setGenerationProgress,
+        60,
+        watermarkOptions[projectId] ?? true,
       );
       setProjects((current) => current.map((project) => project.project_id === projectId
         ? { ...project, clips: result.clips.length }
@@ -233,6 +236,29 @@ export default function Projects() {
                     <span
                       className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
                         (subtitleOptions[project.project_id] ?? true) ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="mt-3 flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3.5">
+                  <span className="text-xs text-zinc-300">Add a watermark: Made with Clip Robin</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={watermarkOptions[project.project_id] ?? true}
+                    disabled={generatingProject !== null || activeGeneration !== undefined || isTranscribing}
+                    onClick={() => setWatermarkOptions((current) => ({
+                      ...current,
+                      [project.project_id]: !(watermarkOptions[project.project_id] ?? true),
+                    }))}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
+                      (watermarkOptions[project.project_id] ?? true) ? "bg-[#10b981]" : "bg-zinc-800"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                        (watermarkOptions[project.project_id] ?? true) ? "translate-x-4" : "translate-x-0"
                       }`}
                     />
                   </button>

@@ -58,6 +58,7 @@ def generate_project_clips(
     project_id: str,
     background_tasks: BackgroundTasks,
     show_subtitles: bool = True,
+    show_watermark: bool = False,
     clip_duration_seconds: int = 60,
 ) -> dict[str, str]:
     if clip_duration_seconds not in {15, 30, 60, 90}:
@@ -101,6 +102,7 @@ def generate_project_clips(
         show_subtitles,
         cancel_event,
         clip_duration_seconds,
+        show_watermark,
     )
     return {"job_id": job_id}
 
@@ -112,6 +114,7 @@ def run_clip_generation(
     show_subtitles: bool,
     cancel_event: threading.Event,
     clip_duration_seconds: int = 60,
+    show_watermark: bool = False,
 ) -> None:
     def report_progress(step: str, completed_clips: int, total_clips: int) -> None:
         if cancel_event.is_set():
@@ -139,6 +142,7 @@ def run_clip_generation(
         clips = generate_clips(
             project_directory,
             show_subtitles=show_subtitles,
+            show_watermark=show_watermark,
             progress_callback=report_progress,
             cancel_event=cancel_event,
             max_clip_seconds=clip_duration_seconds,

@@ -47,6 +47,25 @@ def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
         return True
 
 
+def find_watermark_file() -> Path | None:
+    env_path = os.environ.get("CLIPROBIN_WATERMARK_PATH")
+    if env_path and Path(env_path).is_file():
+        return Path(env_path).resolve()
+
+    root = Path(__file__).resolve().parents[3]
+    candidates = [
+        root / "watermark.png",
+        root / "clip_robin_watermark.png",
+        root / "frontend" / "public" / "watermark.png",
+        Path("watermark.png").resolve(),
+        Path("clip_robin_watermark.png").resolve(),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
 def _copy_font_file(destination_directory: Path) -> str | None:
     if os.name == "nt":
         windows_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
@@ -144,20 +163,16 @@ def _layout_subtitle_words(
     return lines
 
 
-def _build_filter_graph(
+def _build_subtitle_filters(
     start_time: float,
     end_time: float,
     subtitle_segments: list[dict[str, object]] | None = None,
     show_subtitles: bool = True,
     subtitle_directory: Path | None = None,
     font_file: str | None = None,
-) -> str:
-    base_filter = (
-        "scale=720:1280:force_original_aspect_ratio=decrease,"
-        "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
-    )
+) -> list[str]:
     if not show_subtitles or not subtitle_segments or subtitle_directory is None:
-        return base_filter
+        return []
 
     font_fragment = f"fontfile='{font_file}':" if font_file else ""
     subtitle_filters = []
@@ -232,6 +247,29 @@ def _build_filter_graph(
                     )
                 )
 
+    return subtitle_filters
+
+
+def _build_filter_graph(
+    start_time: float,
+    end_time: float,
+    subtitle_segments: list[dict[str, object]] | None = None,
+    show_subtitles: bool = True,
+    subtitle_directory: Path | None = None,
+    font_file: str | None = None,
+) -> str:
+    base_filter = (
+        "scale=720:1280:force_original_aspect_ratio=decrease,"
+        "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+    )
+    subtitle_filters = _build_subtitle_filters(
+        start_time,
+        end_time,
+        subtitle_segments=subtitle_segments,
+        show_subtitles=show_subtitles,
+        subtitle_directory=subtitle_directory,
+        font_file=font_file,
+    )
     if not subtitle_filters:
         return base_filter
     return base_filter + "," + ",".join(subtitle_filters)
@@ -244,6 +282,7 @@ def create_clip(
     end_time: float,
     subtitle_segments: list[dict[str, object]] | None = None,
     show_subtitles: bool = True,
+    show_watermark: bool = False,
     cancel_event: threading.Event | None = None,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
@@ -255,59 +294,128 @@ def create_clip(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     source_path = source_path.resolve()
     output_path = output_path.resolve()
+    watermark_path = find_watermark_file() if show_watermark else None
+
     try:
         with tempfile.TemporaryDirectory(
             prefix="cliprobin-subtitles-",
             dir=output_path.parent,
         ) as temporary_directory:
             subtitle_directory = Path(temporary_directory)
-            filter_graph = _build_filter_graph(
+            font_file = (
+                _copy_font_file(subtitle_directory)
+                if show_subtitles and subtitle_segments
+                else None
+            )
+            subtitle_filters = _build_subtitle_filters(
                 start_time,
                 end_time,
-                subtitle_segments,
+                subtitle_segments=subtitle_segments,
                 show_subtitles=show_subtitles,
                 subtitle_directory=subtitle_directory,
-                font_file=(
-                    _copy_font_file(subtitle_directory)
-                    if show_subtitles and subtitle_segments
-                    else None
-                ),
+                font_file=font_file,
             )
-            filter_script = subtitle_directory / "video-filters.txt"
-            filter_script.write_text(filter_graph, encoding="utf-8")
             has_audio = has_audio_stream(source_path, ffmpeg_path)
-            command = [
-                ffmpeg_path,
-                "-y",
-                "-ss",
-                str(start_time),
-                "-i",
-                str(source_path),
-                "-t",
-                str(end_time - start_time),
-                "-/filter:v",
-                filter_script.name,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "medium",
-                "-crf",
-                "23",
-            ]
-            if has_audio:
+
+            if watermark_path and watermark_path.is_file():
+                # Watermark enabled: scale to 240px wide (-2 ensures even height), overlay at horizontal center and 20% from top
+                base_filter_complex = (
+                    "[0:v]scale=720:1280:force_original_aspect_ratio=decrease,"
+                    "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[base];"
+                    "[1:v]scale=240:-2[wm];"
+                    "[base][wm]overlay=(W-w)/2:round(H*0.20)"
+                )
+                if subtitle_filters:
+                    filter_graph = base_filter_complex + "," + ",".join(subtitle_filters) + "[v]"
+                else:
+                    filter_graph = base_filter_complex + "[v]"
+
+                filter_script = subtitle_directory / "filter-complex.txt"
+                filter_script.write_text(filter_graph, encoding="utf-8")
+
+                command = [
+                    ffmpeg_path,
+                    "-y",
+                    "-ss",
+                    str(start_time),
+                    "-i",
+                    str(source_path),
+                    "-i",
+                    str(watermark_path),
+                    "-t",
+                    str(end_time - start_time),
+                    "-/filter_complex",
+                    filter_script.name,
+                    "-map",
+                    "[v]",
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "23",
+                ]
+                if has_audio:
+                    command.extend([
+                        "-map",
+                        "0:a?",
+                        "-c:a",
+                        "libmp3lame",
+                        "-b:a",
+                        "192k",
+                    ])
+                else:
+                    command.extend(["-an"])
                 command.extend([
-                    "-c:a",
-                    "libmp3lame",
-                    "-b:a",
-                    "192k",
+                    "-movflags",
+                    "+faststart",
+                    str(output_path),
                 ])
             else:
-                command.extend(["-an"])
-            command.extend([
-                "-movflags",
-                "+faststart",
-                str(output_path),
-            ])
+                base_filter = (
+                    "scale=720:1280:force_original_aspect_ratio=decrease,"
+                    "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+                )
+                filter_graph = (
+                    base_filter + "," + ",".join(subtitle_filters)
+                    if subtitle_filters
+                    else base_filter
+                )
+                filter_script = subtitle_directory / "video-filters.txt"
+                filter_script.write_text(filter_graph, encoding="utf-8")
+
+                command = [
+                    ffmpeg_path,
+                    "-y",
+                    "-ss",
+                    str(start_time),
+                    "-i",
+                    str(source_path),
+                    "-t",
+                    str(end_time - start_time),
+                    "-/filter:v",
+                    filter_script.name,
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "medium",
+                    "-crf",
+                    "23",
+                ]
+                if has_audio:
+                    command.extend([
+                        "-c:a",
+                        "libmp3lame",
+                        "-b:a",
+                        "192k",
+                    ])
+                else:
+                    command.extend(["-an"])
+                command.extend([
+                    "-movflags",
+                    "+faststart",
+                    str(output_path),
+                ])
             if cancel_event is not None and cancel_event.is_set():
                 raise ClipGenerationCancelled("Clip generation was cancelled")
             process = subprocess.Popen(

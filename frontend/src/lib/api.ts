@@ -255,10 +255,11 @@ export async function generateClips(
   showSubtitles: boolean = true,
   onProgress?: (job: ClipGenerationJob) => void,
   clipDurationSeconds: 15 | 30 | 60 | 90 = 60,
+  showWatermark: boolean = false,
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}`,
     { method: "POST" },
   );
   if (!response.ok) {

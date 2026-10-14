@@ -37,6 +37,7 @@ export default function Home() {
   const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
   const [clipDurationSeconds, setClipDurationSeconds] = useState<15 | 30 | 60 | 90>(30);
   const [showCaptions, setShowCaptions] = useState(true);
+  const [showWatermark, setShowWatermark] = useState(true);
   const [transcriptionProgress, setTranscriptionProgress] = useState<VideoProcessingProgress | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -231,6 +232,7 @@ export default function Home() {
           });
         },
         clipDurationSeconds,
+        showWatermark,
       );
 
       if (generation.cancelled) {
@@ -374,6 +376,7 @@ export default function Home() {
           });
         },
         clipDurationSeconds,
+        showWatermark,
       );
 
       if (generation.cancelled) {
@@ -754,6 +757,34 @@ export default function Home() {
                   <span
                     className={`pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md transition duration-150 ease-in-out ${
                       showCaptions ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Watermark Toggle Switch */}
+              <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-4 transition-all duration-150">
+                <div className="pr-4">
+                  <p className="text-sm font-medium text-white">Add a watermark: Made with Clip Robin</p>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    Overlay Clip Robin watermark at top-center of vertical video
+                  </p>
+                </div>
+
+                {/* Accessible Toggle Switch */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showWatermark}
+                  disabled={isProcessingVideo}
+                  onClick={() => setShowWatermark((prev) => !prev)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] focus:ring-offset-2 focus:ring-offset-[#111113] disabled:cursor-not-allowed disabled:opacity-50 ${
+                    showWatermark ? "bg-[#10b981]" : "bg-zinc-800"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md transition duration-150 ease-in-out ${
+                      showWatermark ? "translate-x-5" : "translate-x-0"
                     }`}
                   />
                 </button>
