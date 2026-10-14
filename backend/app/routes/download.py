@@ -1,14 +1,68 @@
+import logging
 import shutil
+import threading
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.services.downloader import download_video
 from app.services.project_manager import create_project
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
+
+DOWNLOAD_JOBS: dict[str, dict[str, Any]] = {}
+DOWNLOAD_JOBS_LOCK = threading.Lock()
+
+
+def update_download_job(project_id: str, **updates: Any) -> None:
+    with DOWNLOAD_JOBS_LOCK:
+        job = DOWNLOAD_JOBS.get(project_id)
+        if job is not None:
+            job.update(updates)
+
+
+def run_background_download(project_id: str, url: str, output_path: Path, project_directory: Path) -> None:
+    def on_progress(data: dict[str, Any]) -> None:
+        update_download_job(
+            project_id,
+            status=data.get("status", "downloading"),
+            step=data.get("step", "Downloading video..."),
+            progress=data.get("progress", 0.0),
+            title=data.get("title") or DOWNLOAD_JOBS.get(project_id, {}).get("title"),
+        )
+
+    try:
+        update_download_job(
+            project_id,
+            status="downloading",
+            step="Extracting video info...",
+            progress=5.0,
+        )
+        info = download_video(url, output_path, progress_callback=on_progress)
+        update_download_job(
+            project_id,
+            status="completed",
+            step="Download complete",
+            progress=100.0,
+            file=output_path.name,
+            title=info.get("title"),
+            duration=info.get("duration"),
+        )
+    except Exception as error:
+        logger.exception("Video download failed for project %s", project_id)
+        shutil.rmtree(project_directory, ignore_errors=True)
+        update_download_job(
+            project_id,
+            status="failed",
+            step="Video download failed",
+            progress=0.0,
+            error=str(error) or error.__class__.__name__,
+        )
 
 
 class DownloadRequest(BaseModel):
@@ -31,25 +85,57 @@ class DownloadResponse(BaseModel):
     project_id: str
     status: str
     file: str
+    title: str | None = None
+    step: str | None = None
+    progress: float | None = None
 
 
 def create_project_directory() -> tuple[str, Path]:
     return create_project()
 
 
-@router.post("/download", response_model=DownloadResponse)
-def download(request: DownloadRequest) -> DownloadResponse:
+@router.post("/download")
+def download(request: DownloadRequest, background_tasks: BackgroundTasks) -> JSONResponse:
     project_id, project_directory = create_project_directory()
     output_path = project_directory / "source.mp4"
 
-    try:
-        download_video(request.url, output_path)
-    except Exception as error:
-        shutil.rmtree(project_directory, ignore_errors=True)
-        raise HTTPException(status_code=502, detail="Video download failed") from error
+    with DOWNLOAD_JOBS_LOCK:
+        DOWNLOAD_JOBS[project_id] = {
+            "project_id": project_id,
+            "status": "queued",
+            "step": "Starting download...",
+            "progress": 0.0,
+            "url": request.url,
+            "file": output_path.name,
+            "title": None,
+            "error": None,
+        }
 
-    return DownloadResponse(
-        project_id=project_id,
-        status="downloaded",
-        file=output_path.name,
+    background_tasks.add_task(
+        run_background_download,
+        project_id,
+        request.url,
+        output_path,
+        project_directory,
     )
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "project_id": project_id,
+            "status": "queued",
+            "step": "Starting download...",
+            "progress": 0.0,
+            "file": output_path.name,
+        },
+    )
+
+
+@router.get("/download/{project_id}")
+def get_download_status(project_id: str) -> JSONResponse:
+    with DOWNLOAD_JOBS_LOCK:
+        job = DOWNLOAD_JOBS.get(project_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Download job not found")
+        return JSONResponse(status_code=200, content=dict(job))
+

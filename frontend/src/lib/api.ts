@@ -36,6 +36,7 @@ export type DownloadResponse = {
   project_id: string;
   status: string;
   file: string;
+  title?: string;
 };
 
 export type TranscriptionResponse = {
@@ -80,13 +81,24 @@ export type ClipGenerationJob = {
 
 export type ActiveJob = {
   id: string;
-  kind: "transcription" | "generation";
+  kind: "download" | "transcription" | "generation";
   project_id: string;
-  status: "queued" | "processing" | "cancelling";
+  status: "queued" | "downloading" | "processing" | "cancelling";
   step: string;
   progress: number;
   completed_clips?: number;
   total_clips?: number;
+  title?: string;
+};
+
+export type DownloadJob = {
+  project_id: string;
+  status: "queued" | "downloading" | "processing" | "completed" | "failed";
+  step: string;
+  progress: number;
+  file?: string;
+  title?: string;
+  error?: string;
 };
 
 export type Project = {
@@ -108,7 +120,20 @@ export async function getActiveJobs(): Promise<ActiveJob[]> {
   return result.jobs;
 }
 
-export async function downloadVideo(url: string): Promise<DownloadResponse> {
+export async function getDownloadJob(projectId: string): Promise<DownloadJob> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/download/${encodeURIComponent(projectId)}`);
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not check download progress"));
+  }
+  return response.json();
+}
+
+export async function downloadVideo(
+  url: string,
+  onProgress?: (job: DownloadJob) => void,
+): Promise<DownloadResponse> {
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/download`, {
     method: "POST",
@@ -119,15 +144,44 @@ export async function downloadVideo(url: string): Promise<DownloadResponse> {
   });
 
   if (!response.ok) {
-    throw new Error("Video download failed");
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Video download failed"));
   }
 
-  return response.json();
+  const initial = await response.json() as DownloadJob;
+  onProgress?.(initial);
+
+  if (initial.status === "completed") {
+    return {
+      project_id: initial.project_id,
+      status: "downloaded",
+      file: initial.file || "source.mp4",
+      title: initial.title,
+    };
+  }
+
+  let job: DownloadJob = initial;
+  while (job.status !== "completed" && job.status !== "failed") {
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
+    job = await getDownloadJob(initial.project_id);
+    onProgress?.(job);
+  }
+
+  if (job.status === "failed") {
+    throw new Error(job.error || "Video download failed");
+  }
+
+  return {
+    project_id: job.project_id,
+    status: "downloaded",
+    file: job.file || "source.mp4",
+    title: job.title,
+  };
 }
 
 export async function transcribeVideo(
   projectId: string,
-): Promise<TranscriptionResponse> {
+): Promise<LocalTranscriptionJob> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
     `${apiUrl}/api/projects/${projectId}/transcribe`,
@@ -135,7 +189,8 @@ export async function transcribeVideo(
   );
 
   if (!response.ok) {
-    throw new Error("Video transcription failed");
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Video transcription failed"));
   }
 
   return response.json();

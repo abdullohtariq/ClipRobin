@@ -1,53 +1,74 @@
-import re
 from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
 
-from app.services.transcriber import transcribe_video
+from app.routes.local_video import JOBS_LOCK, TRANSCRIPTION_JOBS, run_local_transcription
+from app.services.project_manager import get_project_directory
 
 router = APIRouter(prefix="/api/projects")
-PROJECTS_DIR = Path(__file__).resolve().parents[2] / "data" / "projects"
-PROJECT_ID_PATTERN = re.compile(r"^project_\d+$")
 
 
-class TranscriptionResponse(BaseModel):
-    project_id: str
-    status: str
-    text_file: str
-    json_file: str
-    segments: int
-
-
-def get_project_directory(project_id: str) -> Path:
-    if not PROJECT_ID_PATTERN.fullmatch(project_id):
-        raise HTTPException(status_code=400, detail="Invalid project ID")
-
-    project_directory = (PROJECTS_DIR / project_id).resolve()
-    if project_directory.parent != PROJECTS_DIR.resolve():
-        raise HTTPException(status_code=400, detail="Invalid project ID")
-
-    if not project_directory.is_dir():
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    return project_directory
-
-
-@router.post("/{project_id}/transcribe", response_model=TranscriptionResponse)
-def transcribe(project_id: str) -> TranscriptionResponse:
-    project_directory = get_project_directory(project_id)
-    source_path = project_directory / "source.mp4"
-
-    if not source_path.is_file():
-        raise HTTPException(status_code=404, detail="Source video not found")
-
+@router.post("/{project_id}/transcribe")
+def transcribe(project_id: str, background_tasks: BackgroundTasks) -> JSONResponse:
     try:
-        result = transcribe_video(source_path, project_directory / "transcription")
-    except Exception as error:
-        raise HTTPException(status_code=502, detail="Video transcription failed") from error
+        project_directory = get_project_directory(project_id)
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
-    return TranscriptionResponse(
-        project_id=project_id,
-        status="transcribed",
-        **result,
+    source_files = list(project_directory.glob("source.*"))
+    if not source_files:
+        raise HTTPException(status_code=404, detail="Source video not found")
+    source_path = source_files[0]
+
+    transcript_file = project_directory / "transcription" / "transcript.json"
+    if transcript_file.exists():
+        with JOBS_LOCK:
+            TRANSCRIPTION_JOBS[project_id] = {
+                "project_id": project_id,
+                "status": "completed",
+                "step": "Complete",
+                "progress": 100,
+                "result": {
+                    "project_id": project_id,
+                    "status": "completed",
+                    "text_file": str(project_directory / "transcription" / "transcript.txt"),
+                    "json_file": str(transcript_file),
+                },
+            }
+        return JSONResponse(
+            status_code=200,
+            content=TRANSCRIPTION_JOBS[project_id],
+        )
+
+    with JOBS_LOCK:
+        active_job = TRANSCRIPTION_JOBS.get(project_id)
+        if active_job and active_job.get("status") in {"queued", "processing"}:
+            return JSONResponse(
+                status_code=200,
+                content=dict(active_job),
+            )
+
+        TRANSCRIPTION_JOBS[project_id] = {
+            "project_id": project_id,
+            "status": "queued",
+            "step": "Preparing transcription",
+            "progress": 0,
+        }
+
+    background_tasks.add_task(
+        run_local_transcription,
+        project_id,
+        source_path,
+        project_directory,
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "project_id": project_id,
+            "status": "queued",
+            "step": "Preparing transcription",
+            "progress": 0,
+        },
     )
