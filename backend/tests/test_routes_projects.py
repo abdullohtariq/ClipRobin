@@ -52,3 +52,4 @@ def test_delete_project_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
     response = client.delete("/api/projects/project_999")
     assert response.status_code == 404
+

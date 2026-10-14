@@ -20,3 +20,4 @@ test("version string format adheres to semver", async () => {
   const pkg = JSON.parse(await readFile(packagePath, "utf8"));
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, "Valid semver version format");
 });
+

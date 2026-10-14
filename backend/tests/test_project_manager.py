@@ -65,3 +65,4 @@ def test_list_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert projects[0]["source_type"] == "Local Video"
     assert projects[0]["clips"] == 1
     assert projects[0]["status"] == "Ready"
+

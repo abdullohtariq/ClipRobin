@@ -62,3 +62,4 @@ def test_analyze_nonexistent_project(tmp_path: Path, monkeypatch: pytest.MonkeyP
     }
     response = client.post("/api/analyze", json=payload)
     assert response.status_code == 404
+

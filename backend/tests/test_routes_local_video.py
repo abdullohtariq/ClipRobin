@@ -42,3 +42,4 @@ def test_transcribe_local_video_accepts_valid_video(tmp_path: Path, monkeypatch:
 def test_get_local_transcription_job_not_found():
     response = client.get("/api/local-video/jobs/project_nonexistent")
     assert response.status_code == 404
+

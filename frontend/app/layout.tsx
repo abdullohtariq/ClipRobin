@@ -24,9 +24,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body className={`${inter.className} bg-[#0a0a0a] text-white antialiased selection:bg-[#10b981]/20 selection:text-emerald-300`}>
-        <div className="min-h-screen flex">
-          {/* Sidebar */}
-          <aside className="w-64 border-r border-[#232326] bg-[#0a0a0a] p-6 shrink-0 flex flex-col justify-between">
+        <div className="h-screen flex overflow-hidden bg-[#0a0a0a]">
+          {/* Sidebar - permanently pinned to the left */}
+          <aside className="w-64 h-screen border-r border-[#232326] bg-[#0a0a0a] p-6 shrink-0 flex flex-col justify-between z-20 overflow-y-auto">
             <div>
               <div className="mb-8 flex items-center gap-3">
                 <Image
@@ -54,8 +54,8 @@ export default function RootLayout({
             </div>
           </aside>
 
-          {/* Main content */}
-          <div className="flex-1 bg-[#0a0a0a] min-h-screen">
+          {/* Main content - independently scrollable right pane */}
+          <div className="flex-1 h-screen overflow-y-auto bg-[#0a0a0a] min-w-0">
             <UpdateNotice />
             {children}
           </div>

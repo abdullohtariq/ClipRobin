@@ -107,3 +107,4 @@ def test_generate_clips_successful_atomic_swap(tmp_path: Path, monkeypatch: pyte
     new_clip = clips_dir / "clip_001.mp4"
     assert new_clip.is_file()
     assert new_clip.read_bytes() == b"new clip content"
+

@@ -56,3 +56,4 @@ def test_create_mock_analysis_tolerates_overlapping_segments(tmp_path: Path):
 def test_create_mock_analysis_missing_transcript(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="Transcript not found"):
         create_mock_analysis(tmp_path)
+

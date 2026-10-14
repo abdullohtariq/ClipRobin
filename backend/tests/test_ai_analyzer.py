@@ -114,3 +114,4 @@ def test_validate_analysis_snaps_floating_point_boundaries():
     assert validated["clips"][0]["end"] == 14.512
     assert validated["clips"][1]["start"] == 14.512
     assert validated["clips"][1]["end"] == 32.894
+
