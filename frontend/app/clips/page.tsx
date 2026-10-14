@@ -9,6 +9,7 @@ import {
   cancelClipGeneration,
   clipDownloadUrl,
   clipUrl,
+  clipsArchiveDownloadUrl,
   generateClips,
   getClips,
   getLatestClipGenerationJob,
@@ -166,6 +167,7 @@ function ProjectClips({ projectId }: { projectId: string }) {
   const [showSubtitles, setShowSubtitles] = useState(true);
   const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
 
   useEffect(() => {
     if (!projectId) {
@@ -265,6 +267,18 @@ function ProjectClips({ projectId }: { projectId: string }) {
     }
   };
 
+  const handleDownloadAll = async () => {
+    if (!projectId || downloadingAll || generating || clips.length === 0) return;
+    setDownloadingAll(true);
+    try {
+      window.location.assign(await clipsArchiveDownloadUrl(projectId));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not download clips");
+    } finally {
+      setDownloadingAll(false);
+    }
+  };
+
   return (
     <main className="min-h-screen p-10">
       <h2 className="text-3xl font-semibold">Clips</h2>
@@ -289,6 +303,16 @@ function ProjectClips({ projectId }: { projectId: string }) {
           >
             {generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}
           </button>
+          {clips.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleDownloadAll()}
+              disabled={generating || downloadingAll}
+              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {downloadingAll ? "Preparing download..." : "Download all"}
+            </button>
+          )}
           <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-300">
             <input
               type="checkbox"

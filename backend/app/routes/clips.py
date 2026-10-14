@@ -1,11 +1,14 @@
 import logging
+import tempfile
 import threading
 import uuid
 from pathlib import Path
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from app.services.clip_generator import generate_clips
 from app.services.project_manager import get_clips_directory, get_project_directory
@@ -240,6 +243,31 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "status": "ready",
         })
     return {"clips": clips}
+
+
+@router.get("/{project_id}/clips/download-all")
+def download_all_project_clips(project_id: str) -> FileResponse:
+    project_or_404(project_id)
+    clip_paths = sorted(get_clips_directory(project_id).glob("*.mp4"))
+    if not clip_paths:
+        raise HTTPException(status_code=404, detail="No clips are available to download")
+
+    archive_directory = tempfile.TemporaryDirectory(prefix="cliprobin-")
+    archive_path = Path(archive_directory.name) / f"{project_id}-clips.zip"
+    try:
+        with ZipFile(archive_path, "w", compression=ZIP_DEFLATED) as archive:
+            for clip_path in clip_paths:
+                archive.write(clip_path, arcname=clip_path.name)
+    except (OSError, RuntimeError, ValueError):
+        archive_directory.cleanup()
+        raise
+
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=f"{project_id}-clips.zip",
+        background=BackgroundTask(archive_directory.cleanup),
+    )
 
 
 @router.get("/{project_id}/clips/{clip_id}")
