@@ -7,6 +7,7 @@ import { ActiveJob, getActiveJobs } from "@/src/lib/api";
 export default function JobProgress() {
   const [jobs, setJobs] = useState<ActiveJob[]>([]);
   const [error, setError] = useState("");
+  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -37,7 +38,7 @@ export default function JobProgress() {
         }
       } finally {
         if (isMounted) {
-          timeoutId = window.setTimeout(() => void refreshJobs(), 1000);
+          timeoutId = window.setTimeout(() => void refreshJobs(), 700);
         }
       }
     };
@@ -55,60 +56,91 @@ export default function JobProgress() {
     return null;
   }
 
+  const hasDownloadJob = jobs.some((job) => job.kind === "download");
+  const downloadJob = jobs.find((job) => job.kind === "download");
+
   return (
     <div className="group fixed bottom-5 right-5 z-50">
       <section
         aria-label="Active job progress"
-        className="absolute bottom-[44px] right-0 hidden w-80 rounded-xl border border-zinc-700 bg-zinc-900 p-4 shadow-2xl group-hover:block group-focus-within:block"
+        className={`absolute bottom-[52px] right-0 w-84 rounded-[12px] border border-[#232326] bg-[#111113] p-4 shadow-2xl transition-all duration-150 ${
+          isOpen ? "block" : "hidden group-hover:block group-focus-within:block"
+        }`}
       >
-        <h2 className="mb-3 text-sm font-semibold text-white">
-          {jobs.length > 0 ? "In progress" : "Progress unavailable"}
-        </h2>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
+            {jobs.length > 0 ? "Active Jobs" : "Status unavailable"}
+          </h2>
+          {hasDownloadJob && (
+            <span className="inline-flex items-center gap-1 rounded bg-[#10b981]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#10b981]">
+              <span className="size-1.5 rounded-full bg-[#10b981] animate-ping" />
+              Downloading
+            </span>
+          )}
+        </div>
+
         {error && (
           <p role="status" className="mb-3 text-xs text-amber-300">
             {error}
           </p>
         )}
-        <ul className="space-y-4">
+
+        <ul className="space-y-3.5">
           {jobs.map((job) => (
-            <li key={`${job.kind}-${job.id}`}>
+            <li key={`${job.kind}-${job.id}`} className="rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-white">
-                    {job.kind === "transcription" ? "Transcribing video" : "Generating clips"}
+                  <p className="text-xs font-semibold text-white">
+                    {job.kind === "download"
+                      ? "Downloading video"
+                      : job.kind === "transcription"
+                      ? "Transcribing audio"
+                      : "Generating clips"}
                   </p>
-                  <p className="mt-1 truncate text-xs text-zinc-400">
-                    {job.project_id} · {job.step}
+                  <p className="mt-0.5 truncate text-[11px] text-zinc-400" title={job.title || job.step}>
+                    <span className="font-mono text-zinc-300">
+                      {job.title ? `${job.title.slice(0, 24)}...` : job.project_id}
+                    </span>{" "}
+                    · {job.step}
                   </p>
                 </div>
-                <span className="shrink-0 text-xs tabular-nums text-zinc-300">
-                  {job.progress}%
+                <span className="shrink-0 text-xs font-mono font-medium text-emerald-400">
+                  {Math.round(job.progress)}%
                 </span>
               </div>
+
               <div
                 role="progressbar"
-                aria-label={`${job.kind === "transcription" ? "Transcription" : "Clip generation"} progress for ${job.project_id}`}
+                aria-label={`${
+                  job.kind === "download"
+                    ? "Download"
+                    : job.kind === "transcription"
+                    ? "Transcription"
+                    : "Clip generation"
+                } progress for ${job.project_id}`}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={job.progress}
-                className="mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-700"
+                aria-valuenow={Math.round(job.progress)}
+                className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-zinc-800"
               >
                 <div
-                  className="h-full rounded-full bg-emerald-400 transition-[width] duration-500"
-                  style={{ width: `${job.progress}%` }}
+                  className="h-full rounded-full bg-[#10b981] transition-[width] duration-200"
+                  style={{ width: `${Math.max(4, Math.round(job.progress))}%` }}
                 />
               </div>
+
               {job.kind === "generation" && (job.total_clips ?? 0) > 0 && (
-                <p className="mt-1 text-right text-xs text-zinc-500">
-                  {job.completed_clips ?? 0} of {job.total_clips} clips
+                <p className="mt-1.5 text-right text-[11px] text-zinc-500">
+                  {job.completed_clips ?? 0} of {job.total_clips} clips rendered
                 </p>
               )}
+
               {job.kind === "generation" && (
                 <Link
                   href="/projects"
-                  className="mt-2 inline-block text-xs text-emerald-300 underline hover:text-emerald-200"
+                  className="mt-1.5 inline-block text-[11px] text-emerald-400 underline hover:text-emerald-300"
                 >
-                  Go to Projects
+                  Go to Projects &rarr;
                 </Link>
               )}
             </li>
@@ -116,31 +148,67 @@ export default function JobProgress() {
         </ul>
       </section>
 
+      {/* Circle button on bottom right */}
       <button
         type="button"
-        aria-label={`${jobs.length} active ${jobs.length === 1 ? "job" : "jobs"}. Focus or hover to view progress.`}
-        className="flex h-11 w-11 items-center justify-center rounded-full border border-zinc-600 bg-zinc-800 text-emerald-300 shadow-lg transition hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+        onClick={() => setIsOpen((prev) => !prev)}
+        aria-label={`${jobs.length} active ${jobs.length === 1 ? "job" : "jobs"}. ${
+          hasDownloadJob ? `Video downloading (${Math.round(downloadJob?.progress || 0)}%).` : ""
+        } Click or hover to view progress.`}
+        className={`relative flex h-11 w-11 items-center justify-center rounded-full border bg-[#111113] text-emerald-400 shadow-xl transition-all duration-150 hover:border-zinc-700 hover:bg-[#18181b] focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+          hasDownloadJob
+            ? "border-[#10b981] ring-2 ring-[#10b981]/50 ring-offset-2 ring-offset-[#0a0a0a]"
+            : "border-[#232326]"
+        }`}
       >
-        <svg
-          aria-hidden="true"
-          viewBox="0 0 24 24"
-          fill="none"
-          className={`h-5 w-5 ${jobs.length > 0 ? "animate-spin" : ""}`}
-        >
-          {jobs.length > 0 ? (
-            <>
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity=".25" strokeWidth="3" />
-              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeLinecap="round" strokeWidth="3" />
-            </>
-          ) : (
-            <>
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
-              <path d="M12 8v5m0 3h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
-            </>
-          )}
-        </svg>
-        {jobs.length > 1 && (
-          <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-400 px-1 text-[10px] font-bold text-zinc-950">
+        {hasDownloadJob ? (
+          <div className="relative flex items-center justify-center">
+            {/* Spinning ring */}
+            <svg
+              className="size-5.5 animate-spin text-emerald-400"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity=".25" strokeWidth="2.5" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeLinecap="round" strokeWidth="2.5" />
+            </svg>
+            {/* Center download arrow */}
+            <svg
+              className="absolute size-2.5 text-emerald-300"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 3v11m0 0 3.5-3.5M12 14 8.5 10.5M5 19h14" />
+            </svg>
+          </div>
+        ) : jobs.length > 0 ? (
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="size-5 animate-spin"
+          >
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity=".2" strokeWidth="2.5" />
+            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeLinecap="round" strokeWidth="2.5" />
+          </svg>
+        ) : (
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="size-5"
+          >
+            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+            <path d="M12 8v5m0 3h.01" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+          </svg>
+        )}
+
+        {jobs.length > 0 && (
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#10b981] px-1 text-[9px] font-bold text-zinc-950 ring-2 ring-[#0a0a0a]">
             {jobs.length}
           </span>
         )}

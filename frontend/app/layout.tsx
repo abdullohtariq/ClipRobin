@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import Image from "next/image";
+import { Inter } from "next/font/google";
 import UpdateNotice from "./update-notice";
 import JobProgress from "./job-progress";
 import SidebarNav from "./sidebar-nav";
 import "./globals.css";
+
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Clip Robin",
@@ -19,28 +22,40 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className="bg-zinc-950 text-white">
+    <html lang="en" className="dark">
+      <body className={`${inter.className} bg-[#0a0a0a] text-white antialiased selection:bg-[#10b981]/20 selection:text-emerald-300`}>
         <div className="min-h-screen flex">
           {/* Sidebar */}
-          <aside className="w-64 border-r border-zinc-800 p-6">
-            <div className="mb-10 flex items-center gap-3">
-              <Image
-                src="/clip-robin-icon.png"
-                alt="Clip Robin logo"
-                width={40}
-                height={40}
-                className="rounded-xl"
-                priority
-              />
-              <h1 className="text-2xl font-bold">Clip Robin</h1>
+          <aside className="w-64 border-r border-[#232326] bg-[#0a0a0a] p-6 shrink-0 flex flex-col justify-between">
+            <div>
+              <div className="mb-8 flex items-center gap-3">
+                <Image
+                  src="/logo.svg"
+                  alt="Clip Robin logo"
+                  width={36}
+                  height={36}
+                  className="rounded-xl shadow"
+                  priority
+                />
+                <div>
+                  <h1 className="text-xl font-bold tracking-tight text-white leading-none">Clip Robin</h1>
+                  <p className="mt-1 text-[11px] font-medium text-zinc-500">Local Video AI</p>
+                </div>
+              </div>
+
+              <SidebarNav />
             </div>
 
-            <SidebarNav />
+            <div className="pt-6 border-t border-[#232326]">
+              <div className="flex items-center gap-2 text-xs text-zinc-500">
+                <span className="size-2 rounded-full bg-[#10b981] animate-pulse" />
+                <span>Local Engine Ready</span>
+              </div>
+            </div>
           </aside>
 
-          {/* Page */}
-          <div className="flex-1">
+          {/* Main content */}
+          <div className="flex-1 bg-[#0a0a0a] min-h-screen">
             <UpdateNotice />
             {children}
           </div>

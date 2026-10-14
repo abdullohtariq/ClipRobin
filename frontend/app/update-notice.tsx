@@ -113,15 +113,21 @@ export default function UpdateNotice() {
   }, [retryCount]);
 
   const installUpdate = async () => {
-    if (!update) {
-      return;
-    }
-
     setIsInstalling(true);
     setError(null);
     try {
-      await update.downloadAndInstall();
-      await relaunch();
+      if (update) {
+        await update.downloadAndInstall();
+        await relaunch();
+      } else {
+        const availableUpdate = await check();
+        if (availableUpdate) {
+          await availableUpdate.downloadAndInstall();
+          await relaunch();
+        } else {
+          await relaunch();
+        }
+      }
     } catch (installError) {
       console.error("Failed to install the Clip Robin update.", installError);
       setError(
@@ -133,75 +139,43 @@ export default function UpdateNotice() {
     }
   };
 
-  if (!update && !pendingUpdateVersion && !error) {
+  if (!update && !pendingUpdateVersion) {
     return null;
   }
 
   return (
     <section
       aria-live="polite"
-      className="m-6 mb-0 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-sky-800 bg-sky-950/70 p-4 text-sm text-sky-100"
+      className="mx-6 mt-6 mb-0 flex items-center justify-between gap-4 rounded-[12px] border border-[#232326] bg-[#111113] p-4 text-sm text-zinc-200 shadow-sm transition-all duration-150"
     >
-      <div>
-        {update ? (
-          <>
-            <p className="font-semibold">
-              Clip Robin {update.version} is available.
+      <div className="flex items-center gap-3 min-w-0">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#10b981]/10 text-[#10b981]">
+          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-white">
+            Newer version is here :)
+          </p>
+          {error && (
+            <p className="mt-0.5 text-xs text-red-400">
+              {error}
             </p>
-            {update.body && (
-              <p className="mt-1 whitespace-pre-wrap text-sky-200">
-                {update.body}
-              </p>
-            )}
-            {error && (
-              <p className="mt-1 text-rose-300">
-                Update failed: {error}
-              </p>
-            )}
-          </>
-        ) : pendingUpdateVersion ? (
-          <>
-            <p className="font-semibold">
-              Clip Robin {pendingUpdateVersion} is still available.
-            </p>
-            <p className="mt-1 text-sky-200">
-              This update reminder will stay here until you update.
-            </p>
-            {error && (
-              <p className="mt-1 text-rose-300">
-                Could not check for updates: {error}
-              </p>
-            )}
-          </>
-        ) : (
-          <>
-            <p className="font-semibold">Could not check for updates.</p>
-            <p className="mt-1 text-sky-200">{error}</p>
-          </>
-        )}
+          )}
+        </div>
       </div>
 
-      {update ? (
-        <button
-          type="button"
-          onClick={installUpdate}
-          disabled={isInstalling}
-          className="rounded-lg bg-sky-200 px-4 py-2 font-semibold text-sky-950 hover:bg-white disabled:cursor-wait disabled:opacity-70"
-        >
-          {isInstalling ? "Installing update…" : "Update and restart"}
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            setRetryCount((count) => count + 1);
-          }}
-          className="rounded-lg border border-sky-700 px-4 py-2 font-semibold hover:bg-sky-900"
-        >
-          Check again
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={installUpdate}
+        disabled={isInstalling}
+        className="shrink-0 rounded-[10px] bg-[#10b981] px-4 py-2 text-xs font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669] disabled:cursor-wait disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+      >
+        {isInstalling ? "Restarting..." : "Click here to restart"}
+      </button>
     </section>
   );
 }

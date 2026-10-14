@@ -86,13 +86,13 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
   };
 
   return (
-    <article className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+    <article className="rounded-[12px] border border-[#232326] bg-[#111113] p-5 shadow-sm transition-all duration-150">
       <video
         ref={videoRef}
         controls
         crossOrigin="anonymous"
         preload="metadata"
-        className="aspect-[9/16] w-full max-w-xs rounded-md bg-black"
+        className="aspect-[9/16] w-full max-w-xs rounded-[10px] bg-black"
         onLoadedMetadata={() => {
           const video = videoRef.current;
           if (!video) return;
@@ -111,16 +111,16 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
       >
         {mediaUrls && <source src={mediaUrls.clip} type="video/mp4" />}
       </video>
-      <div className="mt-3 flex max-w-xs items-center gap-3">
+      <div className="mt-3 flex max-w-xs items-center gap-2">
         <button
           type="button"
           onClick={togglePlaybackSound}
-          className="shrink-0 rounded-md border border-zinc-700 px-3 py-2 text-sm text-white hover:bg-zinc-800"
+          className="shrink-0 rounded-[8px] border border-[#232326] px-2.5 py-1.5 text-xs font-medium text-white transition-all duration-150 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
         >
           {isPlaying && !muted ? "Mute audio" : "Play with sound"}
         </button>
-        <label className="flex min-w-0 flex-1 items-center gap-2 text-xs text-zinc-400">
-          <span>Volume</span>
+        <label className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-zinc-400">
+          <span>Vol</span>
           <input
             type="range"
             min="0"
@@ -129,9 +129,9 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
             value={volume}
             aria-label={`Volume for ${clip.title}`}
             onChange={(event) => handleVolumeChange(Number(event.target.value))}
-            className="min-w-0 flex-1 accent-emerald-400"
+            className="min-w-0 flex-1 accent-[#10b981]"
           />
-          <span className="w-9 text-right tabular-nums">{Math.round(volume * 100)}%</span>
+          <span className="w-8 text-right font-mono tabular-nums">{Math.round(volume * 100)}%</span>
         </label>
       </div>
       {audioStatus && (
@@ -139,22 +139,27 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
           {audioStatus}
         </p>
       )}
-      <a
-        href={mediaUrls?.download}
-        className="mt-3 inline-block rounded-md border border-zinc-700 px-4 py-2 text-sm text-white hover:bg-zinc-800"
-      >
-        Download video
-      </a>
+      <div className="mt-3">
+        <a
+          href={mediaUrls?.download}
+          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#232326] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+        >
+          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+          </svg>
+          Download clip
+        </a>
+      </div>
       {mediaUrlError && (
         <p role="status" className="mt-2 text-xs text-amber-300">
           Could not load clip URL: {mediaUrlError}
         </p>
       )}
-      <h3 className="mt-4 text-lg font-medium">{clip.title}</h3>
-      <p className="mt-2 text-sm text-zinc-400">
-        {clip.start.toFixed(2)}s → {clip.end.toFixed(2)}s · {clip.duration.toFixed(2)}s
+      <h3 className="mt-3.5 text-sm font-semibold text-white line-clamp-2">{clip.title}</h3>
+      <p className="mt-1 text-xs text-zinc-400 font-mono">
+        {clip.start.toFixed(1)}s → {clip.end.toFixed(1)}s · {clip.duration.toFixed(1)}s
       </p>
-      <p className="mt-1 text-sm text-emerald-400">{clip.status}</p>
+      <p className="mt-1 text-xs font-medium text-emerald-400">{clip.status}</p>
     </article>
   );
 });
@@ -280,91 +285,100 @@ function ProjectClips({ projectId }: { projectId: string }) {
   };
 
   return (
-    <main className="min-h-screen p-10">
-      <h2 className="text-3xl font-semibold">Clips</h2>
-      <p className="mt-2 text-zinc-400">
-        {projectId ? `Previewing clips from ${projectId}.` : "Select a project to preview its clips."}
-      </p>
+    <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
+      <div className="mx-auto max-w-5xl">
+        <header className="mb-8">
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Clips</h1>
+          <p className="mt-1.5 text-sm text-zinc-400">
+            {projectId ? `Previewing clips from project ${projectId}.` : "Select a project to preview its clips."}
+          </p>
+          {status && <p className="mt-2 text-xs text-zinc-500">{status}</p>}
+        </header>
 
-      {status && <p className="mt-4 text-sm text-zinc-400">{status}</p>}
+        {!projectId && (
+          <div className="rounded-[12px] border border-[#232326] bg-[#111113] p-8 text-center">
+            <p className="text-sm text-zinc-400">No project selected.</p>
+            <Link
+              href="/projects"
+              className="mt-3 inline-block rounded-[10px] bg-[#10b981] px-4 py-2 text-xs font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669]"
+            >
+              Choose a project &rarr;
+            </Link>
+          </div>
+        )}
 
-      {!projectId && (
-        <Link href="/projects" className="mt-4 inline-block text-sm text-white underline">
-          Choose a project
-        </Link>
-      )}
+        {projectId && (
+          <form onSubmit={handleGenerate} className="mb-8 flex flex-wrap items-center gap-4">
+            <button
+              type="submit"
+              disabled={generating}
+              className="rounded-[10px] bg-[#10b981] px-4 py-2 text-xs font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+            >
+              {generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}
+            </button>
+            {clips.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleDownloadAll()}
+                disabled={generating || downloadingAll}
+                className="rounded-[10px] border border-[#232326] bg-transparent px-4 py-2 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+              >
+                {downloadingAll ? "Preparing download..." : "Download all clips (ZIP)"}
+              </button>
+            )}
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={showSubtitles}
+                onChange={(event) => setShowSubtitles(event.target.checked)}
+                disabled={generating}
+                className="size-4 rounded border-[#232326] bg-zinc-900 accent-[#10b981]"
+              />
+              Burn animated captions into clips
+            </label>
+          </form>
+        )}
 
-      {projectId && (
-        <form onSubmit={handleGenerate} className="mt-6 flex max-w-2xl flex-wrap items-center gap-4">
-          <button
-            type="submit"
-            disabled={generating}
-            className="rounded-lg bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50"
-          >
-            {generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}
-          </button>
-          {clips.length > 0 && (
+        {generationProgress && ["queued", "processing", "cancelling"].includes(generationProgress.status) && (
+          <section aria-live="polite" className="mb-8 rounded-[12px] border border-[#232326] bg-[#111113] p-5">
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-xs font-medium text-zinc-200">{generationProgress.step}</p>
+              <p className="text-xs font-mono font-medium text-emerald-400">{generationProgress.progress}%</p>
+            </div>
+            <div
+              role="progressbar"
+              aria-label={`Clip generation progress for ${projectId}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={generationProgress.progress}
+              className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-zinc-800"
+            >
+              <div
+                className="h-full rounded-full bg-[#10b981] transition-[width] duration-300"
+                style={{ width: `${generationProgress.progress}%` }}
+              />
+            </div>
+            <p className="mt-2 text-[11px] text-zinc-500">
+              {generationProgress.total_clips > 0
+                ? `Rendered ${generationProgress.completed_clips} of ${generationProgress.total_clips} clips`
+                : "Preparing transcript analysis"}
+            </p>
             <button
               type="button"
-              onClick={() => void handleDownloadAll()}
-              disabled={generating || downloadingAll}
-              className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+              onClick={() => void handleCancel()}
+              disabled={!generationProgress.job_id || generationProgress.status === "cancelling"}
+              className="mt-3 rounded-[8px] border border-red-500/30 px-2.5 py-1 text-xs text-red-300 hover:bg-red-950/30 disabled:opacity-50"
             >
-              {downloadingAll ? "Preparing download..." : "Download all"}
+              {generationProgress.status === "cancelling" ? "Cancelling..." : "Cancel generation"}
             </button>
-          )}
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-300">
-            <input
-              type="checkbox"
-              checked={showSubtitles}
-              onChange={(event) => setShowSubtitles(event.target.checked)}
-              disabled={generating}
-              className="size-4 accent-white"
-            />
-            Burn animated captions into clips
-          </label>
-        </form>
-      )}
+          </section>
+        )}
 
-      {generationProgress && ["queued", "processing", "cancelling"].includes(generationProgress.status) && (
-        <section aria-live="polite" className="mt-5 max-w-2xl rounded-lg border border-zinc-800 bg-zinc-900 p-4">
-          <div className="flex items-center justify-between gap-4">
-            <p className="text-sm font-medium text-zinc-200">{generationProgress.step}</p>
-            <p className="text-sm tabular-nums text-zinc-400">{generationProgress.progress}%</p>
-          </div>
-          <div
-            role="progressbar"
-            aria-label={`Clip generation progress for ${projectId}`}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={generationProgress.progress}
-            className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-700"
-          >
-            <div
-              className="h-full rounded-full bg-emerald-400 transition-[width] duration-500"
-              style={{ width: `${generationProgress.progress}%` }}
-            />
-          </div>
-          <p className="mt-3 text-xs text-zinc-400">
-            {generationProgress.total_clips > 0
-              ? `Rendered ${generationProgress.completed_clips} of ${generationProgress.total_clips} clips`
-              : "Preparing transcript analysis"}
-          </p>
-          <button
-            type="button"
-            onClick={() => void handleCancel()}
-            disabled={!generationProgress.job_id || generationProgress.status === "cancelling"}
-            className="mt-4 rounded-md border border-red-500/60 px-3 py-2 text-sm text-red-300 hover:bg-red-950/50 disabled:opacity-50"
-          >
-            {generationProgress.status === "cancelling" ? "Cancelling..." : "Cancel generation"}
-          </button>
-        </section>
-      )}
-
-      <div className="mt-8 grid max-w-5xl gap-6 md:grid-cols-2">
-        {clips.map((clip) => (
-          <ClipCard key={clip.id} clip={clip} projectId={projectId} />
-        ))}
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {clips.map((clip) => (
+            <ClipCard key={clip.id} clip={clip} projectId={projectId} />
+          ))}
+        </div>
       </div>
     </main>
   );
