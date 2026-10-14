@@ -209,18 +209,18 @@ The frontend, Tauri config, and Rust package share one app version. From
 `frontend`, update all version manifests together before a release:
 
 ```powershell
-npm run version:set -- 0.1.13
+npm run version:set -- 0.1.15
 npm run version:check
 ```
 
 Commit and push the version change, then create and push its matching version
-tag from the repository root. A `v0.1.13` tag builds and publishes the signed
+tag from the repository root. A `v0.1.15` tag builds and publishes the signed
 Windows installer and updater metadata as a GitHub Release:
 
 ```powershell
-git tag v0.1.13
+git tag v0.1.15
 git push origin main
-git push origin v0.1.13
+git push origin v0.1.15
 ```
 
 The Tauri desktop app checks for updates when it opens and every six hours.
