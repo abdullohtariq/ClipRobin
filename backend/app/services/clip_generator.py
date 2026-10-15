@@ -2,6 +2,7 @@ import json
 import shutil
 import tempfile
 import threading
+import uuid
 from pathlib import Path
 from typing import Any, Callable
 
@@ -110,22 +111,30 @@ def generate_clips(
     if progress_callback:
         progress_callback("Rendering clips", 0, len(analysis_clips))
 
-    with tempfile.TemporaryDirectory(prefix=".clips-staging-", dir=project_directory) as staging:
-        staging_directory = Path(staging)
-        staged_outputs: list[tuple[Path, dict[str, Any]]] = []
+    existing_clips = list(clips_directory.glob("*.mp4"))
+    backup_directory: Path | None = None
+    if existing_clips:
+        backup_dir_path = project_directory / f".clips-backup-{uuid.uuid4().hex[:8]}"
+        backup_dir_path.mkdir(exist_ok=True)
+        for ec in existing_clips:
+            shutil.move(str(ec), str(backup_dir_path / ec.name))
+        backup_directory = backup_dir_path
+
+    try:
         for index, clip in enumerate(analysis_clips, start=1):
             if cancel_event is not None and cancel_event.is_set():
                 raise ClipGenerationCancelled("Clip generation was cancelled")
+            clip_id = clip.get("id") or f"clip_{index:03d}"
+            temp_output = clips_directory / f".rendering_{clip_id}.mp4"
+            final_output = clips_directory / f"{clip_id}.mp4"
             try:
-                clip_id = clip.get("id") or f"clip_{index:03d}"
-                output_path = staging_directory / f"{clip_id}.mp4"
                 subtitle_segments = [
                     segment for segment in transcript_segments
                     if segment["end"] > clip["start"] and segment["start"] < clip["end"]
                 ]
                 create_clip(
                     source_path,
-                    output_path,
+                    temp_output,
                     clip["start"],
                     clip["end"],
                     subtitle_segments=subtitle_segments if show_subtitles else None,
@@ -134,30 +143,56 @@ def generate_clips(
                     cancel_event=cancel_event,
                 )
                 if cancel_event is not None and cancel_event.is_set():
+                    if temp_output.is_file():
+                        temp_output.unlink(missing_ok=True)
                     raise ClipGenerationCancelled("Clip generation was cancelled")
-                staged_outputs.append((output_path, {
+
+                # Move directly to final file so this clip appears immediately!
+                if temp_output.is_file():
+                    temp_output.replace(final_output)
+
+                clip_metadata = {
                     **clip,
                     "id": clip_id,
                     "duration": round(clip["end"] - clip["start"], 3),
-                    "file": output_path.name,
+                    "file": final_output.name,
                     "status": "ready",
-                }))
+                }
+                generated.append(clip_metadata)
             except (KeyError, TypeError, ValueError, VideoEditorError) as error:
+                if temp_output.is_file():
+                    temp_output.unlink(missing_ok=True)
                 raise VideoEditorError(f"Could not render clip {index} of {len(analysis_clips)}: {error}") from error
-            if progress_callback:
-                progress_callback("Rendering clips", index, len(analysis_clips))
+            except Exception:
+                if temp_output.is_file():
+                    temp_output.unlink(missing_ok=True)
+                raise
 
-        # Atomic commit: all clips rendered without error or cancellation!
-        for existing_clip in clips_directory.glob("*.mp4"):
+            if progress_callback:
+                progress_callback("Rendering clips", index, len(analysis_clips), clip_metadata)
+
+        # Success: clean up backup directory
+        if backup_directory and backup_directory.is_dir():
+            shutil.rmtree(backup_directory, ignore_errors=True)
+
+    except Exception:
+        # Clean up any partial rendering files
+        for tmp in clips_directory.glob(".rendering_*.mp4"):
             try:
-                existing_clip.unlink()
+                tmp.unlink()
             except OSError:
                 pass
-
-        for staged_path, clip_metadata in staged_outputs:
-            destination = clips_directory / staged_path.name
-            shutil.move(str(staged_path), destination)
-            generated.append(clip_metadata)
+        # If generation failed or was cancelled and we had backup clips, restore previous clips
+        if backup_directory and backup_directory.is_dir():
+            for ec in backup_directory.glob("*.mp4"):
+                dest = clips_directory / ec.name
+                if not dest.is_file():
+                    try:
+                        shutil.move(str(ec), str(dest))
+                    except OSError:
+                        pass
+            shutil.rmtree(backup_directory, ignore_errors=True)
+        raise
 
     if progress_callback:
         progress_callback("Finishing up", len(generated), len(generated))

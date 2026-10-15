@@ -16,6 +16,7 @@ import {
   transcribeLocalVideo,
   transcribeVideo,
 } from "@/src/lib/api";
+import { RecentProjectSkeletonItem } from "@/src/components/skeletons";
 
 type VideoProcessingProgress = {
   kind: "transcription" | "generation" | "complete" | "failed";
@@ -107,6 +108,10 @@ export default function Home() {
                 : job.progress,
               projectId: job.project_id,
             });
+            if (job.kind === "generation" && job.ready_clips && job.ready_clips.length > 0) {
+              setGeneratedClips(job.ready_clips);
+              setGeneratedProjectId(job.project_id);
+            }
           } else if (current?.projectId && current.kind === "transcription") {
             const transcription = await getLocalTranscriptionJob(current.projectId);
             if (!isCurrent) return;
@@ -133,6 +138,10 @@ export default function Home() {
           } else if (current?.projectId && current.kind === "generation") {
             const generation = await getLatestClipGenerationJob(current.projectId);
             if (!isCurrent || !generation) return;
+            if (generation.ready_clips && generation.ready_clips.length > 0) {
+              setGeneratedClips(generation.ready_clips);
+              setGeneratedProjectId(current.projectId);
+            }
             if (generation.status === "completed") {
               setTranscriptionProgress({
                 kind: "complete",
@@ -230,6 +239,10 @@ export default function Home() {
             progress: stepJob.progress,
             projectId,
           });
+          if (stepJob.ready_clips && stepJob.ready_clips.length > 0) {
+            setGeneratedClips(stepJob.ready_clips);
+            setGeneratedProjectId(projectId);
+          }
         },
         clipDurationSeconds,
         showWatermark,
@@ -374,6 +387,10 @@ export default function Home() {
             progress: stepJob.progress,
             projectId: result.project_id,
           });
+          if (stepJob.ready_clips && stepJob.ready_clips.length > 0) {
+            setGeneratedClips(stepJob.ready_clips);
+            setGeneratedProjectId(result.project_id);
+          }
         },
         clipDurationSeconds,
         showWatermark,
@@ -933,23 +950,31 @@ export default function Home() {
             )}
 
             {/* Generated clips section or Empty state */}
-            {generatedClips.length > 0 && generatedProjectId ? (
+            {generatedClips.length > 0 || (isProcessingVideo && transcriptionProgress?.kind === "generation") ? (
               <div className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm space-y-4 transition-all duration-150">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="flex size-5 items-center justify-center rounded-full bg-[#10b981]/15 text-[10px] text-[#10b981]">
-                      ✓
+                      {isProcessingVideo && transcriptionProgress?.kind === "generation" ? (
+                        <span className="size-2 rounded-full bg-[#10b981] animate-pulse" />
+                      ) : (
+                        "✓"
+                      )}
                     </span>
                     <h3 className="text-sm font-semibold text-white">
-                      Generated Clips ({generatedClips.length})
+                      {isProcessingVideo && transcriptionProgress?.kind === "generation"
+                        ? `Generating Clips (${generatedClips.length} ready)`
+                        : `Generated Clips (${generatedClips.length})`}
                     </h3>
                   </div>
-                  <Link
-                    href={`/clips?project=${encodeURIComponent(generatedProjectId)}`}
-                    className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
-                  >
-                    View all in Clips page &rarr;
-                  </Link>
+                  {generatedProjectId && (
+                    <Link
+                      href={`/clips?project=${encodeURIComponent(generatedProjectId)}`}
+                      className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
+                    >
+                      View all in Clips studio &rarr;
+                    </Link>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
@@ -973,13 +998,30 @@ export default function Home() {
                         <span className="text-zinc-500 font-mono">
                           {Math.floor(clip.start / 60)}:{String(Math.floor(clip.start % 60)).padStart(2, "0")} - {Math.floor(clip.end / 60)}:{String(Math.floor(clip.end % 60)).padStart(2, "0")}
                         </span>
-                        <Link
-                          href={`/clips?project=${encodeURIComponent(generatedProjectId)}`}
-                          className="text-[#10b981] hover:underline"
-                        >
-                          Watch clip &rarr;
-                        </Link>
+                        {generatedProjectId && (
+                          <Link
+                            href={`/clips?project=${encodeURIComponent(generatedProjectId)}`}
+                            className="text-[#10b981] hover:underline"
+                          >
+                            Watch clip &rarr;
+                          </Link>
+                        )}
                       </div>
+                    </div>
+                  ))}
+                  {isProcessingVideo && transcriptionProgress?.kind === "generation" && Array.from({
+                    length: Math.max(1, Math.min(2, 4 - generatedClips.length))
+                  }).map((_, i) => (
+                    <div
+                      key={`dash-skel-${i}`}
+                      className="rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="h-3.5 w-24 rounded bg-zinc-800/80 skeleton-shimmer" />
+                        <div className="h-3 w-10 rounded bg-zinc-800/50 skeleton-shimmer" />
+                      </div>
+                      <div className="h-3 w-4/5 rounded bg-zinc-800/60 skeleton-shimmer" />
+                      <div className="h-3 w-1/2 rounded bg-zinc-800/40 skeleton-shimmer" />
                     </div>
                   ))}
                 </div>
@@ -1013,9 +1055,11 @@ export default function Home() {
               </div>
 
               {isLoadingProjects ? (
-                <div className="py-6 text-center text-xs text-zinc-400">
-                  Loading projects...
-                </div>
+                <ul className="space-y-2.5">
+                  <RecentProjectSkeletonItem />
+                  <RecentProjectSkeletonItem />
+                  <RecentProjectSkeletonItem />
+                </ul>
               ) : recentProjects.length === 0 ? (
                 <div className="py-8 text-center text-xs text-zinc-400 space-y-1.5">
                   <p className="font-medium text-zinc-300">No projects created yet.</p>

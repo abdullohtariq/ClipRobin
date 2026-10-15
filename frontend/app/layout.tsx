@@ -4,6 +4,7 @@ import { Inter } from "next/font/google";
 import UpdateNotice from "./update-notice";
 import JobProgress from "./job-progress";
 import SidebarNav from "./sidebar-nav";
+import WindowInit from "./window-init";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -56,6 +57,7 @@ export default function RootLayout({
 
           {/* Main content - independently scrollable right pane */}
           <div className="flex-1 h-screen overflow-y-auto bg-[#0a0a0a] min-w-0">
+            <WindowInit />
             <UpdateNotice />
             {children}
           </div>

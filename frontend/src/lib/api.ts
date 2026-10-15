@@ -83,6 +83,7 @@ export type ClipGenerationJob = {
   total_clips: number;
   error?: string;
   clips?: Clip[];
+  ready_clips?: Clip[];
 };
 
 export type ActiveJob = {
@@ -95,6 +96,7 @@ export type ActiveJob = {
   completed_clips?: number;
   total_clips?: number;
   title?: string;
+  ready_clips?: Clip[];
 };
 
 export type DownloadJob = {

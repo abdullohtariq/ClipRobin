@@ -14,6 +14,7 @@ import {
   getClips,
   getLatestClipGenerationJob,
 } from "@/src/lib/api";
+import { ClipSkeletonCard } from "@/src/components/skeletons";
 
 const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; projectId: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -166,8 +167,9 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
 
 function ProjectClips({ projectId }: { projectId: string }) {
   const [clips, setClips] = useState<Clip[]>([]);
+  const [isLoading, setIsLoading] = useState(Boolean(projectId));
   const [status, setStatus] = useState(
-    projectId ? `Loading clips for ${projectId}...` : "Choose a project to view its clips.",
+    projectId ? "" : "Choose a project to view its clips.",
   );
   const [showSubtitles, setShowSubtitles] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
@@ -177,6 +179,7 @@ function ProjectClips({ projectId }: { projectId: string }) {
 
   useEffect(() => {
     if (!projectId) {
+      setIsLoading(false);
       return;
     }
     let isCurrentRequest = true;
@@ -188,8 +191,12 @@ function ProjectClips({ projectId }: { projectId: string }) {
           getLatestClipGenerationJob(projectId),
         ]);
         if (!isCurrentRequest) return;
+        setIsLoading(false);
+        const currentClips = (job?.ready_clips && job.ready_clips.length > result.clips.length)
+          ? job.ready_clips
+          : result.clips;
         setClips((current) =>
-          JSON.stringify(current) === JSON.stringify(result.clips) ? current : result.clips,
+          JSON.stringify(current) === JSON.stringify(currentClips) ? current : currentClips,
         );
         setGenerationProgress(job);
         if (job?.status === "queued" || job?.status === "processing" || job?.status === "cancelling") {
@@ -203,19 +210,20 @@ function ProjectClips({ projectId }: { projectId: string }) {
           setStatus(job.error ?? `Clip generation failed for ${projectId}.`);
         } else {
           setGenerating(false);
-          setStatus(result.clips.length ? "" : `No clips generated yet for ${projectId}.`);
+          setStatus(currentClips.length ? "" : `No clips generated yet for ${projectId}.`);
         }
         const isGenerating = job?.status === "queued"
           || job?.status === "processing"
           || job?.status === "cancelling";
         if (isGenerating && interval === undefined) {
-          interval = window.setInterval(() => void loadProgressAndClips(), 1200);
+          interval = window.setInterval(() => void loadProgressAndClips(), 1000);
         } else if (!isGenerating && interval !== undefined) {
           window.clearInterval(interval);
           interval = undefined;
         }
       } catch (error) {
         if (!isCurrentRequest) return;
+        setIsLoading(false);
         setStatus(error instanceof Error ? error.message : "Could not load clips");
       }
     };
@@ -246,7 +254,16 @@ function ProjectClips({ projectId }: { projectId: string }) {
       const result = await generateClips(
         projectId,
         showSubtitles,
-        setGenerationProgress,
+        (job) => {
+          setGenerationProgress(job);
+          if (job.ready_clips && job.ready_clips.length > 0) {
+            setClips((current) =>
+              JSON.stringify(current) === JSON.stringify(job.ready_clips)
+                ? current
+                : (job.ready_clips ?? current)
+            );
+          }
+        },
         60,
         showWatermark,
       );
@@ -391,11 +408,38 @@ function ProjectClips({ projectId }: { projectId: string }) {
           </section>
         )}
 
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {clips.map((clip) => (
-            <ClipCard key={clip.id} clip={clip} projectId={projectId} />
-          ))}
-        </div>
+        {isLoading ? (
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <ClipSkeletonCard key={`initial-skeleton-${i}`} message="Loading clips..." />
+            ))}
+          </div>
+        ) : clips.length > 0 || generating ? (
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {clips.map((clip) => (
+              <ClipCard key={clip.id} clip={clip} projectId={projectId} />
+            ))}
+            {generating && Array.from({
+              length: Math.max(
+                1,
+                (generationProgress?.total_clips || 4) - clips.length
+              ),
+            }).map((_, i) => (
+              <ClipSkeletonCard
+                key={`generating-skeleton-${i}`}
+                index={clips.length + i + 1}
+                total={generationProgress?.total_clips || undefined}
+              />
+            ))}
+          </div>
+        ) : projectId ? (
+          <div className="rounded-[12px] border border-[#232326] bg-[#111113] p-8 text-center">
+            <p className="text-sm text-zinc-400">No clips generated yet for {projectId}.</p>
+            <p className="mt-1 text-xs text-zinc-500">
+              Click &ldquo;Generate Clips&rdquo; above to start slicing this video into vertical shorts.
+            </p>
+          </div>
+        ) : null}
       </div>
     </main>
   );
@@ -409,7 +453,23 @@ function ClipsContent() {
 
 export default function ClipsPage() {
   return (
-    <Suspense fallback={<main className="min-h-screen p-10 text-zinc-400">Loading clips...</main>}>
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
+          <div className="mx-auto max-w-5xl">
+            <header className="mb-8">
+              <div className="h-8 w-36 rounded bg-zinc-800/80 skeleton-shimmer" />
+              <div className="mt-2 h-4 w-60 rounded bg-zinc-800/50 skeleton-shimmer" />
+            </header>
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <ClipSkeletonCard key={`suspense-skeleton-${i}`} />
+              ))}
+            </div>
+          </div>
+        </main>
+      }
+    >
       <ClipsContent />
     </Suspense>
   );

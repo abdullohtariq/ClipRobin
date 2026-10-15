@@ -52,6 +52,7 @@ def get_active_jobs() -> dict[str, list[dict[str, Any]]]:
                 "progress": job["progress"],
                 "completed_clips": job.get("completed_clips", 0),
                 "total_clips": job.get("total_clips", 0),
+                "ready_clips": job.get("ready_clips", []),
             }
             for job in GENERATION_JOBS.values()
             if job["status"] in {"queued", "processing", "cancelling"}

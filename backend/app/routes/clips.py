@@ -35,6 +35,11 @@ def finish_cancelled_job(job_id: str, project_id: str) -> None:
         clips_directory = get_clips_directory(project_id)
         for generated_clip in clips_directory.glob("*.mp4"):
             generated_clip.unlink()
+        for partial_clip in clips_directory.glob(".rendering_*.mp4"):
+            try:
+                partial_clip.unlink()
+            except OSError:
+                pass
     except OSError as error:
         logger.exception("Could not remove generated clips after cancelling project %s", project_id)
         with JOBS_LOCK:
@@ -91,6 +96,7 @@ def generate_project_clips(
             "progress": 0,
             "completed_clips": 0,
             "total_clips": 0,
+            "ready_clips": [],
         }
         CANCEL_EVENTS[job_id] = cancel_event
 
@@ -116,7 +122,12 @@ def run_clip_generation(
     clip_duration_seconds: int = 60,
     show_watermark: bool = False,
 ) -> None:
-    def report_progress(step: str, completed_clips: int, total_clips: int) -> None:
+    def report_progress(
+        step: str,
+        completed_clips: int,
+        total_clips: int,
+        clip_metadata: dict[str, Any] | None = None,
+    ) -> None:
         if cancel_event.is_set():
             return
         if step == "Preparing clip analysis":
@@ -130,6 +141,10 @@ def run_clip_generation(
         with JOBS_LOCK:
             job = GENERATION_JOBS.get(job_id)
             if job is not None:
+                if clip_metadata is not None:
+                    ready = job.setdefault("ready_clips", [])
+                    if not any(c.get("id") == clip_metadata.get("id") for c in ready):
+                        ready.append(clip_metadata)
                 job.update({
                     "status": "processing",
                     "step": step,
@@ -176,6 +191,7 @@ def run_clip_generation(
                 "completed_clips": len(clips),
                 "total_clips": len(clips),
                 "clips": clips,
+                "ready_clips": clips,
             })
             CANCEL_EVENTS.pop(job_id, None)
     if was_cancelled:
