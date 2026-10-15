@@ -1,3 +1,4 @@
+import json
 import logging
 import tempfile
 import threading
@@ -8,11 +9,24 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from app.services.clip_generator import generate_clips
+from app.services.clip_generator import generate_clips, render_single_clip
 from app.services.project_manager import get_clips_directory, get_project_directory
-from app.services.video_editor import ClipGenerationCancelled
+from app.services.video_editor import (
+    ClipGenerationCancelled,
+    VideoEditorError,
+    create_clip,
+    find_watermark_file,
+)
+
+
+class TopLineRequest(BaseModel):
+    top_line: str
+    show_watermark: bool | None = None
+    show_subtitles: bool | None = None
+
 
 router = APIRouter(prefix="/api/projects")
 logger = logging.getLogger(__name__)
@@ -247,11 +261,15 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
     analysis_path = project_directory / "analysis.json"
     analysis_clips = {}
     if analysis_path.is_file():
-        import json
-        analysis_clips = {clip["id"]: clip for clip in json.loads(analysis_path.read_text(encoding="utf-8")).get("clips", [])}
+        try:
+            analysis_clips = {clip["id"]: clip for clip in json.loads(analysis_path.read_text(encoding="utf-8")).get("clips", [])}
+        except json.JSONDecodeError:
+            analysis_clips = {}
 
     clips = []
     for path in sorted(clips_directory.glob("*.mp4")):
+        if path.name.startswith("."):
+            continue
         metadata = analysis_clips.get(path.stem, {})
         start = metadata.get("start", 0.0)
         end = metadata.get("end", 0.0)
@@ -260,15 +278,67 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "id": path.stem,
             "duration": round(end - start, 3),
             "file": path.name,
+            "top_line": metadata.get("top_line", ""),
             "status": "ready",
         })
     return {"clips": clips}
 
 
+@router.post("/{project_id}/clips/{clip_id}/top-line")
+def update_clip_top_line(
+    project_id: str,
+    clip_id: str,
+    payload: TopLineRequest,
+) -> dict[str, Any]:
+    project_directory = project_or_404(project_id)
+    raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
+    try:
+        updated_clip = render_single_clip(
+            project_directory=project_directory,
+            clip_id=raw_clip_id,
+            top_line=payload.top_line,
+            show_watermark=payload.show_watermark,
+            show_subtitles=payload.show_subtitles,
+        )
+        return {"clip": updated_clip}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except VideoEditorError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+@router.delete("/{project_id}/clips/{clip_id}/top-line")
+def delete_clip_top_line(
+    project_id: str,
+    clip_id: str,
+    show_watermark: bool | None = None,
+    show_subtitles: bool | None = None,
+) -> dict[str, Any]:
+    project_directory = project_or_404(project_id)
+    raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
+    try:
+        updated_clip = render_single_clip(
+            project_directory=project_directory,
+            clip_id=raw_clip_id,
+            top_line=None,
+            show_watermark=show_watermark,
+            show_subtitles=show_subtitles,
+        )
+        return {"clip": updated_clip}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except VideoEditorError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 @router.get("/{project_id}/clips/download-all")
 def download_all_project_clips(project_id: str) -> FileResponse:
     project_or_404(project_id)
-    clip_paths = sorted(get_clips_directory(project_id).glob("*.mp4"))
+    clip_paths = [p for p in sorted(get_clips_directory(project_id).glob("*.mp4")) if not p.name.startswith(".")]
     if not clip_paths:
         raise HTTPException(status_code=404, detail="No clips are available to download")
 

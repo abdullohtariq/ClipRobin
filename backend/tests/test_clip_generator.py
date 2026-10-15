@@ -133,3 +133,102 @@ def test_generate_clips_passes_show_watermark(tmp_path: Path, monkeypatch: pytes
     assert captured_kwargs.get("show_watermark") is True
 
 
+def test_render_single_clip_updates_analysis_and_creates_clip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.clip_generator import render_single_clip
+
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 10.0, "reason": "Test"}
+            ],
+            "generation_options": {"show_subtitles": True, "show_watermark": True},
+        }),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def mock_create_clip(source_path, output_path, start_time, end_time, **kwargs):
+        captured["source"] = source_path
+        captured["output"] = output_path
+        captured["start"] = start_time
+        captured["end"] = end_time
+        captured["kwargs"] = kwargs
+        output_path.write_bytes(b"single clip with top line")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    result = render_single_clip(
+        tmp_path,
+        "clip_001",
+        top_line="POV: When the code works on first try",
+    )
+
+    assert result["id"] == "clip_001"
+    assert result["top_line"] == "POV: When the code works on first try"
+    assert result["file"] == "clip_001.mp4"
+    assert (tmp_path / "clips" / "clip_001.mp4").is_file()
+    assert captured["kwargs"]["top_line"] == "POV: When the code works on first try"
+    assert captured["kwargs"]["show_watermark"] is True
+
+    # Check analysis.json was persisted
+    saved_analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved_analysis["clips"][0]["top_line"] == "POV: When the code works on first try"
+
+
+def test_render_single_clip_enforces_word_limit(tmp_path: Path):
+    from app.services.clip_generator import render_single_clip
+
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 10.0, "reason": "Test"}
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    sixteen_words = "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen"
+    with pytest.raises(ValueError, match="15 words or fewer"):
+        render_single_clip(tmp_path, "clip_001", top_line=sixteen_words)
+
+
+def test_render_single_clip_preserves_passed_show_watermark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.clip_generator import render_single_clip
+
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 10.0, "reason": "Test"}
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def mock_create_clip(source_path, output_path, start_time, end_time, **kwargs):
+        captured.update(kwargs)
+        output_path.write_bytes(b"single clip with top line")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    result = render_single_clip(
+        tmp_path,
+        "clip_001",
+        top_line="POV: Coding",
+        show_watermark=True,
+    )
+
+    assert result["top_line"] == "POV: Coding"
+    assert captured.get("show_watermark") is True
+    saved = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved.get("generation_options", {}).get("show_watermark") is True
+
+

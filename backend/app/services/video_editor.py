@@ -250,6 +250,76 @@ def _build_subtitle_filters(
     return subtitle_filters
 
 
+def _build_top_line_filters(
+    top_line: str | None,
+    subtitle_directory: Path,
+    font_file: str | None = None,
+    has_watermark: bool = False,
+) -> list[str]:
+    if not top_line or not top_line.strip():
+        return []
+
+    cleaned_text = top_line.strip()
+    words = cleaned_text.split()
+    if not words:
+        return []
+
+    # Maximum 15 words limit for social safe zones & punchy headlines
+    if len(words) > 15:
+        words = words[:15]
+
+    # Split into up to 2 lines respecting safe social margin (approx 28 chars per line)
+    import textwrap
+
+    if "\n" in cleaned_text:
+        candidate_lines = [line.strip() for line in cleaned_text.split("\n") if line.strip()]
+        wrapped_lines: list[str] = []
+        for cand in candidate_lines:
+            wrapped_lines.extend(textwrap.wrap(cand, width=28))
+        raw_lines = wrapped_lines[:2]
+    else:
+        full_text = " ".join(words)
+        wrapped_lines = textwrap.wrap(full_text, width=28)
+        if len(wrapped_lines) > 2:
+            mid = (len(words) + 1) // 2
+            raw_lines = [" ".join(words[:mid]), " ".join(words[mid:])]
+        else:
+            raw_lines = wrapped_lines
+
+    font_fragment = f"fontfile='{font_file}':" if font_file else ""
+    filters: list[str] = []
+
+    # Safe vertical position:
+    # 720x1280 vertical video. 16:9 video content begins at Y=438.
+    # When watermark is present with top line, watermark is shifted up to Y=90 (7% of H) and ends at Y~169.
+    # The top line is placed at Y=260-306.
+    # This leaves ~91px gap below the watermark and ~100px gap above the video.
+    # It will never touch the watermark above or the video below!
+    base_y = 260 if has_watermark else 240
+    line_spacing = 46
+    if len(raw_lines) == 1:
+        y_positions = [base_y + 15]
+    else:
+        y_positions = [base_y, base_y + line_spacing]
+
+    for line_index, line_text in enumerate(raw_lines):
+        line_file = subtitle_directory / f"top-line-{line_index}.txt"
+        line_file.write_text(line_text, encoding="utf-8")
+        y_pos = y_positions[line_index]
+        filters.append(
+            "drawtext=textfile='{}':{}expansion=none:fontsize=32:fontcolor=white:"
+            "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
+            "box=1:boxcolor=black@0.65:boxborderw=8:y_align=baseline:fix_bounds=true:"
+            "x=(w-text_w)/2:y={}".format(
+                line_file.name,
+                font_fragment,
+                y_pos,
+            )
+        )
+
+    return filters
+
+
 def _build_filter_graph(
     start_time: float,
     end_time: float,
@@ -283,6 +353,7 @@ def create_clip(
     subtitle_segments: list[dict[str, object]] | None = None,
     show_subtitles: bool = True,
     show_watermark: bool = False,
+    top_line: str | None = None,
     cancel_event: threading.Event | None = None,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
@@ -304,7 +375,7 @@ def create_clip(
             subtitle_directory = Path(temporary_directory)
             font_file = (
                 _copy_font_file(subtitle_directory)
-                if show_subtitles and subtitle_segments
+                if ((show_subtitles and subtitle_segments) or (top_line and top_line.strip()))
                 else None
             )
             subtitle_filters = _build_subtitle_filters(
@@ -315,18 +386,28 @@ def create_clip(
                 subtitle_directory=subtitle_directory,
                 font_file=font_file,
             )
+            top_line_filters = _build_top_line_filters(
+                top_line,
+                subtitle_directory=subtitle_directory,
+                font_file=font_file,
+                has_watermark=bool(watermark_path and watermark_path.is_file()),
+            )
+            all_text_filters = top_line_filters + subtitle_filters
             has_audio = has_audio_stream(source_path, ffmpeg_path)
 
             if watermark_path and watermark_path.is_file():
-                # Watermark enabled: scale to 240px wide (-2 ensures even height), overlay at horizontal center and 20% from top
+                # Watermark enabled: if top_line is present, position watermark higher up at 7% from top (Y=90)
+                # to leave ample breathing room above the top_line and prevent any overlap.
+                # If no top_line, position at standard 20% from top (Y=256).
+                wm_y = "round(H*0.07)" if (top_line and top_line.strip()) else "round(H*0.20)"
                 base_filter_complex = (
                     "[0:v]scale=720:1280:force_original_aspect_ratio=decrease,"
                     "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[base];"
                     "[1:v]scale=240:-2[wm];"
-                    "[base][wm]overlay=(W-w)/2:round(H*0.20)"
+                    f"[base][wm]overlay=(W-w)/2:{wm_y}"
                 )
-                if subtitle_filters:
-                    filter_graph = base_filter_complex + "," + ",".join(subtitle_filters) + "[v]"
+                if all_text_filters:
+                    filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
                 else:
                     filter_graph = base_filter_complex + "[v]"
 
@@ -377,8 +458,8 @@ def create_clip(
                     "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
                 )
                 filter_graph = (
-                    base_filter + "," + ",".join(subtitle_filters)
-                    if subtitle_filters
+                    base_filter + "," + ",".join(all_text_filters)
+                    if all_text_filters
                     else base_filter
                 )
                 filter_script = subtitle_directory / "video-filters.txt"

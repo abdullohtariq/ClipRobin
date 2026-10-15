@@ -13,10 +13,24 @@ import {
   generateClips,
   getClips,
   getLatestClipGenerationJob,
+  removeClipTopLine,
+  setClipTopLine,
 } from "@/src/lib/api";
 import { ClipSkeletonCard } from "@/src/components/skeletons";
 
-const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; projectId: string }) {
+const ClipCard = memo(function ClipCard({
+  clip,
+  projectId,
+  showWatermark = true,
+  showSubtitles = true,
+  onClipUpdated,
+}: {
+  clip: Clip;
+  projectId: string;
+  showWatermark?: boolean;
+  showSubtitles?: boolean;
+  onClipUpdated?: (updatedClip: Clip) => void;
+}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -24,6 +38,16 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
   const [audioStatus, setAudioStatus] = useState("");
   const [mediaUrls, setMediaUrls] = useState<{ clip: string; download: string } | null>(null);
   const [mediaUrlError, setMediaUrlError] = useState("");
+  const [isEditingTopLine, setIsEditingTopLine] = useState(false);
+  const [topLineInput, setTopLineInput] = useState(clip.top_line || "");
+  const [isSavingTopLine, setIsSavingTopLine] = useState(false);
+  const [topLineError, setTopLineError] = useState("");
+
+  const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
+
+  useEffect(() => {
+    setTopLineInput(clip.top_line || "");
+  }, [clip.top_line]);
 
   useEffect(() => {
     let isActive = true;
@@ -86,32 +110,218 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
     setMuted(video.muted);
   };
 
+  const handleSaveTopLine = async () => {
+    const trimmed = topLineInput.trim();
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      setTopLineError("Please enter a top line");
+      return;
+    }
+    if (words.length > 15) {
+      setTopLineError("Top line cannot exceed 15 words");
+      return;
+    }
+    setIsSavingTopLine(true);
+    setTopLineError("");
+    try {
+      const response = await setClipTopLine(projectId, clip.id, trimmed, {
+        show_watermark: showWatermark,
+        show_subtitles: showSubtitles,
+      });
+      setIsEditingTopLine(false);
+      onClipUpdated?.(response.clip);
+      const timestamp = Date.now();
+      const [cUrl, dUrl] = await Promise.all([
+        clipUrl(projectId, clip.file),
+        clipDownloadUrl(projectId, clip.file),
+      ]);
+      setMediaUrls({
+        clip: `${cUrl}?t=${timestamp}`,
+        download: `${dUrl}&t=${timestamp}`,
+      });
+      if (videoRef.current) {
+        videoRef.current.load();
+      }
+    } catch (error) {
+      setTopLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingTopLine(false);
+    }
+  };
+
+  const handleRemoveTopLine = async () => {
+    setIsSavingTopLine(true);
+    setTopLineError("");
+    try {
+      const response = await removeClipTopLine(projectId, clip.id, {
+        show_watermark: showWatermark,
+        show_subtitles: showSubtitles,
+      });
+      setIsEditingTopLine(false);
+      setTopLineInput("");
+      onClipUpdated?.(response.clip);
+      const timestamp = Date.now();
+      const [cUrl, dUrl] = await Promise.all([
+        clipUrl(projectId, clip.file),
+        clipDownloadUrl(projectId, clip.file),
+      ]);
+      setMediaUrls({
+        clip: `${cUrl}?t=${timestamp}`,
+        download: `${dUrl}&t=${timestamp}`,
+      });
+      if (videoRef.current) {
+        videoRef.current.load();
+      }
+    } catch (error) {
+      setTopLineError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsSavingTopLine(false);
+    }
+  };
+
   return (
     <article className="rounded-[12px] border border-[#232326] bg-[#111113] p-5 shadow-sm transition-all duration-150">
-      <video
-        ref={videoRef}
-        controls
-        crossOrigin="anonymous"
-        preload="metadata"
-        className="aspect-[9/16] w-full max-w-xs rounded-[10px] bg-black"
-        onLoadedMetadata={() => {
-          const video = videoRef.current;
-          if (!video) return;
-          video.defaultMuted = false;
-          video.muted = false;
-          video.volume = volume;
-          setMuted(false);
-        }}
-        onVolumeChange={(event) => {
-          setMuted(event.currentTarget.muted);
-          setVolume(event.currentTarget.volume);
-        }}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onEnded={() => setIsPlaying(false)}
-      >
-        {mediaUrls && <source src={mediaUrls.clip} type="video/mp4" />}
-      </video>
+      {/* Top line editor space above video */}
+      {isEditingTopLine && (
+        <div className="mb-3 max-w-xs rounded-[10px] border border-zinc-700/80 bg-zinc-900/95 p-3 shadow-lg">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-semibold text-white flex items-center gap-1.5">
+              <span className="inline-block size-2 rounded-full bg-[#10b981]" />
+              Top Line (Hook / Context)
+            </span>
+            <span
+              className={`font-mono text-[11px] font-medium ${
+                wordCount > 15
+                  ? "text-rose-400 font-bold"
+                  : wordCount >= 12
+                  ? "text-amber-400"
+                  : "text-zinc-400"
+              }`}
+            >
+              {wordCount} / 15 words
+            </span>
+          </div>
+
+          <textarea
+            value={topLineInput}
+            onChange={(e) => {
+              setTopLineInput(e.target.value);
+              if (topLineError) setTopLineError("");
+            }}
+            placeholder="e.g. MrBeast reacted this way when Ronaldo said it"
+            rows={2}
+            maxLength={100}
+            className="w-full rounded-[8px] border border-zinc-700 bg-black/60 px-2.5 py-1.5 text-xs text-white placeholder-zinc-500 focus:border-[#10b981] focus:outline-none focus:ring-1 focus:ring-[#10b981] resize-none"
+          />
+
+          <p className="mt-1 text-[10px] text-zinc-400">
+            Enforces 15-word limit &amp; safe margins so line never touches video, watermark, or sides.
+          </p>
+
+          {topLineError && (
+            <p role="alert" className="mt-1.5 text-xs text-rose-400">
+              {topLineError}
+            </p>
+          )}
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={isSavingTopLine || wordCount === 0 || wordCount > 15}
+              onClick={handleSaveTopLine}
+              className="inline-flex items-center gap-1.5 rounded-[7px] bg-[#10b981] px-2.5 py-1.5 text-xs font-semibold text-black transition-all hover:bg-[#059669] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSavingTopLine ? (
+                <>
+                  <svg className="size-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  Burning...
+                </>
+              ) : (
+                "Burn top line"
+              )}
+            </button>
+
+            {clip.top_line && (
+              <button
+                type="button"
+                disabled={isSavingTopLine}
+                onClick={handleRemoveTopLine}
+                className="rounded-[7px] border border-rose-900/60 bg-rose-950/40 px-2 py-1.5 text-xs font-medium text-rose-300 transition-all hover:bg-rose-900/60 hover:text-white disabled:opacity-50"
+              >
+                Remove
+              </button>
+            )}
+
+            <button
+              type="button"
+              disabled={isSavingTopLine}
+              onClick={() => {
+                setIsEditingTopLine(false);
+                setTopLineInput(clip.top_line || "");
+                setTopLineError("");
+              }}
+              className="rounded-[7px] border border-zinc-700 px-2 py-1.5 text-xs font-medium text-zinc-400 transition-all hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Video element with safe-zone live preview overlay */}
+      <div className="relative aspect-[9/16] w-full max-w-xs overflow-hidden rounded-[10px] bg-black">
+        <video
+          ref={videoRef}
+          controls
+          crossOrigin="anonymous"
+          preload="metadata"
+          className="size-full object-contain"
+          onLoadedMetadata={() => {
+            const video = videoRef.current;
+            if (!video) return;
+            video.defaultMuted = false;
+            video.muted = false;
+            video.volume = volume;
+            setMuted(false);
+          }}
+          onVolumeChange={(event) => {
+            setMuted(event.currentTarget.muted);
+            setVolume(event.currentTarget.volume);
+          }}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+        >
+          {mediaUrls && <source src={mediaUrls.clip} type="video/mp4" />}
+        </video>
+
+        {/* Live overlay showing safe margin positioning while editing */}
+        {isEditingTopLine && (
+          <>
+            {showWatermark && (
+              <div className="pointer-events-none absolute inset-x-0 top-[7%] z-10 flex justify-center px-4">
+                <div className="rounded-[4px] border border-white/20 bg-black/80 px-2 py-0.5 text-center font-medium text-[9px] text-zinc-300 shadow backdrop-blur-xs">
+                  Watermark moves here &uarr;
+                </div>
+              </div>
+            )}
+            {topLineInput.trim() && (
+              <div className="pointer-events-none absolute inset-x-0 top-[20%] z-10 flex justify-center px-4">
+                <div className="rounded-[6px] border border-black/70 bg-black/95 px-3 py-1.5 text-center font-bold text-white text-[11px] leading-tight shadow-xl max-w-[85%] mx-auto backdrop-blur-md">
+                  {topLineInput.trim().split("\n").map((line, idx) => (
+                    <div key={idx}>{line}</div>
+                  ))}
+                  <span className="block mt-0.5 text-[8px] font-normal text-emerald-400">Top line safe zone</span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
       <div className="mt-3 flex max-w-xs items-center gap-2">
         <button
           type="button"
@@ -135,12 +345,15 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
           <span className="w-8 text-right font-mono tabular-nums">{Math.round(volume * 100)}%</span>
         </label>
       </div>
+
       {audioStatus && (
         <p role="status" className="mt-2 max-w-xs text-xs text-amber-300">
           {audioStatus}
         </p>
       )}
-      <div className="mt-3">
+
+      {/* Action buttons: Download clip and Add/Edit top line */}
+      <div className="mt-3 flex max-w-xs flex-wrap items-center gap-2">
         <a
           href={mediaUrls?.download}
           className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#232326] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#10b981]"
@@ -150,13 +363,41 @@ const ClipCard = memo(function ClipCard({ clip, projectId }: { clip: Clip; proje
           </svg>
           Download clip
         </a>
+
+        <button
+          type="button"
+          onClick={() => {
+            setIsEditingTopLine((prev) => !prev);
+            setTopLineInput(clip.top_line || "");
+            setTopLineError("");
+          }}
+          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-1.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+            clip.top_line
+              ? "border-emerald-600/40 bg-emerald-950/20 text-emerald-300 hover:border-emerald-500 hover:text-white"
+              : "border-[#232326] text-zinc-200 hover:border-zinc-700 hover:text-white"
+          }`}
+        >
+          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+          </svg>
+          {clip.top_line ? "Edit top line" : "Add top line"}
+        </button>
       </div>
+
       {mediaUrlError && (
         <p role="status" className="mt-2 text-xs text-amber-300">
           Could not load clip URL: {mediaUrlError}
         </p>
       )}
-      <h3 className="mt-3.5 text-sm font-semibold text-white line-clamp-2">{clip.title}</h3>
+
+      {clip.top_line && (
+        <div className="mt-2.5 flex max-w-xs items-center gap-1.5 rounded-[6px] border border-emerald-900/40 bg-emerald-950/20 px-2 py-1 text-[11px] text-emerald-300">
+          <span className="font-semibold text-emerald-400 shrink-0">Top line:</span>
+          <span className="truncate italic">&ldquo;{clip.top_line}&rdquo;</span>
+        </div>
+      )}
+
+      <h3 className="mt-3 text-sm font-semibold text-white line-clamp-2">{clip.title}</h3>
       <p className="mt-1 text-xs text-zinc-400 font-mono">
         {clip.start.toFixed(1)}s → {clip.end.toFixed(1)}s · {clip.duration.toFixed(1)}s
       </p>
@@ -417,7 +658,18 @@ function ProjectClips({ projectId }: { projectId: string }) {
         ) : clips.length > 0 || generating ? (
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {clips.map((clip) => (
-              <ClipCard key={clip.id} clip={clip} projectId={projectId} />
+              <ClipCard
+                key={clip.id}
+                clip={clip}
+                projectId={projectId}
+                showWatermark={showWatermark}
+                showSubtitles={showSubtitles}
+                onClipUpdated={(updatedClip) => {
+                  setClips((prev) =>
+                    prev.map((c) => (c.id === updatedClip.id ? updatedClip : c)),
+                  );
+                }}
+              />
             ))}
             {generating && Array.from({
               length: Math.max(

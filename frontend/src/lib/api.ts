@@ -70,6 +70,7 @@ export type Clip = {
   duration: number;
   reason?: string;
   file: string;
+  top_line?: string;
   status: string;
 };
 
@@ -373,4 +374,57 @@ export async function clipDownloadUrl(projectId: string, filename: string): Prom
 export async function clipsArchiveDownloadUrl(projectId: string): Promise<string> {
   const apiUrl = await getApiUrl();
   return `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/download-all`;
+}
+
+export async function setClipTopLine(
+  projectId: string,
+  clipId: string,
+  topLine: string,
+  options?: { show_watermark?: boolean; show_subtitles?: boolean },
+): Promise<{ clip: Clip }> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/${encodeURIComponent(clipId)}/top-line`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        top_line: topLine,
+        show_watermark: options?.show_watermark,
+        show_subtitles: options?.show_subtitles,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not update clip top line"));
+  }
+  return response.json();
+}
+
+export async function removeClipTopLine(
+  projectId: string,
+  clipId: string,
+  options?: { show_watermark?: boolean; show_subtitles?: boolean },
+): Promise<{ clip: Clip }> {
+  const apiUrl = await getApiUrl();
+  const query = new URLSearchParams();
+  if (options?.show_watermark !== undefined) {
+    query.set("show_watermark", String(options.show_watermark));
+  }
+  if (options?.show_subtitles !== undefined) {
+    query.set("show_subtitles", String(options.show_subtitles));
+  }
+  const queryString = query.toString() ? `?${query.toString()}` : "";
+  const response = await fetch(
+    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/${encodeURIComponent(clipId)}/top-line${queryString}`,
+    {
+      method: "DELETE",
+    },
+  );
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not remove clip top line"));
+  }
+  return response.json();
 }

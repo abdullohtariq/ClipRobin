@@ -101,6 +101,12 @@ def generate_clips(
             progress_callback("Analyzing transcript", 0, 0)
         analysis = create_mock_analysis(project_directory, max_clip_seconds=max_clip_seconds)
 
+    analysis["generation_options"] = {
+        "show_subtitles": show_subtitles,
+        "show_watermark": show_watermark,
+    }
+    analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
+
     if cancel_event is not None and cancel_event.is_set():
         raise ClipGenerationCancelled("Clip generation was cancelled")
     transcript_segments = _load_transcript_segments(project_directory)
@@ -140,6 +146,7 @@ def generate_clips(
                     subtitle_segments=subtitle_segments if show_subtitles else None,
                     show_subtitles=show_subtitles,
                     show_watermark=show_watermark,
+                    top_line=clip.get("top_line"),
                     cancel_event=cancel_event,
                 )
                 if cancel_event is not None and cancel_event.is_set():
@@ -156,6 +163,7 @@ def generate_clips(
                     "id": clip_id,
                     "duration": round(clip["end"] - clip["start"], 3),
                     "file": final_output.name,
+                    "top_line": clip.get("top_line", ""),
                     "status": "ready",
                 }
                 generated.append(clip_metadata)
@@ -197,3 +205,99 @@ def generate_clips(
     if progress_callback:
         progress_callback("Finishing up", len(generated), len(generated))
     return generated
+
+
+def render_single_clip(
+    project_directory: Path,
+    clip_id: str,
+    top_line: str | None = None,
+    show_subtitles: bool | None = None,
+    show_watermark: bool | None = None,
+) -> dict[str, Any]:
+    source_files = list(project_directory.glob("source.*"))
+    if not source_files:
+        raise FileNotFoundError("Source video not found")
+    source_path = source_files[0]
+
+    analysis_path = project_directory / "analysis.json"
+    if not analysis_path.is_file():
+        raise FileNotFoundError("Analysis not found")
+    try:
+        analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError("Invalid analysis format") from error
+
+    clips = analysis.get("clips", [])
+    target_clip = next(
+        (c for c in clips if c.get("id") == clip_id or f"{c.get('id')}.mp4" == clip_id),
+        None,
+    )
+    if not target_clip:
+        raise ValueError(f"Clip '{clip_id}' not found in project")
+
+    cleaned_top_line: str | None = None
+    if top_line is not None and top_line.strip():
+        words = top_line.strip().split()
+        if len(words) > 15:
+            raise ValueError("Top line must be 15 words or fewer")
+        cleaned_top_line = top_line.strip()
+
+    saved_options = analysis.get("generation_options", {})
+    if show_watermark is not None:
+        use_watermark = show_watermark
+    elif "show_watermark" in saved_options:
+        use_watermark = bool(saved_options["show_watermark"])
+    else:
+        from app.services.video_editor import find_watermark_file
+        use_watermark = find_watermark_file() is not None
+
+    if show_subtitles is not None:
+        use_subtitles = show_subtitles
+    else:
+        use_subtitles = saved_options.get("show_subtitles", True)
+
+    if "generation_options" not in analysis:
+        analysis["generation_options"] = {}
+    analysis["generation_options"]["show_watermark"] = use_watermark
+    analysis["generation_options"]["show_subtitles"] = use_subtitles
+
+    transcript_segments = _load_transcript_segments(project_directory)
+    subtitle_segments = [
+        segment for segment in transcript_segments
+        if segment["end"] > target_clip["start"] and segment["start"] < target_clip["end"]
+    ]
+
+    clips_directory = project_directory / "clips"
+    clips_directory.mkdir(parents=True, exist_ok=True)
+    actual_id = target_clip.get("id") or clip_id.replace(".mp4", "")
+    final_output = clips_directory / f"{actual_id}.mp4"
+    temp_output = clips_directory / f".rendering_{actual_id}_{uuid.uuid4().hex[:6]}.mp4"
+
+    try:
+        create_clip(
+            source_path=source_path,
+            output_path=temp_output,
+            start_time=target_clip["start"],
+            end_time=target_clip["end"],
+            subtitle_segments=subtitle_segments if use_subtitles else None,
+            show_subtitles=use_subtitles,
+            show_watermark=use_watermark,
+            top_line=cleaned_top_line,
+        )
+        if temp_output.is_file():
+            temp_output.replace(final_output)
+    finally:
+        if temp_output.is_file():
+            temp_output.unlink(missing_ok=True)
+
+    target_clip["top_line"] = cleaned_top_line or ""
+    analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
+
+    return {
+        **target_clip,
+        "id": actual_id,
+        "duration": round(target_clip["end"] - target_clip["start"], 3),
+        "file": final_output.name,
+        "top_line": cleaned_top_line or "",
+        "status": "ready",
+    }

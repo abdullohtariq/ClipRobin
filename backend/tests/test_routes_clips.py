@@ -69,3 +69,50 @@ def test_generate_clips_accepts_show_watermark_param(tmp_path: Path, monkeypatch
     assert response.status_code == 200
     assert "job_id" in response.json()
 
+
+def test_update_and_delete_clip_top_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_id, project_dir = create_project()
+
+    mock_clip = {
+        "id": "clip_001",
+        "title": "Test Clip",
+        "start": 0.0,
+        "end": 10.0,
+        "duration": 10.0,
+        "file": "clip_001.mp4",
+        "top_line": "MrBeast reacted this way",
+        "status": "ready",
+    }
+
+    def mock_render(project_directory, clip_id, top_line=None, **kwargs):
+        res = dict(mock_clip)
+        res["top_line"] = top_line or ""
+        return res
+
+    monkeypatch.setattr("app.routes.clips.render_single_clip", mock_render)
+
+    # Test POST
+    response = client.post(
+        f"/api/projects/{project_id}/clips/clip_001/top-line",
+        json={"top_line": "MrBeast reacted this way"},
+    )
+    assert response.status_code == 200
+    assert response.json()["clip"]["top_line"] == "MrBeast reacted this way"
+
+    # Test DELETE
+    del_response = client.delete(
+        f"/api/projects/{project_id}/clips/clip_001/top-line",
+    )
+    assert del_response.status_code == 200
+    assert del_response.json()["clip"]["top_line"] == ""
+
+
+def test_update_clip_top_line_project_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    response = client.post(
+        "/api/projects/project_999/clips/clip_001/top-line",
+        json={"top_line": "Hook line"},
+    )
+    assert response.status_code == 404
+
