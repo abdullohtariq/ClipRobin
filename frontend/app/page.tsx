@@ -37,6 +37,7 @@ export default function Home() {
   const [downloadProgress, setDownloadProgress] = useState<{ step: string; progress: number; title?: string } | null>(null);
   const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
   const [clipDurationSeconds, setClipDurationSeconds] = useState<15 | 30 | 60 | 90>(30);
+  const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
   const [transcriptionProgress, setTranscriptionProgress] = useState<VideoProcessingProgress | null>(null);
@@ -722,6 +723,47 @@ export default function Home() {
                   <h2 className="text-base font-semibold text-white">Clip settings</h2>
                 </div>
                 <span className="text-xs text-zinc-400 font-medium">Timing &amp; captions</span>
+              </div>
+
+              {/* Generation Mode Selector */}
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-2">
+                  Generation mode
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isProcessingVideo}
+                    onClick={() => setGenerationMode("random")}
+                    className={`rounded-[10px] border py-2.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                      generationMode === "random"
+                        ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
+                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                    }`}
+                  >
+                    Random
+                  </button>
+
+                  <div className="relative group cursor-not-allowed">
+                    <button
+                      type="button"
+                      disabled
+                      title="COMING SOON"
+                      aria-label="AI mode coming soon"
+                      className="w-full h-full rounded-[10px] border border-[#232326] bg-[#0a0a0a]/50 py-2.5 text-xs font-medium text-zinc-500 cursor-not-allowed flex items-center justify-center gap-2 group-hover:border-zinc-700 transition-all duration-150 pointer-events-none"
+                    >
+                      <span className="font-semibold text-zinc-400">AI</span>
+                      <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/90 border border-amber-400/20">
+                        Soon
+                      </span>
+                    </button>
+                    {/* Hover tooltip */}
+                    <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-[10px] font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
+                      COMING SOON
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Clip Length Selector */}
