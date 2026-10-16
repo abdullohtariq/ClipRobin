@@ -50,30 +50,33 @@ def evict_old_generation_jobs() -> None:
 
 def ask_save_path_dialog(default_filename: str, file_type: str = "mp4") -> Path | None:
     try:
-        import tkinter as tk
-        from tkinter import filedialog
+        import subprocess
+        import sys
 
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        if file_type == "zip":
-            filetypes = [("ZIP Archive (*.zip)", "*.zip"), ("All Files (*.*)", "*.*")]
-            defaultextension = ".zip"
-        else:
-            filetypes = [("MP4 Video (*.mp4)", "*.mp4"), ("All Files (*.*)", "*.*")]
-            defaultextension = ".mp4"
-
-        chosen = filedialog.asksaveasfilename(
-            parent=root,
-            title="Save As",
-            initialfile=default_filename,
-            defaultextension=defaultextension,
-            filetypes=filetypes,
+        script = (
+            "import tkinter as tk, sys\n"
+            "from tkinter import filedialog\n"
+            "root = tk.Tk()\n"
+            "root.withdraw()\n"
+            "root.attributes('-topmost', True)\n"
+            "file_type = sys.argv[1] if len(sys.argv) > 1 else 'mp4'\n"
+            "default_fn = sys.argv[2] if len(sys.argv) > 2 else 'clip.mp4'\n"
+            "ext, fts = ('.zip', [('ZIP Archive (*.zip)', '*.zip'), ('All Files (*.*)', '*.*')]) "
+            "if file_type == 'zip' else ('.mp4', [('MP4 Video (*.mp4)', '*.mp4'), ('All Files (*.*)', '*.*')])\n"
+            "chosen = filedialog.asksaveasfilename(parent=root, title='Save As', "
+            "initialfile=default_fn, defaultextension=ext, filetypes=fts)\n"
+            "root.destroy()\n"
+            "if chosen:\n"
+            "    sys.stdout.write(chosen)\n"
         )
-        root.destroy()
-        if not chosen:
-            return None
-        return Path(chosen)
+        result = subprocess.run(
+            [sys.executable, "-c", script, file_type, default_filename],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        chosen = result.stdout.strip()
+        return Path(chosen) if chosen else None
     except Exception as error:
         logger.warning("Could not open native save dialog: %s", error)
         return None

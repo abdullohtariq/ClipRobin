@@ -232,3 +232,41 @@ def test_render_single_clip_preserves_passed_show_watermark(tmp_path: Path, monk
     assert saved.get("generation_options", {}).get("show_watermark") is True
 
 
+def test_render_subtitles_and_top_line_with_special_characters(tmp_path: Path):
+    from app.services.video_editor import _build_subtitle_filters, _build_top_line_filters
+    sub_dir = tmp_path / "subtitles"
+    sub_dir.mkdir()
+
+    # Test top line with ', %, :, \
+    tricky_top_line = "POV: It's 100% true (C:\\test)!"
+    filters = _build_top_line_filters(tricky_top_line, sub_dir, font_file="subtitle-font.ttf")
+    assert len(filters) > 0
+    line_file = sub_dir / "top-line-0.txt"
+    assert line_file.is_file()
+    assert "100%" in line_file.read_text(encoding="utf-8")
+    assert "drawtext=textfile=" in filters[0]
+    assert "expansion=none" in filters[0]
+
+    # Test subtitle segments with tricky quotes, colons, percentages, and backslashes
+    segments = [{
+        "start": 0.0,
+        "end": 4.0,
+        "text": "He said: 'It's 100% fine\\good'!",
+        "words": [
+            {"start": 0.0, "end": 1.0, "text": "He"},
+            {"start": 1.0, "end": 2.0, "text": "said:"},
+            {"start": 2.0, "end": 3.0, "text": "'It's"},
+            {"start": 3.0, "end": 4.0, "text": "100%\\fine"},
+        ]
+    }]
+    sub_filters = _build_subtitle_filters(
+        0.0,
+        5.0,
+        subtitle_segments=segments,
+        show_subtitles=True,
+        subtitle_directory=sub_dir,
+    )
+    assert len(sub_filters) > 0
+    assert any("expansion=none" in f for f in sub_filters)
+
+

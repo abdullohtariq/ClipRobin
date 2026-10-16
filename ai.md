@@ -1,6 +1,6 @@
 # Clip Robin — AI Context, Codebase Audit & Engineering Handbook
 
-> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.15**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
+> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.16**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
 >
 > **Do NOT delete or overwrite this file.** Maintain and update this context as the project evolves.
 
@@ -101,7 +101,7 @@ ClipRobin/
 │   │   │   └── video_editor.py   # FFmpeg command builder, filtergraph, animated subtitles & watermark
 │   │   ├── __init__.py
 │   │   └── main.py               # FastAPI app definition, CORS, router mounting
-│   ├── tests/                    # Automated pytest suite (40 unit & integration tests)
+│   ├── tests/                    # Automated pytest suite (55 unit & integration tests)
 │   │   ├── __init__.py
 │   │   ├── test_ai_analyzer.py
 │   │   ├── test_clip_generator.py
@@ -224,7 +224,7 @@ projects/
 
 ## 5. Codebase Bugs, Vulnerabilities & Implementation Status
 
-> **Audit Status as of v0.1.15**: The primary Bug Bounty cycle resolved 12 critical and high-priority flaws across the backend and frontend, and established a 40-test automated test suite in `backend/tests/`.
+> **Audit Status as of v0.1.16**: The Bug Bounty and feature hardening cycles resolved all critical, high, and medium-priority flaws across the backend and frontend, and established a 55-test automated test suite in `backend/tests/`.
 
 ### 🔴 Critical Severity (Showstoppers)
 
@@ -301,16 +301,17 @@ projects/
 - **Fix**: Long-running generation, transcription, and download flows are offloaded to FastAPI `BackgroundTasks` with thread-safe cancellation events and progress dictionaries (`GENERATION_JOBS`).
 - **Tests**: `backend/tests/test_routes_clips.py` and `backend/tests/test_routes_jobs.py`.
 
-#### 12. Real-Time Skeleton UI & Startup Smoothing `[IMPLEMENTED]`
-- **Files**: `frontend/src/components/skeletons.tsx`, `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/page.tsx`, `frontend/app/globals.css`.
-- **Status**: **IMPLEMENTED & VERIFIED**.
+#### 12. Progressive Clip Rendering & Real-Time Skeleton UI Smoothing (v0.1.16) `[RESOLVED & IMPLEMENTED]`
+- **Files**: `frontend/src/components/skeletons.tsx`, `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/page.tsx`, `frontend/app/globals.css`, `backend/app/routes/clips.py`, `backend/app/services/clip_generator.py`.
+- **Status**: **RESOLVED & VERIFIED**.
 - **Features**:
+  - Clips appear immediately in the UI as each one completes rendering (e.g. 1 of 29 clips ready), without waiting for all clips to finish.
+  - Slicing renders each clip to a hidden file (`.rendering_{clip_id}.mp4`) directly inside `clips_directory`, immediately renaming it to `{clip_id}.mp4` upon completion.
   - Created reusable `ClipSkeletonCard` (9:16 vertical ratio with spinning loader, shimmer animation, and metadata placeholders), `ProjectSkeletonCard`, and `RecentProjectSkeletonItem`.
   - Replaced jarring raw text loading indicators ("Loading projects...", "Loading clips...") with fluid CSS-animated skeleton cards on initial load and Next.js `Suspense` fallbacks.
-  - As clips generate one by one (e.g. clip 1 of 29), ready clips appear immediately in Projects, Clips Studio, and Dashboard, while remaining clips display shimmering skeleton placeholders.
   - Projects page provides live counter (`X of Y clips ready (generating...)`) and real-time clip preview grid with "Watch" shortcuts.
 
-#### 13. Desktop Window Maximization on App Launch `[IMPLEMENTED]`
+#### 13. Desktop Window Maximization on App Launch (v0.1.16) `[IMPLEMENTED]`
 - **Files**: `frontend/src-tauri/tauri.conf.json`, `frontend/app/window-init.tsx`, `frontend/app/layout.tsx`.
 - **Status**: **IMPLEMENTED & VERIFIED**.
 - **Features**:
@@ -333,14 +334,14 @@ projects/
 
 ---
 
-### 🟢 UI/UX Enhancements & New Features (v0.1.15)
+### 🟢 UI/UX Enhancements & New Features (v0.1.16)
 
-#### 22. Fixed Sticky Sidebar Navigation `[RESOLVED]`
+#### 16. Fixed Sticky Sidebar Navigation `[RESOLVED]`
 - **Files**: `frontend/app/layout.tsx`, `frontend/app/globals.css`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Fixed layout scrolling bug where scrolling down the Dashboard, Clips, or Projects view scrolled the sidebar navigation out of view. The sidebar is now pinned (`fixed` / `sticky` with independent content scrolling) so navigation is always instantly accessible.
 
-#### 23. Watermark Burning Engine & UI Toggles `[RESOLVED / IMPLEMENTED]`
+#### 17. Watermark Burning Engine & UI Toggles `[RESOLVED / IMPLEMENTED]`
 - **Files**: `backend/app/services/video_editor.py`, `backend/app/services/clip_generator.py`, `backend/app/routes/clips.py`, `frontend/app/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/clips/page.tsx`, `frontend/src/lib/api.ts`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Added user-configurable watermark burning into vertical clips:
@@ -350,17 +351,12 @@ projects/
   - **UI Toggles**: Accessible toggle switch on Dashboard ("Add a watermark: Made with Clip Robin"), Projects, and Clips pages.
 - **Tests**: `backend/tests/test_clip_generator.py::test_generate_clips_passes_show_watermark` and `backend/tests/test_routes_clips.py::test_generate_clips_accepts_show_watermark_param`.
 
-#### 24. Progressive Clip Rendering & Real-Time Skeleton Loading (v0.1.16) `[RESOLVED / IMPLEMENTED]`
-- **Files**: `backend/app/routes/clips.py`, `backend/app/services/clip_generator.py`, `frontend/app/clips/page.tsx`, `frontend/src/components/skeletons.tsx`.
-- **Status**: **RESOLVED & VERIFIED**.
-- **Feature**: Clips now appear immediately in the UI as each one completes rendering (e.g. 1 of 29 clips ready), without waiting for all clips to finish. Skeleton shimmer placeholders dynamically indicate remaining clips in progress. Tauri desktop shell also launches maximized by default.
-
-#### 25. Generation Mode Selector: Random vs AI (v0.1.16) `[RESOLVED / IMPLEMENTED]`
+#### 18. Generation Mode Selector: Random vs AI (v0.1.16) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `frontend/app/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/clips/page.tsx`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Added a generation mode toggle switch above clip duration selection: "Random" (active) and "AI" (disabled with an interactive tooltip indicating "COMING SOON").
 
-#### 26. Top Line Headline Hook Burning Engine & Social Margins (v0.1.16) `[RESOLVED / IMPLEMENTED]`
+#### 19. Top Line Headline Hook Burning Engine & Social Margins (v0.1.16) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `backend/app/services/video_editor.py`, `backend/app/services/clip_generator.py`, `backend/app/routes/clips.py`, `frontend/app/clips/page.tsx`, `frontend/src/lib/api.ts`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Users can add and burn custom headline context hooks (e.g., "POV: When the code works on the first try", "MrBeast reacted this way") into generated vertical clips:
@@ -370,13 +366,13 @@ projects/
   - **Single-Clip Re-render API**: `POST /api/projects/{id}/clips/{clip_id}/top-line` and `DELETE /api/projects/{id}/clips/{clip_id}/top-line` re-render clips with FFmpeg atomically without affecting other clips and persist metadata to `analysis.json`.
 - **Tests**: `backend/tests/test_clip_generator.py::test_render_single_clip_updates_analysis_and_creates_clip`, `test_render_single_clip_enforces_word_limit`, `test_render_single_clip_preserves_passed_show_watermark`, and `backend/tests/test_routes_clips.py::test_update_and_delete_clip_top_line`.
 
-#### 27. Native File Explorer Save As Dialog for Clip & ZIP Downloads (v0.1.16) `[RESOLVED / IMPLEMENTED]`
+#### 20. Native File Explorer Save As Dialog for Clip & ZIP Downloads (v0.1.16) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `backend/app/routes/clips.py`, `frontend/app/clips/page.tsx`, `frontend/src/lib/api.ts`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Replaced passive direct-to-Downloads anchor downloads with explicit native Windows File Explorer Save As dialogs:
   - **Modern File System Access API**: Uses `window.showSaveFilePicker({ suggestedName, types })` in Edge/Chrome/WebView2 desktop browsers to directly prompt the user with Windows File Explorer, allowing them to choose their destination directory and file name before streaming bytes.
   - **Clean Cancellation**: User clicking "Cancel" in File Explorer triggers `AbortError`, which is caught and handled silently without dumping unwanted files into `%USERPROFILE%\Downloads`.
-  - **Backend Native Dialog Fallback**: `POST /api/projects/{id}/clips/{clip_id}/save-dialog` and `POST /api/projects/{id}/clips/download-all-dialog` invoke Windows Tkinter `filedialog.asksaveasfilename` directly on the host machine to prompt a topmost Save As dialog and copy the file or generate the zip directly to the target path.
+  - **Backend Native Dialog Fallback**: `POST /api/projects/{id}/clips/{clip_id}/save-dialog` and `POST /api/projects/{id}/clips/download-all-dialog` invoke Windows Tkinter `filedialog.asksaveasfilename` directly in an isolated child process to prompt a topmost Save As dialog and copy the file or generate the zip directly to the target path without non-main thread conflicts.
   - **Single & Batch Downloads**: Hooked up to both individual "Download clip" buttons (with spinning "Saving..." indicators) and the header "Download all clips (ZIP)" action.
 - **Tests**: `backend/tests/test_routes_clips.py::test_export_clip_with_dialog_saved`, `test_export_clip_with_dialog_cancelled`, `test_export_clip_with_dialog_not_found`, and `test_export_all_clips_with_dialog`.
 
@@ -387,14 +383,14 @@ projects/
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **54 tests** across 11 test suites in `backend/tests/` (All 54 passing via `pytest`).
+- **Active Backend Automated Tests**: **55 tests** across 11 test suites in `backend/tests/` (All 55 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (54 Implemented & Passing)
+### Backend Test Inventory (55 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
@@ -403,7 +399,7 @@ projects/
 | **`app.services.project_manager`** | `tests/test_project_manager.py` | ✅ Passed | • `create_project()` generates sequential project IDs (`project_001`, `002`).<br>• `get_project_directory()` validates ID format regex.<br>• Path traversal attempts (`project_../etc`) raise `ValueError`.<br>• Missing project raises `FileNotFoundError`.<br>• `list_projects()` detects source type and clip count.<br>• `CLIPROBIN_PROJECTS_DIR` environment variable override is honored. |
 | **`app.services.ai_analyzer`** | `tests/test_ai_analyzer.py` | ✅ Passed | • `validate_transcript()` rejects missing segments or malformed schema.<br>• Rejects non-numeric timestamps.<br>• Clamps and tolerates overlapping segments without crashing.<br>• Prompt formatting formats lines correctly.<br>• `request_openai_compatible()` handles valid response & bearer token.<br>• `request_gemini()` formats `generateContent` URL & key params.<br>• Handles HTTP 401/429/500 errors from AI providers.<br>• Handles Markdown code-block wrapped JSON response.<br>• Tolerates floating-point variance in clip start/end boundaries.<br>• Synthesizes missing clip IDs (`clip_001`, etc.) automatically. |
 | **`app.services.mock_analyzer`** | `tests/test_mock_analyzer.py` | ✅ Passed | • Slices transcript into chunks between 20s and 60s.<br>• Avoids orphan trailing segments shorter than `MIN_CLIP_SECONDS`.<br>• Handles single-segment transcripts.<br>• Generates sequential clip IDs. |
-| **`app.services.clip_generator`** | `tests/test_clip_generator.py` | ✅ Passed | • Raises `FileNotFoundError` if source video is missing.<br>• Reuses existing valid `analysis.json`.<br>• Calls mock analyzer if no analysis exists.<br>• Renders clips to temporary staging directory (`.clips-staging-`).<br>• Atomic move of clips from staging to final directory.<br>• Cancellation cleans up staging files without deleting old clips.<br>• Passes `show_watermark` configuration to `create_clip`.<br>• `render_single_clip` updates `analysis.json`, enforces 15-word limit, and preserves watermark options. |
+| **`app.services.clip_generator`** | `tests/test_clip_generator.py` | ✅ Passed | • Raises `FileNotFoundError` if source video is missing.<br>• Reuses existing valid `analysis.json`.<br>• Calls mock analyzer if no analysis exists.<br>• Renders clips progressively directly inside `clips_directory` using hidden `.rendering_{clip_id}.mp4` and renames to `{clip_id}.mp4` upon completion.<br>• Preserves existing clips on cancellation or error via `.clips-backup-*` recovery.<br>• Passes `show_watermark` configuration to `create_clip`.<br>• `render_single_clip` updates `analysis.json`, enforces 15-word limit, and preserves watermark options.<br>• Subtitle filter graph safely escapes quotes, colons, percent signs, and backslashes without FFmpeg parse failure. |
 | **`app.routes.download`** | `tests/test_routes_download.py` | ✅ Passed | • Rejects non-YouTube domains (e.g. `vimeo.com`, `malicious.com`).<br>• Accepts `youtube.com` and `youtu.be` URLs.<br>• Cleans up project folder if download fails. |
 | **`app.routes.local_video`** | `tests/test_routes_local_video.py` | ✅ Passed | • Rejects unsupported video extensions (`.exe`, `.txt`).<br>• Accepts `.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`.<br>• Queues background transcription task and reports progress.<br>• Rejects nonexistent file path on `/from-path`.<br>• Rejects unsupported extension on `/from-path`.<br>• Successfully creates project and queues transcription from local path.<br>• Evicts completed transcription jobs when capacity exceeds limit. |
 | **`app.routes.clips`** | `tests/test_routes_clips.py` | ✅ Passed | • Validates `clip_duration_seconds` in `{15, 30, 60, 90}`.<br>• Rejects duplicate concurrent clip generation for same project (409).<br>• Returns 404 for nonexistent projects and missing downloads.<br>• Accepts `show_watermark` query parameter for clip generation.<br>• `POST` and `DELETE /api/projects/{id}/clips/{clip_id}/top-line` endpoints burn and clear top lines.<br>• Evicts completed generation jobs when capacity exceeds limit.<br>• Returns 404 when saving nonexistent clip with dialog.<br>• Returns cancelled status when user cancels native save dialog.<br>• Exports clip to chosen location on save dialog confirmation.<br>• Exports all clips ZIP to chosen location on save dialog confirmation. |
@@ -418,7 +414,7 @@ projects/
 | :--- | :--- | :--- | :--- |
 | **`src/lib/api.ts`** | `src/lib/__tests__/api.test.ts` | P0 | 1. Resolves `getApiUrl()` to `127.0.0.1:8000` in web mode.<br>2. Resolves `getApiUrl()` via `backend_port` Tauri IPC in desktop mode.<br>3. Handles IPC failure with retry instead of permanently cached rejection.<br>4. `getApiErrorMessage()` parses string details, array validation errors, and fallbacks.<br>5. `downloadVideo()` issues correct POST request.<br>6. `transcribeLocalVideo()` tracks upload progress via XHR.<br>7. `generateClips()` poll loop handles status transitions (`queued` -> `processing` -> `completed`).<br>8. `generateClips()` stops polling on `failed` or `cancelled`.<br>9. `cancelClipGeneration()` posts cancellation. |
 | **`app/page.tsx` (Dashboard)** | `app/__tests__/dashboard.test.tsx` | P0 | 10. Renders YouTube URL input and download button.<br>11. Disables download button while downloading or processing.<br>12. Validates video files on drag-and-drop.<br>13. Accepts `.mkv`/`.webm` files with empty MIME types.<br>14. Displays upload and transcription progress bars.<br>15. Transitions progress steps ("Uploading" -> "Loading model" -> "Transcribing" -> "Clips ready").<br>16. Navigates to project upon completion. |
-| **`app/clips/page.tsx`** | `app/clips/__tests__/clips.test.tsx` | P0 | 17. Displays empty state when no project selected.<br>18. Loads and renders clips for valid project ID.<br>19. ClipCard renders HTML5 video element with correct src.<br>20. Volume slider adjusts video volume.<br>21. Mute/unmute toggle changes audio state.<br>22. Single clip download link points to `?download=true`.<br>23. "Download all" triggers ZIP download.<br>24. Shows generation progress banner when job is running.<br>25. Cancel button prompts user confirmation before cancelling. |
+| **`app/clips/page.tsx`** | `app/clips/__tests__/clips.test.tsx` | P0 | 17. Displays empty state when no project selected.<br>18. Loads and renders clips for valid project ID.<br>19. ClipCard renders HTML5 video element with correct src.<br>20. Volume slider adjusts video volume.<br>21. Mute/unmute toggle changes audio state.<br>22. "Download clip" invokes native Windows Save As dialog picker; handles user cancel cleanly without unwanted file downloads.<br>23. "Download all" triggers ZIP download with Save As dialog.<br>24. Shows generation progress banner when job is running.<br>25. Cancel button prompts user confirmation before cancelling. |
 | **`app/projects/page.tsx`** | `app/projects/__tests__/projects.test.tsx` | P0 | 26. Renders list of projects with source type and clip count.<br>27. Delete project prompts confirmation.<br>28. Successful deletion removes project from list.<br>29. "Generate Clips" triggers clip generation for selected project.<br>30. Displays inline transcription progress bar for transcribing project.<br>31. Displays inline clip generation progress bar with clip counter. |
 | **`app/settings/page.tsx`** | `app/settings/__tests__/settings.test.tsx` | P1 | 32. Persists changes to local storage or backend API.<br>33. Form controls reflect loaded preferences.<br>34. Form validation for project directory path. |
 | **`app/job-progress.tsx`** | `app/__tests__/job-progress.test.tsx` | P1 | 35. Renders nothing when no active jobs.<br>36. Shows animated spinner and badge count when jobs are running.<br>37. Hover/focus expands flyout showing progress for all active jobs.<br>38. Displays connection error if backend is unreachable. |
@@ -437,19 +433,19 @@ projects/
 ## 7. Edge Cases Not Properly Addressed
 
 ### 1. Media & Video Codec Edge Cases
-- **Silent Videos**: Source videos with no audio stream (e.g., recorded slideshows, screen recordings) fail transcription or crash FFmpeg during MP3 audio encoding.
-- **Variable Frame Rate (VFR)**: Phone recordings (iPhone/Android) frequently use VFR. Slicing with FFmpeg `-ss` before `-i` causes audio/video desynchronization over time.
+- **Silent Videos**: Source videos with no audio stream are detected via `ffprobe` / `has_audio_stream()` probing and encoded with `-an` to prevent FFmpeg crashes (Item 9). Transcription runs with `vad_filter=True` and returns 0 segments cleanly without crashing.
+- **Variable Frame Rate (VFR)**: Phone recordings (iPhone/Android) frequently use VFR. Slicing with FFmpeg `-ss` before `-i` causes audio/video desynchronization over time; requires `-vsync cfr` / `fps` filter normalization.
 - **HDR & 10-Bit Color**: 10-bit HEVC/HDR footage scaled with basic `format=yuv420p` renders washed-out colors without tonemapping filters (`zscale` / `tonemap`).
 - **Unusual Aspect Ratios**: Ultra-wide 21:9 or vertical 9:16 inputs padded to 720x1280 vertical can result in extreme letterboxing or unintended black bar padding.
-- **Rotated Videos**: Mobile videos with EXIF rotation metadata (`displaymatrix`) can lose rotation metadata during FFmpeg cutting, resulting in sideways video output.
+- **Rotated Videos**: Mobile videos with EXIF rotation metadata (`displaymatrix`) can lose rotation metadata during FFmpeg cutting, resulting in sideways video output; requires `-noautorotate` or explicit rotation filter transposition.
 - **Corrupted Keyframes / Missing MOOV Atom**: Incomplete MP4s without faststart MOOV atom at the beginning fail seeking during slicing.
 
 ### 2. Subtitle & Typography Edge Cases
 - **Punctuation & Word Wrap**: Long words (e.g. URLs or hyphenated technical terms) can exceed `max_width=640`, overflowing past the edge of the 720px video container.
 - **Word Timestamps with Zero Duration**: Whisper occasionally yields `word.start == word.end`, creating divide-by-zero or zero-duration highlight filters.
 - **RTL Languages (Arabic / Hebrew / Persian)**: Standard FFmpeg `drawtext` does not implement HarfBuzz bidirectional text shaping, rendering Arabic characters detached and reversed.
-- **Special Characters in Subtitles**: Quotes (`'`), percent signs (`%`), colons (`:`), and backslashes (`\`) inside subtitle text break FFmpeg `drawtext` filter parsing if not escaped.
-- **Font Availability**: Hardcoded font lookup (`C:\Windows\Fonts\segoeuib.ttf`) fails on Windows N-editions or non-standard system drives (D:\).
+- **Special Characters in Subtitles**: Subtitles, animated word highlights, and top lines are written to dedicated text files inside the temporary working directory and rendered with `drawtext=textfile='...':expansion=none`, safely preserving quotes (`'`), percent signs (`%`), colons (`:`), and backslashes (`\`) without FFmpeg syntax corruption (verified in `test_clip_generator.py`).
+- **Font Availability**: `_copy_font_file()` dynamically inspects multiple system font candidates (`segoeuib.ttf`, `arialbd.ttf`, `segoeui.ttf`, `arial.ttf`) and copies the resolved font to the local staging directory to ensure font availability across Windows N-editions and custom drives (Item 10).
 
 ### 3. Network & External API Edge Cases
 - **YouTube Anti-Bot & SABR Blocks**: YouTube aggressively blocks datacenter IPs and outdated `yt-dlp` instances with HTTP 403 or bot challenges (po-token requirements).
@@ -461,12 +457,12 @@ projects/
 ### 4. Concurrency, Storage & Windows Filesystem Edge Cases
 - **Windows Path Limits (`MAX_PATH`)**: Deeply nested directories (`%APPDATA%/.../cliprobin-subtitles-...`) can exceed 260 characters on Windows systems without LongPathsEnabled.
 - **Disk Space Exhaustion**: Generating multiple 60-second clips from a 4K 10GB video can easily fill the user's C: drive; no pre-flight disk space check exists.
-- **Concurrent Generation Conflict**: If a user clicks "Generate" across multiple browser tabs for the same project, file write collisions corrupt `analysis.json` and intermediate MP4s.
+- **Concurrent Generation Conflict**: Concurrent generation runs for the same project are rejected at the route layer with HTTP 409 Conflict. In addition, single-clip top-line re-renders write atomically to `analysis.json` to guard against metadata race conditions.
 - **Project Number Overflow / Gaps**: Deleting `project_002` leaves a gap; `create_project()` uses linear probing from 1 upwards, causing $O(N)$ filesystem checks as projects grow.
 
 ### 5. Client Lifecycle & Network Resilience
 - **Offline Startup**: If launched with no internet connection, the app should function 100% locally for local videos, but update check errors and missing model downloads must fail gracefully.
-- **Orphan Backend Process**: If the Tauri desktop window is forcibly killed via Task Manager, the background `cliprobin-api.exe` process can remain running as an orphan holding port 8000.
+- **Orphan Backend Process**: Desktop builds allocate dynamic ephemeral loopback ports (`127.0.0.1:0`) passed via `CLIPROBIN_API_PORT`, eliminating fixed port 8000 collisions. On app exit, Tauri's exit handler sends `child.kill()` to cleanly terminate the backend process.
 - **Client Disconnection During Generation**: Navigating between pages should not cancel background tasks; polling must resume seamlessly.
 
 ---
