@@ -57,7 +57,4 @@ frontend/src-tauri/gen/schemas/
 exports/
 backend/data/projects/*
 !backend/data/projects/.gitkeep
-backend/dist/
-
-# AI Model Context
-ai.md
+backend/dist/
