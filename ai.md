@@ -1,6 +1,6 @@
 # Clip Robin — AI Context, Codebase Audit & Engineering Handbook
 
-> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.16**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
+> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.17**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
 >
 > **Do NOT delete or overwrite this file.** Maintain and update this context as the project evolves.
 
