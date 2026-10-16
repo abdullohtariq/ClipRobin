@@ -27,6 +27,7 @@ class TopLineRequest(BaseModel):
     top_line: str
     show_watermark: bool | None = None
     show_subtitles: bool | None = None
+    framing_mode: str | None = None
 
 
 router = APIRouter(prefix="/api/projects")
@@ -127,11 +128,17 @@ def generate_project_clips(
     show_subtitles: bool = True,
     show_watermark: bool = False,
     clip_duration_seconds: int = 60,
+    framing_mode: str = "standard",
 ) -> dict[str, str]:
     if clip_duration_seconds not in {15, 30, 60, 90}:
         raise HTTPException(
             status_code=422,
             detail="Clip duration must be 15, 30, 60, or 90 seconds",
+        )
+    if framing_mode not in {"standard", "square_rounded"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Framing mode must be 'standard' or 'square_rounded'",
         )
     project_directory = project_or_404(project_id)
     job_id = uuid.uuid4().hex
@@ -172,6 +179,7 @@ def generate_project_clips(
         cancel_event,
         clip_duration_seconds,
         show_watermark,
+        framing_mode,
     )
     return {"job_id": job_id}
 
@@ -184,6 +192,7 @@ def run_clip_generation(
     cancel_event: threading.Event,
     clip_duration_seconds: int = 60,
     show_watermark: bool = False,
+    framing_mode: str = "standard",
 ) -> None:
     def report_progress(
         step: str,
@@ -224,6 +233,7 @@ def run_clip_generation(
             progress_callback=report_progress,
             cancel_event=cancel_event,
             max_clip_seconds=clip_duration_seconds,
+            framing_mode=framing_mode,
         )
     except ClipGenerationCancelled:
         finish_cancelled_job(job_id, project_id)
@@ -350,6 +360,7 @@ def update_clip_top_line(
             top_line=payload.top_line,
             show_watermark=payload.show_watermark,
             show_subtitles=payload.show_subtitles,
+            framing_mode=payload.framing_mode,
         )
         return {"clip": updated_clip}
     except ValueError as error:
@@ -366,6 +377,7 @@ def delete_clip_top_line(
     clip_id: str,
     show_watermark: bool | None = None,
     show_subtitles: bool | None = None,
+    framing_mode: str | None = None,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
     raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
@@ -376,6 +388,7 @@ def delete_clip_top_line(
             top_line=None,
             show_watermark=show_watermark,
             show_subtitles=show_subtitles,
+            framing_mode=framing_mode,
         )
         return {"clip": updated_clip}
     except ValueError as error:

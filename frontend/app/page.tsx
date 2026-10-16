@@ -6,6 +6,7 @@ import {
   ActiveJob,
   Clip,
   downloadVideo,
+  FramingMode,
   generateClips,
   getActiveJobs,
   getLatestClipGenerationJob,
@@ -38,6 +39,7 @@ export default function Home() {
   const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
   const [clipDurationSeconds, setClipDurationSeconds] = useState<15 | 30 | 60 | 90>(30);
   const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
+  const [framingMode, setFramingMode] = useState<FramingMode>("standard");
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
   const [transcriptionProgress, setTranscriptionProgress] = useState<VideoProcessingProgress | null>(null);
@@ -247,6 +249,7 @@ export default function Home() {
         },
         clipDurationSeconds,
         showWatermark,
+        framingMode,
       );
 
       if (generation.cancelled) {
@@ -790,6 +793,128 @@ export default function Home() {
                       </button>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* Video Framing / Layout Visual Selector */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs font-medium text-zinc-400">
+                    Video layout & framing
+                  </label>
+                  <span className="text-[11px] text-zinc-500 font-normal">
+                    Visual preview
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Video framing mode">
+                  {/* Option 1: Standard Vertical (Letterbox) */}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={framingMode === "standard"}
+                    disabled={isProcessingVideo}
+                    onClick={() => setFramingMode("standard")}
+                    className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                      framingMode === "standard"
+                        ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
+                        : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
+                    }`}
+                  >
+                    {/* Visual Phone Mockup */}
+                    <div className="relative mb-3 flex h-24 w-14 items-center justify-center rounded-lg border border-zinc-700 bg-black p-1 shadow-inner overflow-hidden">
+                      {/* Subtle notch */}
+                      <div className="absolute top-1 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-zinc-700" />
+                      
+                      {/* 16:9 Letterbox video rectangle in center */}
+                      <div className="w-full h-8 rounded-[2px] bg-gradient-to-br from-zinc-700 via-zinc-600 to-zinc-700 flex items-center justify-center border border-zinc-600/50 shadow-sm">
+                        <svg className="size-3 text-zinc-300" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+
+                      {/* Bottom subtitle mock lines */}
+                      <div className="absolute bottom-2 left-1.5 right-1.5 space-y-0.5">
+                        <div className="h-0.5 w-3/4 mx-auto rounded bg-zinc-600/80" />
+                        <div className="h-0.5 w-1/2 mx-auto rounded bg-amber-400/80" />
+                      </div>
+                    </div>
+
+                    <div className="w-full text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span className={`text-xs font-semibold ${framingMode === "standard" ? "text-white" : "text-zinc-300"}`}>
+                          Standard
+                        </span>
+                        {framingMode === "standard" && (
+                          <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
+                            ✓
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-zinc-400">
+                        Classic 9:16 letterbox
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Option 2: 1:1 Rounded Square (TikTok & Reels Style) */}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={framingMode === "square_rounded"}
+                    disabled={isProcessingVideo}
+                    onClick={() => setFramingMode("square_rounded")}
+                    className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                      framingMode === "square_rounded"
+                        ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
+                        : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
+                    }`}
+                  >
+                    {/* Trending / Popular Pill Badge */}
+                    <div className="absolute -top-2 right-2 z-10 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 px-1.5 py-0.5 text-[9px] font-bold text-zinc-950 shadow-md">
+                      POPULAR
+                    </div>
+
+                    {/* Visual Phone Mockup */}
+                    <div className="relative mb-3 flex h-24 w-14 items-center justify-center rounded-lg border border-zinc-700 bg-black p-1 shadow-inner overflow-hidden">
+                      {/* Subtle notch */}
+                      <div className="absolute top-1 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-zinc-700" />
+                      
+                      {/* Top hook line preview */}
+                      <div className="absolute top-2.5 left-1.5 right-1.5">
+                        <div className="h-0.5 w-4/5 mx-auto rounded bg-emerald-400/90" />
+                      </div>
+
+                      {/* 1:1 Square with rounded corners in center */}
+                      <div className="size-11 rounded-[6px] bg-gradient-to-br from-emerald-600/90 via-teal-700 to-zinc-800 flex items-center justify-center border border-emerald-400/40 shadow-sm relative overflow-hidden">
+                        <svg className="size-3 text-white" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+
+                      {/* Bottom subtitle mock lines */}
+                      <div className="absolute bottom-2 left-1.5 right-1.5 space-y-0.5">
+                        <div className="h-0.5 w-3/4 mx-auto rounded bg-amber-400/90" />
+                        <div className="h-0.5 w-1/2 mx-auto rounded bg-zinc-500" />
+                      </div>
+                    </div>
+
+                    <div className="w-full text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span className={`text-xs font-semibold ${framingMode === "square_rounded" ? "text-white" : "text-zinc-300"}`}>
+                          1:1 Rounded
+                        </span>
+                        {framingMode === "square_rounded" && (
+                          <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
+                            ✓
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-emerald-400 font-medium">
+                        TikTok & Reels square
+                      </p>
+                    </div>
+                  </button>
                 </div>
               </div>
 

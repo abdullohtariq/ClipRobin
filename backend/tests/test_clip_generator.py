@@ -270,3 +270,79 @@ def test_render_subtitles_and_top_line_with_special_characters(tmp_path: Path):
     assert any("expansion=none" in f for f in sub_filters)
 
 
+def test_generate_rounded_corner_mask(tmp_path: Path):
+    from app.services.video_editor import _generate_rounded_corner_mask
+    from PIL import Image
+
+    mask_path = _generate_rounded_corner_mask(tmp_path, size=660, radius=36)
+    assert mask_path.is_file()
+    assert mask_path.name == "rounded-mask.png"
+
+    with Image.open(mask_path) as img:
+        assert img.size == (660, 660)
+        # Center should be fully opaque (255)
+        assert img.getpixel((330, 330)) == 255
+        # Outer corner (0, 0) should be transparent/black (0)
+        assert img.getpixel((0, 0)) == 0
+
+
+def test_generate_clips_with_square_rounded_framing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 15.0, "reason": "Test"}
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def mock_create_clip(source, output, start, end, **kwargs):
+        captured.update(kwargs)
+        output.write_bytes(b"square clip content")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    results = generate_clips(tmp_path, framing_mode="square_rounded")
+    assert len(results) == 1
+    assert captured.get("framing_mode") == "square_rounded"
+
+    saved_analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved_analysis.get("generation_options", {}).get("framing_mode") == "square_rounded"
+
+
+def test_render_single_clip_square_rounded_framing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.clip_generator import render_single_clip
+
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 10.0, "reason": "Test"}
+            ],
+            "generation_options": {
+                "framing_mode": "square_rounded"
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def mock_create_clip(source_path, output_path, start_time, end_time, **kwargs):
+        captured.update(kwargs)
+        output_path.write_bytes(b"square single clip")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    result = render_single_clip(tmp_path, "clip_001")
+    assert captured.get("framing_mode") == "square_rounded"
+    saved = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved.get("generation_options", {}).get("framing_mode") == "square_rounded"
+
+
+

@@ -69,6 +69,7 @@ def generate_clips(
     progress_callback: Callable[[str, int, int], None] | None = None,
     cancel_event: threading.Event | None = None,
     max_clip_seconds: float = 60.0,
+    framing_mode: str = "standard",
 ) -> list[dict[str, Any]]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -104,6 +105,7 @@ def generate_clips(
     analysis["generation_options"] = {
         "show_subtitles": show_subtitles,
         "show_watermark": show_watermark,
+        "framing_mode": framing_mode,
     }
     analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
 
@@ -148,6 +150,7 @@ def generate_clips(
                     show_watermark=show_watermark,
                     top_line=clip.get("top_line"),
                     cancel_event=cancel_event,
+                    framing_mode=framing_mode,
                 )
                 if cancel_event is not None and cancel_event.is_set():
                     if temp_output.is_file():
@@ -213,6 +216,7 @@ def render_single_clip(
     top_line: str | None = None,
     show_subtitles: bool | None = None,
     show_watermark: bool | None = None,
+    framing_mode: str | None = None,
 ) -> dict[str, Any]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -256,10 +260,18 @@ def render_single_clip(
     else:
         use_subtitles = saved_options.get("show_subtitles", True)
 
+    if framing_mode is not None:
+        use_framing_mode = framing_mode
+    elif "framing_mode" in saved_options:
+        use_framing_mode = str(saved_options["framing_mode"])
+    else:
+        use_framing_mode = "standard"
+
     if "generation_options" not in analysis:
         analysis["generation_options"] = {}
     analysis["generation_options"]["show_watermark"] = use_watermark
     analysis["generation_options"]["show_subtitles"] = use_subtitles
+    analysis["generation_options"]["framing_mode"] = use_framing_mode
 
     transcript_segments = _load_transcript_segments(project_directory)
     subtitle_segments = [
@@ -283,6 +295,7 @@ def render_single_clip(
             show_subtitles=use_subtitles,
             show_watermark=use_watermark,
             top_line=cleaned_top_line,
+            framing_mode=use_framing_mode,
         )
         if temp_output.is_file():
             temp_output.replace(final_output)

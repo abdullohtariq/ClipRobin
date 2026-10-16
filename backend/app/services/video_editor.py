@@ -5,7 +5,24 @@ import tempfile
 import threading
 from pathlib import Path
 
-from PIL import ImageFont
+from PIL import Image, ImageDraw, ImageFont
+
+
+def _generate_rounded_corner_mask(
+    destination_directory: Path,
+    size: int = 660,
+    radius: int = 36,
+) -> Path:
+    mask_file = destination_directory / "rounded-mask.png"
+    scale = 4
+    high_size = size * scale
+    high_radius = radius * scale
+    img = Image.new("L", (high_size, high_size), 0)
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle((0, 0, high_size, high_size), radius=high_radius, fill=255)
+    img = img.resize((size, size), Image.Resampling.LANCZOS)
+    img.save(mask_file)
+    return mask_file
 
 
 class VideoEditorError(Exception):
@@ -170,6 +187,7 @@ def _build_subtitle_filters(
     show_subtitles: bool = True,
     subtitle_directory: Path | None = None,
     font_file: str | None = None,
+    framing_mode: str = "standard",
 ) -> list[str]:
     if not show_subtitles or not subtitle_segments or subtitle_directory is None:
         return []
@@ -206,7 +224,10 @@ def _build_subtitle_filters(
             text = " ".join(str(word["text"]) for word in line_words)
             text_file = subtitle_directory / f"subtitle-{len(subtitle_filters)}.txt"
             text_file.write_text(text, encoding="utf-8")
-            y_position = f"h-340-{(len(lines) - line_index - 1) * line_height}"
+            if framing_mode == "square_rounded":
+                y_position = f"1010+{line_index * line_height}"
+            else:
+                y_position = f"h-340-{(len(lines) - line_index - 1) * line_height}"
             subtitle_filters.append(
                 "drawtext=textfile='{}':{}expansion=none:fontsize={}:fontcolor=white:"
                 "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
@@ -255,6 +276,7 @@ def _build_top_line_filters(
     subtitle_directory: Path,
     font_file: str | None = None,
     has_watermark: bool = False,
+    framing_mode: str = "standard",
 ) -> list[str]:
     if not top_line or not top_line.strip():
         return []
@@ -292,11 +314,15 @@ def _build_top_line_filters(
     # Safe vertical position:
     # 720x1280 vertical video. 16:9 video content begins at Y=438.
     # When watermark is present with top line, watermark is shifted up to Y=90 (7% of H) and ends at Y~169.
-    # The top line is placed at Y=260-306.
-    # This leaves ~91px gap below the watermark and ~100px gap above the video.
-    # It will never touch the watermark above or the video below!
-    base_y = 260 if has_watermark else 240
-    line_spacing = 46
+    # The top line is placed at Y=260-306 in standard mode.
+    # In square_rounded mode, square video begins at Y=310, so top line is at Y=205 (with watermark) or Y=190.
+    if framing_mode == "square_rounded":
+        base_y = 205 if has_watermark else 190
+        line_spacing = 42
+    else:
+        base_y = 260 if has_watermark else 240
+        line_spacing = 46
+
     if len(raw_lines) == 1:
         y_positions = [base_y + 15]
     else:
@@ -327,11 +353,22 @@ def _build_filter_graph(
     show_subtitles: bool = True,
     subtitle_directory: Path | None = None,
     font_file: str | None = None,
+    framing_mode: str = "standard",
 ) -> str:
-    base_filter = (
-        "scale=720:1280:force_original_aspect_ratio=decrease,"
-        "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
-    )
+    if framing_mode == "square_rounded" and subtitle_directory is not None:
+        _generate_rounded_corner_mask(subtitle_directory)
+        base_filter = (
+            "color=c=black:s=720x1280:r=30[bg];"
+            "[0:v]crop=min(iw\\,ih):min(iw\\,ih),scale=660:660,format=yuva420p[sq];"
+            "movie=rounded-mask.png:loop=0,setpts=N/FRAME_RATE/TB[mask];"
+            "[sq][mask]alphamerge[rounded];"
+            "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
+        )
+    else:
+        base_filter = (
+            "scale=720:1280:force_original_aspect_ratio=decrease,"
+            "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+        )
     subtitle_filters = _build_subtitle_filters(
         start_time,
         end_time,
@@ -339,6 +376,7 @@ def _build_filter_graph(
         show_subtitles=show_subtitles,
         subtitle_directory=subtitle_directory,
         font_file=font_file,
+        framing_mode=framing_mode,
     )
     if not subtitle_filters:
         return base_filter
@@ -355,6 +393,7 @@ def create_clip(
     show_watermark: bool = False,
     top_line: str | None = None,
     cancel_event: threading.Event | None = None,
+    framing_mode: str = "standard",
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -385,17 +424,110 @@ def create_clip(
                 show_subtitles=show_subtitles,
                 subtitle_directory=subtitle_directory,
                 font_file=font_file,
+                framing_mode=framing_mode,
             )
             top_line_filters = _build_top_line_filters(
                 top_line,
                 subtitle_directory=subtitle_directory,
                 font_file=font_file,
                 has_watermark=bool(watermark_path and watermark_path.is_file()),
+                framing_mode=framing_mode,
             )
             all_text_filters = top_line_filters + subtitle_filters
             has_audio = has_audio_stream(source_path, ffmpeg_path)
 
-            if watermark_path and watermark_path.is_file():
+            if framing_mode == "square_rounded":
+                _generate_rounded_corner_mask(subtitle_directory, size=660, radius=36)
+                bg_and_square = (
+                    "color=c=black:s=720x1280:r=30[bg];"
+                    "[0:v]crop=min(iw\\,ih):min(iw\\,ih),scale=660:660,format=yuva420p[sq];"
+                    "movie=rounded-mask.png:loop=0,setpts=N/FRAME_RATE/TB[mask];"
+                    "[sq][mask]alphamerge[rounded];"
+                    "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
+                )
+                if watermark_path and watermark_path.is_file():
+                    wm_y = "round(H*0.07)"
+                    base_filter_complex = (
+                        f"{bg_and_square}[base];"
+                        f"[1:v]scale=240:-2[wm];"
+                        f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                    )
+                    if all_text_filters:
+                        filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
+                    else:
+                        filter_graph = base_filter_complex + "[v]"
+
+                    filter_script = subtitle_directory / "filter-complex.txt"
+                    filter_script.write_text(filter_graph, encoding="utf-8")
+
+                    command = [
+                        ffmpeg_path,
+                        "-y",
+                        "-ss",
+                        str(start_time),
+                        "-i",
+                        str(source_path),
+                        "-i",
+                        str(watermark_path),
+                        "-t",
+                        str(end_time - start_time),
+                        "-/filter_complex",
+                        filter_script.name,
+                        "-map",
+                        "[v]",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "medium",
+                        "-crf",
+                        "23",
+                    ]
+                else:
+                    if all_text_filters:
+                        filter_graph = bg_and_square + "," + ",".join(all_text_filters) + "[v]"
+                    else:
+                        filter_graph = bg_and_square + "[v]"
+
+                    filter_script = subtitle_directory / "filter-complex.txt"
+                    filter_script.write_text(filter_graph, encoding="utf-8")
+
+                    command = [
+                        ffmpeg_path,
+                        "-y",
+                        "-ss",
+                        str(start_time),
+                        "-i",
+                        str(source_path),
+                        "-t",
+                        str(end_time - start_time),
+                        "-/filter_complex",
+                        filter_script.name,
+                        "-map",
+                        "[v]",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "medium",
+                        "-crf",
+                        "23",
+                    ]
+                if has_audio:
+                    command.extend([
+                        "-map",
+                        "0:a?",
+                        "-c:a",
+                        "libmp3lame",
+                        "-b:a",
+                        "192k",
+                    ])
+                else:
+                    command.extend(["-an"])
+                command.extend([
+                    "-movflags",
+                    "+faststart",
+                    str(output_path),
+                ])
+            elif watermark_path and watermark_path.is_file():
                 # Watermark enabled: if top_line is present, position watermark higher up at 7% from top (Y=90)
                 # to leave ample breathing room above the top_line and prevent any overlap.
                 # If no top_line, position at standard 20% from top (Y=256).

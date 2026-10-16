@@ -269,16 +269,19 @@ export async function getLocalTranscriptionJob(
   return response.json();
 }
 
+export type FramingMode = "standard" | "square_rounded";
+
 export async function generateClips(
   projectId: string,
   showSubtitles: boolean = true,
   onProgress?: (job: ClipGenerationJob) => void,
   clipDurationSeconds: 15 | 30 | 60 | 90 = 60,
   showWatermark: boolean = false,
+  framingMode: FramingMode = "standard",
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}&framing_mode=${framingMode}`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -396,7 +399,7 @@ export async function setClipTopLine(
   projectId: string,
   clipId: string,
   topLine: string,
-  options?: { show_watermark?: boolean; show_subtitles?: boolean },
+  options?: { show_watermark?: boolean; show_subtitles?: boolean; framing_mode?: FramingMode },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
@@ -408,6 +411,7 @@ export async function setClipTopLine(
         top_line: topLine,
         show_watermark: options?.show_watermark,
         show_subtitles: options?.show_subtitles,
+        framing_mode: options?.framing_mode,
       }),
     },
   );
@@ -421,7 +425,7 @@ export async function setClipTopLine(
 export async function removeClipTopLine(
   projectId: string,
   clipId: string,
-  options?: { show_watermark?: boolean; show_subtitles?: boolean },
+  options?: { show_watermark?: boolean; show_subtitles?: boolean; framing_mode?: FramingMode },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
   const query = new URLSearchParams();
@@ -430,6 +434,9 @@ export async function removeClipTopLine(
   }
   if (options?.show_subtitles !== undefined) {
     query.set("show_subtitles", String(options.show_subtitles));
+  }
+  if (options?.framing_mode !== undefined) {
+    query.set("framing_mode", options.framing_mode);
   }
   const queryString = query.toString() ? `?${query.toString()}` : "";
   const response = await fetch(
