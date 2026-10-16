@@ -241,6 +241,22 @@ export async function transcribeLocalVideo(
   });
 }
 
+export async function transcribeLocalVideoFromPath(
+  filePath: string,
+): Promise<LocalTranscriptionJob> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/local-video/from-path`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file_path: filePath }),
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not start transcription from file path"));
+  }
+  return response.json();
+}
+
 export async function getLocalTranscriptionJob(
   projectId: string,
 ): Promise<LocalTranscriptionJob> {
@@ -425,6 +441,134 @@ export async function removeClipTopLine(
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Could not remove clip top line"));
+  }
+  return response.json();
+}
+
+export async function saveClipWithExplorer(
+  projectId: string,
+  clipIdOrFilename: string,
+  defaultFilename?: string,
+): Promise<{ saved: boolean; path?: string; cancelled?: boolean }> {
+  const cleanName =
+    defaultFilename ||
+    (clipIdOrFilename.endsWith(".mp4") ? clipIdOrFilename : `${clipIdOrFilename}.mp4`);
+
+  // 1. Try modern File System Access API (Native Windows Save File Picker in Chrome/Edge/WebView2)
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      const picker = (window as unknown as {
+        showSaveFilePicker: (options: {
+          suggestedName: string;
+          types: Array<{ description: string; accept: Record<string, string[]> }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+          name: string;
+        }>;
+      }).showSaveFilePicker;
+
+      const fileHandle = await picker({
+        suggestedName: cleanName,
+        types: [
+          {
+            description: "MP4 Video (*.mp4)",
+            accept: { "video/mp4": [".mp4"] },
+          },
+        ],
+      });
+
+      const downloadUrl = await clipDownloadUrl(projectId, clipIdOrFilename);
+      const res = await fetch(downloadUrl);
+      if (!res.ok) {
+        throw new Error("Could not download clip stream");
+      }
+      const blob = await res.blob();
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return { saved: true, path: fileHandle.name };
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return { saved: false, cancelled: true };
+      }
+      // If permission or browser unsupported, fall through to backend dialog
+    }
+  }
+
+  // 2. Fallback to backend native Windows File Explorer Save dialog
+  const apiUrl = await getApiUrl();
+  const cleanId = clipIdOrFilename.replace(/\.mp4$/, "");
+  const response = await fetch(
+    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/${encodeURIComponent(cleanId)}/save-dialog`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not open save dialog"));
+  }
+  return response.json();
+}
+
+export async function saveAllClipsWithExplorer(
+  projectId: string,
+): Promise<{ saved: boolean; path?: string; cancelled?: boolean }> {
+  const defaultZipName = `${projectId}-clips.zip`;
+
+  // 1. Try modern File System Access API
+  if (typeof window !== "undefined" && "showSaveFilePicker" in window) {
+    try {
+      const picker = (window as unknown as {
+        showSaveFilePicker: (options: {
+          suggestedName: string;
+          types: Array<{ description: string; accept: Record<string, string[]> }>;
+        }) => Promise<{
+          createWritable: () => Promise<{
+            write: (data: Blob) => Promise<void>;
+            close: () => Promise<void>;
+          }>;
+          name: string;
+        }>;
+      }).showSaveFilePicker;
+
+      const fileHandle = await picker({
+        suggestedName: defaultZipName,
+        types: [
+          {
+            description: "ZIP Archive (*.zip)",
+            accept: { "application/zip": [".zip"] },
+          },
+        ],
+      });
+
+      const downloadUrl = await clipsArchiveDownloadUrl(projectId);
+      const res = await fetch(downloadUrl);
+      if (!res.ok) {
+        throw new Error("Could not download archive stream");
+      }
+      const blob = await res.blob();
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return { saved: true, path: fileHandle.name };
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        return { saved: false, cancelled: true };
+      }
+    }
+  }
+
+  // 2. Fallback to backend native Windows File Explorer Save dialog
+  const apiUrl = await getApiUrl();
+  const response = await fetch(
+    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/download-all-dialog`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not open save dialog"));
   }
   return response.json();
 }

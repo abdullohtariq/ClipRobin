@@ -1,5 +1,6 @@
 import json
 import logging
+import shutil
 import tempfile
 import threading
 import uuid
@@ -33,6 +34,49 @@ logger = logging.getLogger(__name__)
 GENERATION_JOBS: dict[str, dict[str, Any]] = {}
 CANCEL_EVENTS: dict[str, threading.Event] = {}
 JOBS_LOCK = threading.Lock()
+MAX_COMPLETED_JOBS = 50
+
+
+def evict_old_generation_jobs() -> None:
+    completed_keys = [
+        k for k, v in GENERATION_JOBS.items()
+        if v.get("status") in {"completed", "failed", "cancelled"}
+    ]
+    if len(completed_keys) > MAX_COMPLETED_JOBS:
+        for key in completed_keys[: len(completed_keys) - MAX_COMPLETED_JOBS]:
+            GENERATION_JOBS.pop(key, None)
+            CANCEL_EVENTS.pop(key, None)
+
+
+def ask_save_path_dialog(default_filename: str, file_type: str = "mp4") -> Path | None:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        if file_type == "zip":
+            filetypes = [("ZIP Archive (*.zip)", "*.zip"), ("All Files (*.*)", "*.*")]
+            defaultextension = ".zip"
+        else:
+            filetypes = [("MP4 Video (*.mp4)", "*.mp4"), ("All Files (*.*)", "*.*")]
+            defaultextension = ".mp4"
+
+        chosen = filedialog.asksaveasfilename(
+            parent=root,
+            title="Save As",
+            initialfile=default_filename,
+            defaultextension=defaultextension,
+            filetypes=filetypes,
+        )
+        root.destroy()
+        if not chosen:
+            return None
+        return Path(chosen)
+    except Exception as error:
+        logger.warning("Could not open native save dialog: %s", error)
+        return None
 
 
 def project_or_404(project_id: str) -> Path:
@@ -70,6 +114,7 @@ def finish_cancelled_job(job_id: str, project_id: str) -> None:
             "step": "Cancelled; generated clips removed",
         })
         CANCEL_EVENTS.pop(job_id, None)
+        evict_old_generation_jobs()
 
 
 @router.post("/{project_id}/generate-clips")
@@ -101,6 +146,7 @@ def generate_project_clips(
                 status_code=409,
                 detail="Clip generation is already running for this project",
             )
+        evict_old_generation_jobs()
         cancel_event = threading.Event()
         GENERATION_JOBS[job_id] = {
             "job_id": job_id,
@@ -191,6 +237,7 @@ def run_clip_generation(
                 "error": str(error) or error.__class__.__name__,
             })
             CANCEL_EVENTS.pop(job_id, None)
+            evict_old_generation_jobs()
         return
 
     with JOBS_LOCK:
@@ -208,6 +255,7 @@ def run_clip_generation(
                 "ready_clips": clips,
             })
             CANCEL_EVENTS.pop(job_id, None)
+            evict_old_generation_jobs()
     if was_cancelled:
         finish_cancelled_job(job_id, project_id)
 
@@ -374,3 +422,45 @@ def serve_clip(project_id: str, clip_id: str, download: bool = False) -> FileRes
         filename=clip_path.name if download else None,
         headers={} if download else {"Content-Disposition": f'inline; filename="{clip_path.name}"'},
     )
+
+
+@router.post("/{project_id}/clips/{clip_id}/save-dialog")
+def export_clip_with_dialog(project_id: str, clip_id: str) -> dict[str, Any]:
+    project_directory = project_or_404(project_id)
+    raw_clip_id = clip_id if clip_id.endswith(".mp4") else f"{clip_id}.mp4"
+    clip_path = get_clips_directory(project_id) / raw_clip_id
+    if not clip_path.is_file():
+        raise HTTPException(status_code=404, detail="Clip not found")
+
+    chosen_path = ask_save_path_dialog(clip_path.name, file_type="mp4")
+    if not chosen_path:
+        return {"saved": False, "cancelled": True}
+
+    try:
+        chosen_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(clip_path, chosen_path)
+        return {"saved": True, "path": str(chosen_path)}
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"Could not save clip: {error}") from error
+
+
+@router.post("/{project_id}/clips/download-all-dialog")
+def export_all_clips_with_dialog(project_id: str) -> dict[str, Any]:
+    project_directory = project_or_404(project_id)
+    clip_paths = [p for p in sorted(get_clips_directory(project_id).glob("*.mp4")) if not p.name.startswith(".")]
+    if not clip_paths:
+        raise HTTPException(status_code=404, detail="No clips are available to download")
+
+    default_name = f"{project_id}-clips.zip"
+    chosen_path = ask_save_path_dialog(default_name, file_type="zip")
+    if not chosen_path:
+        return {"saved": False, "cancelled": True}
+
+    try:
+        chosen_path.parent.mkdir(parents=True, exist_ok=True)
+        with ZipFile(chosen_path, "w", compression=ZIP_DEFLATED) as archive:
+            for clip_path in clip_paths:
+                archive.write(clip_path, arcname=clip_path.name)
+        return {"saved": True, "path": str(chosen_path)}
+    except OSError as error:
+        raise HTTPException(status_code=500, detail=f"Could not save archive: {error}") from error

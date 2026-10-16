@@ -14,6 +14,8 @@ import {
   getClips,
   getLatestClipGenerationJob,
   removeClipTopLine,
+  saveAllClipsWithExplorer,
+  saveClipWithExplorer,
   setClipTopLine,
 } from "@/src/lib/api";
 import { ClipSkeletonCard } from "@/src/components/skeletons";
@@ -176,6 +178,26 @@ const ClipCard = memo(function ClipCard({
       setTopLineError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsSavingTopLine(false);
+    }
+  };
+
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadMessage, setDownloadMessage] = useState("");
+
+  const handleDownloadClip = async () => {
+    if (isDownloading) return;
+    setIsDownloading(true);
+    setDownloadMessage("");
+    try {
+      const res = await saveClipWithExplorer(projectId, clip.file, `${clip.id}.mp4`);
+      if (res.saved) {
+        setDownloadMessage("Saved successfully");
+        setTimeout(() => setDownloadMessage(""), 4000);
+      }
+    } catch (err) {
+      setDownloadMessage(err instanceof Error ? err.message : "Download failed");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -354,15 +376,29 @@ const ClipCard = memo(function ClipCard({
 
       {/* Action buttons: Download clip and Add/Edit top line */}
       <div className="mt-3 flex max-w-xs flex-wrap items-center gap-2">
-        <a
-          href={mediaUrls?.download}
-          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#232326] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+        <button
+          type="button"
+          onClick={() => void handleDownloadClip()}
+          disabled={isDownloading}
+          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#232326] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-60"
         >
-          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-          </svg>
-          Download clip
-        </a>
+          {isDownloading ? (
+            <>
+              <svg className="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              <span>Saving...</span>
+            </>
+          ) : (
+            <>
+              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+              <span>Download clip</span>
+            </>
+          )}
+        </button>
 
         <button
           type="button"
@@ -383,6 +419,17 @@ const ClipCard = memo(function ClipCard({
           {clip.top_line ? "Edit top line" : "Add top line"}
         </button>
       </div>
+
+      {downloadMessage && (
+        <p
+          role="status"
+          className={`mt-2 max-w-xs text-xs font-medium ${
+            downloadMessage.includes("failed") ? "text-rose-400" : "text-emerald-400"
+          }`}
+        >
+          {downloadMessage}
+        </p>
+      )}
 
       {mediaUrlError && (
         <p role="status" className="mt-2 text-xs text-amber-300">
@@ -540,8 +587,12 @@ function ProjectClips({ projectId }: { projectId: string }) {
   const handleDownloadAll = async () => {
     if (!projectId || downloadingAll || generating || clips.length === 0) return;
     setDownloadingAll(true);
+    setStatus("");
     try {
-      window.location.assign(await clipsArchiveDownloadUrl(projectId));
+      const res = await saveAllClipsWithExplorer(projectId);
+      if (res.saved) {
+        setStatus("All clips archive saved successfully.");
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not download clips");
     } finally {

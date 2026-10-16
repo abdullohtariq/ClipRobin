@@ -116,3 +116,74 @@ def test_update_clip_top_line_project_not_found(tmp_path: Path, monkeypatch: pyt
     )
     assert response.status_code == 404
 
+
+def test_evict_old_generation_jobs():
+    from app.routes.clips import GENERATION_JOBS, CANCEL_EVENTS, evict_old_generation_jobs, MAX_COMPLETED_JOBS
+    import threading
+    for i in range(MAX_COMPLETED_JOBS + 10):
+        key = f"test_gen_job_{i}"
+        GENERATION_JOBS[key] = {"status": "completed"}
+        CANCEL_EVENTS[key] = threading.Event()
+    evict_old_generation_jobs()
+    remaining = [k for k in GENERATION_JOBS if k.startswith("test_gen_job_")]
+    assert len(remaining) <= MAX_COMPLETED_JOBS
+    for k in remaining:
+        GENERATION_JOBS.pop(k, None)
+        CANCEL_EVENTS.pop(k, None)
+
+
+def test_export_clip_with_dialog_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_dir = tmp_path / "project_001"
+    project_dir.mkdir(parents=True)
+    response = client.post("/api/projects/project_001/clips/clip_999/save-dialog")
+    assert response.status_code == 404
+
+
+def test_export_clip_with_dialog_cancelled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_dir = tmp_path / "project_001"
+    clips_dir = project_dir / "clips"
+    clips_dir.mkdir(parents=True)
+    clip_file = clips_dir / "clip_001.mp4"
+    clip_file.write_bytes(b"sample clip")
+
+    monkeypatch.setattr("app.routes.clips.ask_save_path_dialog", lambda *args, **kwargs: None)
+    response = client.post("/api/projects/project_001/clips/clip_001/save-dialog")
+    assert response.status_code == 200
+    assert response.json() == {"saved": False, "cancelled": True}
+
+
+def test_export_clip_with_dialog_saved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_dir = tmp_path / "project_001"
+    clips_dir = project_dir / "clips"
+    clips_dir.mkdir(parents=True)
+    clip_file = clips_dir / "clip_001.mp4"
+    clip_file.write_bytes(b"sample clip")
+
+    target_file = tmp_path / "exported.mp4"
+    monkeypatch.setattr("app.routes.clips.ask_save_path_dialog", lambda *args, **kwargs: target_file)
+    response = client.post("/api/projects/project_001/clips/clip_001/save-dialog")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["saved"] is True
+    assert target_file.is_file()
+    assert target_file.read_bytes() == b"sample clip"
+
+
+def test_export_all_clips_with_dialog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_dir = tmp_path / "project_001"
+    clips_dir = project_dir / "clips"
+    clips_dir.mkdir(parents=True)
+    (clips_dir / "clip_001.mp4").write_bytes(b"clip 1")
+    (clips_dir / "clip_002.mp4").write_bytes(b"clip 2")
+
+    target_zip = tmp_path / "exported.zip"
+    monkeypatch.setattr("app.routes.clips.ask_save_path_dialog", lambda *args, **kwargs: target_zip)
+    response = client.post("/api/projects/project_001/clips/download-all-dialog")
+    assert response.status_code == 200
+    assert response.json()["saved"] is True
+    assert target_zip.is_file()
+

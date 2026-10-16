@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -15,6 +16,21 @@ logger = logging.getLogger(__name__)
 ALLOWED_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".m4v", ".webm"}
 TRANSCRIPTION_JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+MAX_COMPLETED_JOBS = 50
+
+
+class LocalVideoPathRequest(BaseModel):
+    file_path: str
+
+
+def evict_old_transcription_jobs() -> None:
+    completed_keys = [
+        k for k, v in TRANSCRIPTION_JOBS.items()
+        if v.get("status") in {"completed", "failed"}
+    ]
+    if len(completed_keys) > MAX_COMPLETED_JOBS:
+        for key in completed_keys[: len(completed_keys) - MAX_COMPLETED_JOBS]:
+            TRANSCRIPTION_JOBS.pop(key, None)
 
 
 def update_job(project_id: str, **updates: Any) -> None:
@@ -22,6 +38,7 @@ def update_job(project_id: str, **updates: Any) -> None:
         job = TRANSCRIPTION_JOBS.get(project_id)
         if job is not None:
             job.update(updates)
+        evict_old_transcription_jobs()
 
 
 def run_local_transcription(project_id: str, source_path: Path, project_directory: Path) -> None:
@@ -117,3 +134,49 @@ def get_local_transcription_job(project_id: str) -> dict[str, Any]:
         if job is None:
             raise HTTPException(status_code=404, detail="Transcription job not found")
         return dict(job)
+
+
+@router.post("/local-video/from-path")
+def transcribe_from_path(
+    payload: LocalVideoPathRequest,
+    background_tasks: BackgroundTasks,
+) -> JSONResponse:
+    local_file = Path(payload.file_path)
+    if not local_file.is_file():
+        raise HTTPException(status_code=400, detail="Specified video file does not exist")
+    extension = local_file.suffix.lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported video file type")
+
+    project_id, project_directory = create_project_directory()
+    source_path = project_directory / f"source{extension}"
+
+    try:
+        shutil.copyfile(local_file, source_path)
+    except Exception as error:
+        shutil.rmtree(project_directory, ignore_errors=True)
+        raise HTTPException(status_code=500, detail="Could not access local video file") from error
+
+    with JOBS_LOCK:
+        evict_old_transcription_jobs()
+        TRANSCRIPTION_JOBS[project_id] = {
+            "project_id": project_id,
+            "status": "queued",
+            "step": "Preparing transcription",
+            "progress": 0,
+        }
+    background_tasks.add_task(
+        run_local_transcription,
+        project_id,
+        source_path,
+        project_directory,
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "project_id": project_id,
+            "status": "queued",
+            "step": "Preparing transcription",
+            "progress": 0,
+        },
+    )
