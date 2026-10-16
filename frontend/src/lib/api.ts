@@ -277,11 +277,12 @@ export async function generateClips(
   onProgress?: (job: ClipGenerationJob) => void,
   clipDurationSeconds: 15 | 30 | 60 | 90 = 60,
   showWatermark: boolean = false,
-  framingMode: FramingMode = "standard",
+  framingMode?: FramingMode,
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
+  const framingQuery = framingMode ? `&framing_mode=${encodeURIComponent(framingMode)}` : "";
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}&framing_mode=${framingMode}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}`,
     { method: "POST" },
   );
   if (!response.ok) {

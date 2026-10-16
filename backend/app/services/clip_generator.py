@@ -69,7 +69,7 @@ def generate_clips(
     progress_callback: Callable[[str, int, int], None] | None = None,
     cancel_event: threading.Event | None = None,
     max_clip_seconds: float = 60.0,
-    framing_mode: str = "standard",
+    framing_mode: str | None = None,
 ) -> list[dict[str, Any]]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -102,10 +102,18 @@ def generate_clips(
             progress_callback("Analyzing transcript", 0, 0)
         analysis = create_mock_analysis(project_directory, max_clip_seconds=max_clip_seconds)
 
+    saved_options = analysis.get("generation_options", {}) if isinstance(analysis, dict) else {}
+    if framing_mode is not None:
+        use_framing_mode = framing_mode
+    elif "framing_mode" in saved_options:
+        use_framing_mode = str(saved_options["framing_mode"])
+    else:
+        use_framing_mode = "standard"
+
     analysis["generation_options"] = {
         "show_subtitles": show_subtitles,
         "show_watermark": show_watermark,
-        "framing_mode": framing_mode,
+        "framing_mode": use_framing_mode,
     }
     analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
 
@@ -150,7 +158,7 @@ def generate_clips(
                     show_watermark=show_watermark,
                     top_line=clip.get("top_line"),
                     cancel_event=cancel_event,
-                    framing_mode=framing_mode,
+                    framing_mode=use_framing_mode,
                 )
                 if cancel_event is not None and cancel_event.is_set():
                     if temp_output.is_file():

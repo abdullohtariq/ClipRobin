@@ -398,6 +398,7 @@ export default function Home() {
         },
         clipDurationSeconds,
         showWatermark,
+        framingMode,
       );
 
       if (generation.cancelled) {

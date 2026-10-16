@@ -128,14 +128,14 @@ def generate_project_clips(
     show_subtitles: bool = True,
     show_watermark: bool = False,
     clip_duration_seconds: int = 60,
-    framing_mode: str = "standard",
+    framing_mode: str | None = None,
 ) -> dict[str, str]:
     if clip_duration_seconds not in {15, 30, 60, 90}:
         raise HTTPException(
             status_code=422,
             detail="Clip duration must be 15, 30, 60, or 90 seconds",
         )
-    if framing_mode not in {"standard", "square_rounded"}:
+    if framing_mode is not None and framing_mode not in {"standard", "square_rounded"}:
         raise HTTPException(
             status_code=422,
             detail="Framing mode must be 'standard' or 'square_rounded'",
@@ -192,7 +192,7 @@ def run_clip_generation(
     cancel_event: threading.Event,
     clip_duration_seconds: int = 60,
     show_watermark: bool = False,
-    framing_mode: str = "standard",
+    framing_mode: str | None = None,
 ) -> None:
     def report_progress(
         step: str,
