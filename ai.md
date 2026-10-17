@@ -445,14 +445,16 @@ projects/
   - **Preview Assets Regenerated**: Rebuilt moving preview videos and posters for all 6 styles with the 2-words-per-line layout and clean highlights, updating `manifest.json` and generating direct `{style_id}.mp4` and `{style_id}.jpg` files for direct preview rendering.
 - **Tests**: `backend/tests/test_caption_previews.py` (all styles + aliases verified), `backend/tests/test_ass_captions.py`, `backend/tests/test_clip_generator.py` (all 97 backend tests passing), and Next.js production build passing with 0 errors.
 
-#### 27. Aspect Ratio Selectors & Caption Style Picker on Projects and Clips Pages (v0.1.18+) `[RESOLVED / IMPLEMENTED]`
-- **Files**: `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/scripts/take_screenshots.mjs`.
+#### 27. Aspect Ratio, Duration, Generation Mode & Caption Style Controls on Projects and Clips Pages (v0.1.18+) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/page.tsx`, `frontend/scripts/take_screenshots.mjs`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**:
   - **Removed Raw Checkbox Tick Marks**: Replaced browser-native `<input type="checkbox">` elements across clip and project regeneration forms with styled accessible switches and interactive picker cards.
   - **Aspect Ratio Selectors**: Added full aspect ratio selection buttons (16:9 Rounded, 1:1 Rounded, True 9:16) matching the dashboard controls on both `/clips` and `/projects` views before running clip regeneration.
+  - **Clip Duration Selectors**: Added selectable clip duration chips (`15s`, `30s`, `60s`, `90s`) with live highlight and persistence across `/clips`, `/projects`, and dashboard.
+  - **Generation Mode Selectors**: Added Generation Mode toggle switch (`Random` active, `AI` with `Soon` badge and COMING SOON tooltip) aligned with dashboard UX.
   - **Integrated Caption Style Picker**: Added caption style preview cards showing current style thumbnail, label, description, and "Change" button opening the full `<CaptionStylePicker>` modal dialog.
-  - **Preferences & API Synchronization**: Selected framing mode and caption style persist across sessions via `localStorage` (`cliprobin_framing_mode`, `cliprobin_caption_style`) and are passed explicitly to `generateClips({ framingMode, captionStyle, ... })`.
+  - **Preferences & API Synchronization**: Selected framing mode, clip duration, generation mode, and caption style persist across sessions via `localStorage` (`cliprobin_framing_mode`, `cliprobin_clip_duration`, `cliprobin_generation_mode`, `cliprobin_caption_style`) and are passed explicitly to `generateClips({ clipDurationSeconds, framingMode, captionStyle, ... })`.
 - **Tests**: Playwright visual regression snapshots (`clips_page_controls.png`, `projects_page.png`), frontend unit tests, and production build verification.
 
 ---

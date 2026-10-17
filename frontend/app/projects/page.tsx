@@ -22,6 +22,9 @@ import {
   getPreviewUrls,
 } from "@/src/components/caption-style-picker";
 
+const CLIP_DURATIONS = [15, 30, 60, 90] as const;
+type ClipDuration = (typeof CLIP_DURATIONS)[number];
+
 export default function Projects() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -35,15 +38,27 @@ export default function Projects() {
   const [watermarkOptions, setWatermarkOptions] = useState<Record<string, boolean>>({});
   const [framingOptions, setFramingOptions] = useState<Record<string, FramingMode>>({});
   const [captionStyleOptions, setCaptionStyleOptions] = useState<Record<string, CaptionStyle>>({});
+  const [durationOptions, setDurationOptions] = useState<Record<string, ClipDuration>>({});
+  const [generationModeOptions, setGenerationModeOptions] = useState<Record<string, "random" | "ai">>({});
   const [activeModalProjectId, setActiveModalProjectId] = useState<string | null>(null);
   const [defaultFraming, setDefaultFraming] = useState<FramingMode>("standard");
   const [defaultCaptionStyle, setDefaultCaptionStyle] = useState<CaptionStyle>("classic");
+  const [defaultDuration, setDefaultDuration] = useState<ClipDuration>(30);
+  const [defaultGenerationMode, setDefaultGenerationMode] = useState<"random" | "ai">("random");
 
   useEffect(() => {
     try {
       const savedFraming = localStorage.getItem("cliprobin_framing_mode");
       if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
         setDefaultFraming(savedFraming as FramingMode);
+      }
+      const savedDuration = localStorage.getItem("cliprobin_clip_duration");
+      if (savedDuration && [15, 30, 60, 90].includes(Number(savedDuration))) {
+        setDefaultDuration(Number(savedDuration) as ClipDuration);
+      }
+      const savedMode = localStorage.getItem("cliprobin_generation_mode");
+      if (savedMode && ["random", "ai"].includes(savedMode)) {
+        setDefaultGenerationMode(savedMode as "random" | "ai");
       }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
       if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
@@ -154,7 +169,7 @@ export default function Projects() {
               : p));
           }
         },
-        60,
+        durationOptions[projectId] ?? defaultDuration,
         watermarkOptions[projectId] ?? true,
         framingOptions[projectId] ?? defaultFraming,
         captionStyleOptions[projectId] ?? defaultCaptionStyle,
@@ -295,6 +310,8 @@ export default function Projects() {
                   {(() => {
                     const currentFraming = framingOptions[project.project_id] ?? defaultFraming;
                     const currentCaptionStyle = captionStyleOptions[project.project_id] ?? defaultCaptionStyle;
+                    const currentDuration = durationOptions[project.project_id] ?? defaultDuration;
+                    const currentGenMode = generationModeOptions[project.project_id] ?? defaultGenerationMode;
                     const activeStyleOption =
                       CAPTION_STYLE_OPTIONS.find((s) => s.id === currentCaptionStyle) || CAPTION_STYLE_OPTIONS[0];
                     const previewUrls = getPreviewUrls(currentCaptionStyle);
@@ -418,6 +435,87 @@ export default function Projects() {
                                 Captions disabled
                               </div>
                             )}
+                          </div>
+                        </div>
+
+                        {/* Row 2: Generation Mode (Random vs AI) + Clip Duration (15s, 30s, 60s, 90s) */}
+                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-[#232326]">
+                          {/* Generation Mode Selector */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-medium text-zinc-400">
+                              Generation mode
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                disabled={isGenerating || isTranscribing}
+                                onClick={() => {
+                                  setGenerationModeOptions((prev) => ({ ...prev, [project.project_id]: "random" }));
+                                  try {
+                                    localStorage.setItem("cliprobin_generation_mode", "random");
+                                  } catch {}
+                                }}
+                                className={`rounded-[10px] border py-2 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                                  currentGenMode === "random"
+                                    ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
+                                    : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                                }`}
+                              >
+                                Random
+                              </button>
+
+                              <div className="relative group cursor-not-allowed">
+                                <button
+                                  type="button"
+                                  disabled
+                                  title="COMING SOON"
+                                  aria-label="AI mode coming soon"
+                                  className="w-full h-full rounded-[10px] border border-[#232326] bg-[#0a0a0a]/50 py-2 text-xs font-medium text-zinc-500 cursor-not-allowed flex items-center justify-center gap-1.5 group-hover:border-zinc-700 transition-all duration-150 pointer-events-none"
+                                >
+                                  <span className="font-semibold text-zinc-400">AI</span>
+                                  <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/90 border border-amber-400/20">
+                                    Soon
+                                  </span>
+                                </button>
+                                {/* Hover tooltip */}
+                                <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-[10px] font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
+                                  COMING SOON
+                                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Clip Duration Selector */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-medium text-zinc-400">
+                              Clip duration
+                            </label>
+                            <div className="grid grid-cols-4 gap-2">
+                              {CLIP_DURATIONS.map((seconds) => {
+                                const isSelected = currentDuration === seconds;
+                                return (
+                                  <button
+                                    key={seconds}
+                                    type="button"
+                                    disabled={isGenerating || isTranscribing}
+                                    onClick={() => {
+                                      setDurationOptions((prev) => ({ ...prev, [project.project_id]: seconds }));
+                                      try {
+                                        localStorage.setItem("cliprobin_clip_duration", String(seconds));
+                                      } catch {}
+                                    }}
+                                    className={`rounded-[10px] border py-2 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                                      isSelected
+                                        ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
+                                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                                    }`}
+                                  >
+                                    {seconds}s
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
 

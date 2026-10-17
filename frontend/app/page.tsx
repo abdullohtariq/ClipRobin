@@ -55,6 +55,14 @@ export default function Home() {
       if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
         setFramingMode(savedFraming as FramingMode);
       }
+      const savedDuration = localStorage.getItem("cliprobin_clip_duration");
+      if (savedDuration && [15, 30, 60, 90].includes(Number(savedDuration))) {
+        setClipDurationSeconds(Number(savedDuration) as 15 | 30 | 60 | 90);
+      }
+      const savedMode = localStorage.getItem("cliprobin_generation_mode");
+      if (savedMode && ["random", "ai"].includes(savedMode)) {
+        setGenerationMode(savedMode as "random" | "ai");
+      }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
       if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
         setCaptionStyle(savedStyle as CaptionStyle);
@@ -72,6 +80,20 @@ export default function Home() {
     setFramingMode(mode);
     try {
       localStorage.setItem("cliprobin_framing_mode", mode);
+    } catch {}
+  };
+
+  const handleClipDurationChange = (seconds: 15 | 30 | 60 | 90) => {
+    setClipDurationSeconds(seconds);
+    try {
+      localStorage.setItem("cliprobin_clip_duration", String(seconds));
+    } catch {}
+  };
+
+  const handleGenerationModeChange = (mode: "random" | "ai") => {
+    setGenerationMode(mode);
+    try {
+      localStorage.setItem("cliprobin_generation_mode", mode);
     } catch {}
   };
 
@@ -785,7 +807,7 @@ export default function Home() {
                   <button
                     type="button"
                     disabled={isProcessingVideo}
-                    onClick={() => setGenerationMode("random")}
+                    onClick={() => handleGenerationModeChange("random")}
                     className={`rounded-[10px] border py-2.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
                       generationMode === "random"
                         ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
@@ -830,7 +852,7 @@ export default function Home() {
                         key={seconds}
                         type="button"
                         disabled={isProcessingVideo}
-                        onClick={() => setClipDurationSeconds(seconds)}
+                        onClick={() => handleClipDurationChange(seconds)}
                         className={`rounded-[10px] border py-2.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
                           isSelected
                             ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
