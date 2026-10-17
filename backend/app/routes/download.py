@@ -54,14 +54,18 @@ def run_background_download(project_id: str, url: str, output_path: Path, projec
             duration=info.get("duration"),
         )
     except Exception as error:
-        logger.exception("Video download failed for project %s", project_id)
+        logger.exception("Video download failed for project %s: %s", project_id, error)
         shutil.rmtree(project_directory, ignore_errors=True)
+        user_message = (
+            "This YouTube video was unavailable to download. "
+            "You can choose or drop a local video file (MP4, MOV, MKV, WebM) to generate clips instead."
+        )
         update_download_job(
             project_id,
             status="failed",
-            step="Video download failed",
+            step="Video download unavailable",
             progress=0.0,
-            error=str(error) or error.__class__.__name__,
+            error=user_message,
         )
 
 

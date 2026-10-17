@@ -55,6 +55,7 @@ const formatFileSize = (bytes: number) => {
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadStatus, setDownloadStatus] = useState("");
+  const [youtubeDownloadError, setYoutubeDownloadError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{
     step: string;
     progress: number;
@@ -455,6 +456,7 @@ export default function Home() {
     }
 
     setIsDownloading(true);
+    setYoutubeDownloadError(null);
     setDownloadStatus("Connecting to YouTube...");
     setDownloadProgress({ step: "Downloading video from YouTube", progress: 5 });
 
@@ -478,9 +480,13 @@ export default function Home() {
       setYoutubeUrl("");
       void refreshProjectsList();
     } catch (error) {
-      setDownloadStatus(
-        error instanceof Error ? error.message : "Video download failed",
-      );
+      const rawMsg = error instanceof Error ? error.message : "";
+      const friendlyMsg =
+        rawMsg && rawMsg.includes("unavailable")
+          ? rawMsg
+          : "This YouTube video was unavailable to download. You can choose or drop a local video file (MP4, MOV, MKV, WebM) below instead.";
+      setDownloadStatus(friendlyMsg);
+      setYoutubeDownloadError(friendlyMsg);
     } finally {
       setIsDownloading(false);
       setDownloadProgress(null);
@@ -577,6 +583,7 @@ export default function Home() {
         size: video.size,
       });
       setDownloadStatus("");
+      setYoutubeDownloadError(null);
       setTranscriptionProgress(null);
     }
   };
@@ -599,6 +606,7 @@ export default function Home() {
         size: video.size,
       });
       setDownloadStatus("");
+      setYoutubeDownloadError(null);
       setTranscriptionProgress(null);
     }
   };
@@ -713,7 +721,10 @@ export default function Home() {
                         id="youtube-url-input"
                         type="url"
                         value={youtubeUrl}
-                        onChange={(e) => setYoutubeUrl(e.target.value)}
+                        onChange={(e) => {
+                          setYoutubeUrl(e.target.value);
+                          if (youtubeDownloadError) setYoutubeDownloadError(null);
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") {
                             e.preventDefault();
@@ -760,6 +771,34 @@ export default function Home() {
                         </p>
                       )}
                     </div>
+
+                    {/* Dedicated YouTube Download Unavailable Alert */}
+                    {youtubeDownloadError && (
+                      <div
+                        role="alert"
+                        className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-200 animate-in fade-in-0 duration-150"
+                      >
+                        <svg className="size-4 shrink-0 text-amber-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <div className="flex-1 space-y-1">
+                          <p className="font-medium text-amber-200">{youtubeDownloadError}</p>
+                          <p className="text-[11px] text-amber-300/80">
+                            YouTube may be restricting automated downloads or the video might be private/geo-blocked. Choose or drop your file below to proceed immediately.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setYoutubeDownloadError(null)}
+                          className="text-amber-400 hover:text-amber-200 p-0.5 transition-colors"
+                          aria-label="Dismiss message"
+                        >
+                          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
 
                     {/* Live Download Progress Bar */}
                     {isDownloading && downloadProgress && (

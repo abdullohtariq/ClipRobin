@@ -450,7 +450,7 @@ def test_create_clip_true_9_16_audio_mapping_with_watermark(tmp_path: Path, monk
     assert "-map" in captured_command
     assert "[v]" in captured_command
     assert "0:a?" in captured_command
-    assert "libmp3lame" in captured_command
+    assert "aac" in captured_command
 
 
 def test_generate_rounded_corner_mask_16_9(tmp_path: Path):
@@ -517,7 +517,7 @@ def test_create_clip_standard_16_9_rounded_framing(tmp_path: Path, monkeypatch: 
     assert "-map" in captured_command
     assert "[v]" in captured_command
     assert "0:a?" in captured_command
-    assert "libmp3lame" in captured_command
+    assert "aac" in captured_command
 
     # Check filter content includes 16:9 scale and rounded mask
     assert len(captured_filter_content) == 1
@@ -829,6 +829,155 @@ def test_create_clip_classic_drawtext_regression(tmp_path: Path, monkeypatch: py
     assert "box=1:boxcolor=black@0.55" in filter_text
     assert "fontcolor=yellow" in filter_text
     assert "fontsize=34" in filter_text
+
+
+def test_create_clip_true_9_16_without_watermark_retains_audio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import create_clip
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"dummy_source")
+    output = tmp_path / "output.mp4"
+
+    monkeypatch.setattr("app.services.video_editor.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: True)
+    monkeypatch.setattr("app.services.video_editor.find_watermark_file", lambda: None)
+    monkeypatch.setattr("app.services.video_editor.has_ass_filter", lambda *args: True)
+
+    captured_command = []
+
+    class MockProcess:
+        returncode = 0
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def mock_popen(cmd, *args, **kwargs):
+        captured_command.extend(cmd)
+        output.write_bytes(b"rendered")
+        return MockProcess()
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+
+    create_clip(
+        source_path=source,
+        output_path=output,
+        start_time=0.0,
+        end_time=4.0,
+        framing_mode="true_9_16",
+        caption_style="robin",
+        show_subtitles=True,
+        subtitle_segments=[{"start": 0.0, "end": 2.0, "text": "test", "words": [{"start": 0.0, "end": 2.0, "text": "test"}]}],
+    )
+
+    # Audio MUST NOT be dropped when watermark is absent and ASS subtitles are enabled in true_9_16!
+    assert "-map" in captured_command
+    assert "[v]" in captured_command
+    assert "0:a?" in captured_command
+    assert "aac" in captured_command
+
+
+def test_create_clip_all_caption_styles_retain_audio(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import create_clip
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"dummy")
+
+    monkeypatch.setattr("app.services.video_editor.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: True)
+    monkeypatch.setattr("app.services.video_editor.has_ass_filter", lambda *args: True)
+
+    for style in ["classic", "clean", "punch", "robin", "pill", "karaoke"]:
+        for framing in ["true_9_16", "square_rounded", "standard"]:
+            output = tmp_path / f"out_{style}_{framing}.mp4"
+            captured = []
+
+            class MockProcess:
+                returncode = 0
+                def communicate(self, timeout=None):
+                    return ("", "")
+
+            def mock_popen(cmd, *args, **kwargs):
+                captured.extend(cmd)
+                output.write_bytes(b"data")
+                return MockProcess()
+
+            monkeypatch.setattr("subprocess.Popen", mock_popen)
+
+            create_clip(
+                source_path=source,
+                output_path=output,
+                start_time=0.0,
+                end_time=3.0,
+                framing_mode=framing,
+                caption_style=style,
+                show_subtitles=True,
+                subtitle_segments=[{"start": 0.0, "end": 1.5, "text": "hello", "words": [{"start": 0.0, "end": 1.5, "text": "hello"}]}],
+            )
+
+            assert "0:a?" in captured, f"Missing audio mapping for style {style} in framing {framing}"
+            assert "aac" in captured, f"Missing aac audio codec for style {style} in framing {framing}"
+            assert "[v]" in captured, f"Missing video stream mapping for style {style} in framing {framing}"
+
+
+def test_create_clip_no_audio_stream_adds_an(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import create_clip
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"dummy")
+    output = tmp_path / "output_no_audio.mp4"
+
+    monkeypatch.setattr("app.services.video_editor.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: False)
+
+    captured = []
+
+    class MockProcess:
+        returncode = 0
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def mock_popen(cmd, *args, **kwargs):
+        captured.extend(cmd)
+        output.write_bytes(b"data")
+        return MockProcess()
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+
+    create_clip(
+        source_path=source,
+        output_path=output,
+        start_time=0.0,
+        end_time=3.0,
+        framing_mode="true_9_16",
+    )
+
+    assert "-an" in captured
+    assert "0:a?" not in captured
+
+
+def test_youtube_download_failure_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.routes.download import run_background_download, DOWNLOAD_JOBS, DOWNLOAD_JOBS_LOCK
+
+    project_dir = tmp_path / "project_fail"
+    project_dir.mkdir()
+    output_file = project_dir / "source.mp4"
+
+    def mock_download_fail(*args, **kwargs):
+        raise RuntimeError("HTTP 403: Forbidden - anti-bot challenge")
+
+    monkeypatch.setattr("app.routes.download.download_video", mock_download_fail)
+
+    with DOWNLOAD_JOBS_LOCK:
+        DOWNLOAD_JOBS["test_fail_proj"] = {"status": "queued"}
+
+    run_background_download("test_fail_proj", "https://youtube.com/watch?v=123", output_file, project_dir)
+
+    with DOWNLOAD_JOBS_LOCK:
+        job = DOWNLOAD_JOBS["test_fail_proj"]
+
+    assert job["status"] == "failed"
+    assert "unavailable to download" in job["error"].lower()
+    assert "local video file" in job["error"].lower()
+
 
 
 

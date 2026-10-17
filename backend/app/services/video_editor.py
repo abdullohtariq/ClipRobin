@@ -590,108 +590,7 @@ def create_clip(
 
             has_audio = has_audio_stream(source_path, ffmpeg_path)
 
-            if framing_mode == "square_rounded":
-                _generate_rounded_corner_mask(subtitle_directory, size=660, radius=36)
-                bg_and_square = (
-                    "color=c=black:s=720x1280:r=30[bg];"
-                    "[0:v]crop=min(iw\\,ih):min(iw\\,ih),scale=660:660,format=yuva420p[sq];"
-                    "movie=rounded-mask.png:loop=0,setpts=N/FRAME_RATE/TB[mask];"
-                    "[sq][mask]alphamerge[rounded];"
-                    "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
-                )
-                if watermark_path and watermark_path.is_file():
-                    wm_x = "W-w-44"
-                    wm_y = "round(H*0.06)"
-                    if use_ass and ass_filter:
-                        base_filter_complex = (
-                            f"{bg_and_square},{ass_filter}[base];"
-                            f"[1:v]scale=220:-2[wm];"
-                            f"[base][wm]overlay={wm_x}:{wm_y}"
-                        )
-                    else:
-                        base_filter_complex = (
-                            f"{bg_and_square}[base];"
-                            f"[1:v]scale=220:-2[wm];"
-                            f"[base][wm]overlay={wm_x}:{wm_y}"
-                        )
-                    if (not use_ass) and all_text_filters:
-                        filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
-                    else:
-                        filter_graph = base_filter_complex + "[v]"
-
-                    filter_script = subtitle_directory / "filter-complex.txt"
-                    filter_script.write_text(filter_graph, encoding="utf-8")
-
-                    command = [
-                        ffmpeg_path,
-                        "-y",
-                        "-ss",
-                        str(start_time),
-                        "-i",
-                        str(source_path),
-                        "-i",
-                        str(watermark_path),
-                        "-t",
-                        str(end_time - start_time),
-                        "-/filter_complex",
-                        filter_script.name,
-                        "-map",
-                        "[v]",
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "medium",
-                        "-crf",
-                        "23",
-                    ]
-                else:
-                    if use_ass and ass_filter:
-                        filter_graph = f"{bg_and_square},{ass_filter}[v]"
-                    elif (not use_ass) and all_text_filters:
-                        filter_graph = bg_and_square + "," + ",".join(all_text_filters) + "[v]"
-                    else:
-                        filter_graph = bg_and_square + "[v]"
-
-                    filter_script = subtitle_directory / "filter-complex.txt"
-                    filter_script.write_text(filter_graph, encoding="utf-8")
-
-                    command = [
-                        ffmpeg_path,
-                        "-y",
-                        "-ss",
-                        str(start_time),
-                        "-i",
-                        str(source_path),
-                        "-t",
-                        str(end_time - start_time),
-                        "-/filter_complex",
-                        filter_script.name,
-                        "-map",
-                        "[v]",
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "medium",
-                        "-crf",
-                        "23",
-                    ]
-                if has_audio:
-                    command.extend([
-                        "-map",
-                        "0:a?",
-                        "-c:a",
-                        "libmp3lame",
-                        "-b:a",
-                        "192k",
-                    ])
-                else:
-                    command.extend(["-an"])
-                command.extend([
-                    "-movflags",
-                    "+faststart",
-                    str(output_path),
-                ])
-            elif framing_mode == "true_9_16":
+            if framing_mode == "true_9_16":
                 from app.services.smart_framing import analyze_speaker_tracking, get_crop_filter_for_clip
                 project_dir = output_path.parent.parent if output_path.parent.name == "clips" else source_path.parent
                 try:
@@ -716,6 +615,7 @@ def create_clip(
                     base_filter = f"crop=w={crop_w}:h={crop_h}:x='{x_expr}':y=0,scale=720:1280,format=yuv420p"
 
                 if watermark_path and watermark_path.is_file():
+                    input_args = ["-i", str(source_path), "-i", str(watermark_path)]
                     wm_x = "W-w-44"
                     wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
@@ -734,103 +634,54 @@ def create_clip(
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
                     else:
                         filter_graph = base_filter_complex + "[v]"
-
-                    filter_script = subtitle_directory / "filter-complex.txt"
-                    filter_script.write_text(filter_graph, encoding="utf-8")
-
-                    command = [
-                        ffmpeg_path,
-                        "-y",
-                        "-ss",
-                        str(start_time),
-                        "-i",
-                        str(source_path),
-                        "-i",
-                        str(watermark_path),
-                        "-t",
-                        str(end_time - start_time),
-                        "-/filter_complex",
-                        filter_script.name,
-                        "-map",
-                        "[v]",
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "medium",
-                        "-crf",
-                        "23",
-                    ]
                 else:
+                    input_args = ["-i", str(source_path)]
                     if use_ass and ass_filter:
                         filter_graph = f"[0:v]{base_filter},{ass_filter}[v]"
-                        filter_script = subtitle_directory / "filter-complex.txt"
-                        filter_script.write_text(filter_graph, encoding="utf-8")
-                        command = [
-                            ffmpeg_path,
-                            "-y",
-                            "-ss",
-                            str(start_time),
-                            "-i",
-                            str(source_path),
-                            "-t",
-                            str(end_time - start_time),
-                            "-/filter_complex",
-                            filter_script.name,
-                            "-map",
-                            "[v]",
-                            "-c:v",
-                            "libx264",
-                            "-preset",
-                            "medium",
-                            "-crf",
-                            "23",
-                        ]
+                    elif (not use_ass) and all_text_filters:
+                        filter_graph = f"[0:v]{base_filter}," + ",".join(all_text_filters) + "[v]"
                     else:
-                        filter_graph = (
-                            base_filter + "," + ",".join(all_text_filters)
-                            if all_text_filters
-                            else base_filter
+                        filter_graph = f"[0:v]{base_filter}[v]"
+
+            elif framing_mode == "square_rounded":
+                _generate_rounded_corner_mask(subtitle_directory, size=660, radius=36)
+                bg_and_square = (
+                    "color=c=black:s=720x1280:r=30[bg];"
+                    "[0:v]crop=min(iw\\,ih):min(iw\\,ih),scale=660:660,format=yuva420p[sq];"
+                    "movie=rounded-mask.png:loop=0,setpts=N/FRAME_RATE/TB[mask];"
+                    "[sq][mask]alphamerge[rounded];"
+                    "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
+                )
+                if watermark_path and watermark_path.is_file():
+                    input_args = ["-i", str(source_path), "-i", str(watermark_path)]
+                    wm_x = "W-w-44"
+                    wm_y = "round(H*0.06)"
+                    if use_ass and ass_filter:
+                        base_filter_complex = (
+                            f"{bg_and_square},{ass_filter}[base];"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
-                        filter_script = subtitle_directory / "video-filters.txt"
-                        filter_script.write_text(filter_graph, encoding="utf-8")
-                        command = [
-                            ffmpeg_path,
-                            "-y",
-                            "-ss",
-                            str(start_time),
-                            "-i",
-                            str(source_path),
-                            "-t",
-                            str(end_time - start_time),
-                            "-/filter:v",
-                            filter_script.name,
-                            "-c:v",
-                            "libx264",
-                            "-preset",
-                            "medium",
-                            "-crf",
-                            "23",
-                        ]
-                if has_audio:
-                    if watermark_path and watermark_path.is_file():
-                        command.extend([
-                            "-map",
-                            "0:a?",
-                        ])
-                    command.extend([
-                        "-c:a",
-                        "libmp3lame",
-                        "-b:a",
-                        "192k",
-                    ])
+                    else:
+                        base_filter_complex = (
+                            f"{bg_and_square}[base];"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
+                        )
+                    if (not use_ass) and all_text_filters:
+                        filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
+                    else:
+                        filter_graph = base_filter_complex + "[v]"
                 else:
-                    command.extend(["-an"])
-                command.extend([
-                    "-movflags",
-                    "+faststart",
-                    str(output_path),
-                ])
-            else:
+                    input_args = ["-i", str(source_path)]
+                    if use_ass and ass_filter:
+                        filter_graph = f"{bg_and_square},{ass_filter}[v]"
+                    elif (not use_ass) and all_text_filters:
+                        filter_graph = bg_and_square + "," + ",".join(all_text_filters) + "[v]"
+                    else:
+                        filter_graph = bg_and_square + "[v]"
+
+            else:  # standard (16:9 rounded card in 9:16 vertical)
                 _generate_rounded_corner_mask(
                     subtitle_directory,
                     width=672,
@@ -846,6 +697,7 @@ def create_clip(
                     "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
                 )
                 if watermark_path and watermark_path.is_file():
+                    input_args = ["-i", str(source_path), "-i", str(watermark_path)]
                     wm_x = "W-w-44"
                     wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
@@ -864,33 +716,8 @@ def create_clip(
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
                     else:
                         filter_graph = base_filter_complex + "[v]"
-
-                    filter_script = subtitle_directory / "filter-complex.txt"
-                    filter_script.write_text(filter_graph, encoding="utf-8")
-
-                    command = [
-                        ffmpeg_path,
-                        "-y",
-                        "-ss",
-                        str(start_time),
-                        "-i",
-                        str(source_path),
-                        "-i",
-                        str(watermark_path),
-                        "-t",
-                        str(end_time - start_time),
-                        "-/filter_complex",
-                        filter_script.name,
-                        "-map",
-                        "[v]",
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "medium",
-                        "-crf",
-                        "23",
-                    ]
                 else:
+                    input_args = ["-i", str(source_path)]
                     if use_ass and ass_filter:
                         filter_graph = f"{bg_and_video},{ass_filter}[v]"
                     elif (not use_ass) and all_text_filters:
@@ -898,45 +725,46 @@ def create_clip(
                     else:
                         filter_graph = bg_and_video + "[v]"
 
-                    filter_script = subtitle_directory / "filter-complex.txt"
-                    filter_script.write_text(filter_graph, encoding="utf-8")
+            filter_script = subtitle_directory / "filter-complex.txt"
+            filter_script.write_text(filter_graph, encoding="utf-8")
 
-                    command = [
-                        ffmpeg_path,
-                        "-y",
-                        "-ss",
-                        str(start_time),
-                        "-i",
-                        str(source_path),
-                        "-t",
-                        str(end_time - start_time),
-                        "-/filter_complex",
-                        filter_script.name,
-                        "-map",
-                        "[v]",
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "medium",
-                        "-crf",
-                        "23",
-                    ]
-                if has_audio:
-                    command.extend([
-                        "-map",
-                        "0:a?",
-                        "-c:a",
-                        "libmp3lame",
-                        "-b:a",
-                        "192k",
-                    ])
-                else:
-                    command.extend(["-an"])
+            command = [
+                ffmpeg_path,
+                "-y",
+                "-ss",
+                str(start_time),
+                *input_args,
+                "-t",
+                str(end_time - start_time),
+                "-/filter_complex",
+                filter_script.name,
+                "-map",
+                "[v]",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "medium",
+                "-crf",
+                "23",
+            ]
+
+            if has_audio:
                 command.extend([
-                    "-movflags",
-                    "+faststart",
-                    str(output_path),
+                    "-map",
+                    "0:a?",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
                 ])
+            else:
+                command.extend(["-an"])
+
+            command.extend([
+                "-movflags",
+                "+faststart",
+                str(output_path),
+            ])
             if cancel_event is not None and cancel_event.is_set():
                 raise ClipGenerationCancelled("Clip generation was cancelled")
             process = subprocess.Popen(
