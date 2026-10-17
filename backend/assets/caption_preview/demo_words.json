@@ -1,0 +1,17 @@
+[
+  {
+    "start": 0.5,
+    "end": 3.3,
+    "text": "This is how your captions will move",
+    "words": [
+      { "start": 0.5, "end": 0.85, "text": "This" },
+      { "start": 0.85, "end": 1.15, "text": "is" },
+      { "start": 1.15, "end": 1.5, "text": "how" },
+      { "start": 1.5, "end": 1.85, "text": "your" },
+      { "start": 1.85, "end": 2.45, "text": "captions" },
+      { "start": 2.45, "end": 2.8, "text": "will" },
+      { "start": 2.8, "end": 3.3, "text": "move" }
+    ]
+  }
+]
+

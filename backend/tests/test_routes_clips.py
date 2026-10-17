@@ -292,16 +292,21 @@ def test_get_caption_styles_endpoint():
     assert response.status_code == 200
     styles = response.json()
     assert isinstance(styles, list)
-    assert len(styles) == 5
+    assert len(styles) == 6
 
     style_ids = [s["id"] for s in styles]
-    assert set(style_ids) == {"clean", "punch", "robin", "pill", "karaoke"}
+    assert set(style_ids) == {"classic", "clean", "punch", "robin", "pill", "karaoke"}
+
+    classic = next(s for s in styles if s["id"] == "classic")
+    assert classic["default_animation"] == "pop"
+    assert classic["allowed_animations"] == ["pop"]
 
     robin = next(s for s in styles if s["id"] == "robin")
     assert robin["default_animation"] == "grow"
     assert "grow" in robin["allowed_animations"]
     assert "sweep" in robin["allowed_animations"]
     assert len(robin["allowed_animations"]) == 5
+
 
 
 def test_update_clip_top_line_with_caption_style_and_animation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -529,8 +529,9 @@ def create_clip(
             dir=output_path.parent,
         ) as temporary_directory:
             subtitle_directory = Path(temporary_directory)
-            use_ass = has_ass_filter(ffmpeg_path)
-            if not use_ass:
+            normalized_style = (caption_style or "classic").lower().strip()
+            use_ass = (normalized_style != "classic") and has_ass_filter(ffmpeg_path)
+            if normalized_style != "classic" and not use_ass:
                 logger.warning("FFmpeg libass filter 'ass' not found. Falling back to drawtext filter.")
 
             ass_filter: str | None = None

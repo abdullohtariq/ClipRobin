@@ -767,6 +767,70 @@ def test_create_clip_integration_with_ass(tmp_path: Path):
     assert output_path.stat().st_size > 1000
 
 
+def test_create_clip_classic_drawtext_regression(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import create_clip
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"dummy")
+    output = tmp_path / "output.mp4"
+
+    monkeypatch.setattr("app.services.video_editor.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: True)
+    monkeypatch.setattr("app.services.video_editor.find_watermark_file", lambda: None)
+    monkeypatch.setattr("app.services.video_editor.has_ass_filter", lambda *args: True)
+
+    captured_filter_content = []
+
+    class MockProcess:
+        returncode = 0
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def mock_popen(cmd, *args, **kwargs):
+        cwd = kwargs.get("cwd")
+        if cwd and (Path(cwd) / "filter-complex.txt").is_file():
+            captured_filter_content.append((Path(cwd) / "filter-complex.txt").read_text(encoding="utf-8"))
+        elif cwd and (Path(cwd) / "video-filters.txt").is_file():
+            captured_filter_content.append((Path(cwd) / "video-filters.txt").read_text(encoding="utf-8"))
+        output.write_bytes(b"rendered")
+        return MockProcess()
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+
+    subtitles = [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "text": "Hello world",
+            "words": [
+                {"start": 0.0, "end": 1.0, "text": "Hello"},
+                {"start": 1.0, "end": 2.0, "text": "world"},
+            ],
+        }
+    ]
+
+    create_clip(
+        source_path=source,
+        output_path=output,
+        start_time=0.0,
+        end_time=2.0,
+        subtitle_segments=subtitles,
+        show_subtitles=True,
+        caption_style="classic",
+    )
+
+    assert len(captured_filter_content) == 1
+    filter_text = captured_filter_content[0]
+    # Classic MUST use drawtext, never ass
+    assert "ass=" not in filter_text
+    assert "captions.ass" not in filter_text
+    assert "drawtext=" in filter_text
+    assert "box=1:boxcolor=black@0.55" in filter_text
+    assert "fontcolor=yellow" in filter_text
+    assert "fontsize=34" in filter_text
+
+
+
 
 
 

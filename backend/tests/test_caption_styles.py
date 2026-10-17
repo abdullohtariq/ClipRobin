@@ -16,28 +16,27 @@ from app.services.caption_styles import (
 
 
 def test_styles_and_animations_definitions():
-    expected_styles = {"clean", "punch", "robin", "pill", "karaoke"}
+    expected_styles = {"classic", "clean", "punch", "robin", "pill", "karaoke"}
     assert set(CAPTION_STYLES.keys()) == expected_styles
 
     expected_animations = {"pop", "grow", "sweep", "fade", "glide"}
     assert set(ANIMATIONS.keys()) == expected_animations
     assert set(ALL_ANIMATION_IDS) == expected_animations
 
-    assert DEFAULT_STYLE_ID == "robin"
+    assert DEFAULT_STYLE_ID == "classic"
 
 
 def test_get_caption_style_defaults_and_aliases():
-    # None or empty defaults to Robin
-    assert get_caption_style(None).id == "robin"
-    assert get_caption_style("").id == "robin"
+    # None or empty defaults to Classic
+    assert get_caption_style(None).id == "classic"
+    assert get_caption_style("").id == "classic"
 
     # Aliases
-    assert get_caption_style("classic").id == "robin"
     assert get_caption_style("bold_emerald").id == "robin"
     assert get_caption_style("clean_gold").id == "clean"
 
     # Exact styles
-    for style_id in ["clean", "punch", "robin", "pill", "karaoke"]:
+    for style_id in ["classic", "clean", "punch", "robin", "pill", "karaoke"]:
         assert get_caption_style(style_id).id == style_id
 
     # Unknown style raises ValueError
@@ -47,6 +46,11 @@ def test_get_caption_style_defaults_and_aliases():
 
 def test_get_caption_animation_resolution():
     # Defaults for each style
+    classic_style = get_caption_style("classic")
+    assert get_caption_animation(None, classic_style) == "pop"
+    # Classic fixed highlight ignores requested animations
+    assert get_caption_animation("grow", classic_style) == "pop"
+
     clean_style = get_caption_style("clean")
     assert get_caption_animation(None, clean_style) == "fade"
 
@@ -58,6 +62,7 @@ def test_get_caption_animation_resolution():
 
     pill_style = get_caption_style("pill")
     assert get_caption_animation(None, pill_style) == "pop"
+
 
     karaoke_style = get_caption_style("karaoke")
     assert get_caption_animation(None, karaoke_style) == "sweep"
@@ -108,9 +113,9 @@ def test_resolve_font_file_fallbacks():
 
 def test_list_caption_styles():
     styles = list_caption_styles()
-    assert len(styles) == 5
+    assert len(styles) == 6
     style_ids = {s["id"] for s in styles}
-    assert style_ids == {"clean", "punch", "robin", "pill", "karaoke"}
+    assert style_ids == {"classic", "clean", "punch", "robin", "pill", "karaoke"}
 
     for s in styles:
         assert "name" in s

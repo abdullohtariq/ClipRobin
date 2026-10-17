@@ -68,6 +68,22 @@ ANIMATIONS: dict[str, dict[str, Any]] = {
 ALL_ANIMATION_IDS = list(ANIMATIONS.keys())
 
 CAPTION_STYLES: dict[str, CaptionStyleDefinition] = {
+    "classic": CaptionStyleDefinition(
+        id="classic",
+        name="Classic",
+        description="The original Clip Robin word-by-word look.",
+        font_family="Montserrat",
+        font_file="Montserrat-Bold.ttf",
+        text_case="normal",
+        primary_color="#FFFFFF",
+        accent_color="#FFFF00",
+        outline_width=3,
+        shadow_depth=2,
+        border_style=1,
+        box_opacity=0.55,
+        default_animation="pop",
+        allowed_animations=["pop"],
+    ),
     "clean": CaptionStyleDefinition(
         id="clean",
         name="Clean",
@@ -150,14 +166,14 @@ CAPTION_STYLES: dict[str, CaptionStyleDefinition] = {
     ),
 }
 
-DEFAULT_STYLE_ID = "robin"
+DEFAULT_STYLE_ID = "classic"
 
 # Backward compatibility aliases for existing projects and tests
 STYLE_ALIASES: dict[str, str] = {
-    "classic": "robin",
     "bold_emerald": "robin",
     "clean_gold": "clean",
 }
+
 
 
 def get_fonts_directory() -> Path:
@@ -227,8 +243,9 @@ def get_caption_animation(animation_id: str | None, style: CaptionStyleDefinitio
     """Validate and return the animation ID for a given style.
 
     Defaults to style.default_animation if animation_id is None.
+    Classic has a fixed built-in highlight so it always uses its default animation.
     """
-    if not animation_id:
+    if not animation_id or style.id == "classic":
         return style.default_animation
 
     normalized = animation_id.strip().lower()
@@ -242,6 +259,7 @@ def get_caption_animation(animation_id: str | None, style: CaptionStyleDefinitio
         )
 
     return normalized
+
 
 
 def list_caption_styles() -> list[dict[str, Any]]:
