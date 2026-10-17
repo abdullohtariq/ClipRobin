@@ -149,6 +149,134 @@ def _is_speech_active(t: float, speech_windows: list[tuple[float, float]]) -> bo
     return False
 
 
+BACKCHANNEL_WORDS = {
+    "yeah", "yep", "yes", "mm", "hm", "hmm", "mm-hm", "mmhm", "mhm", "mmhmm",
+    "uh", "huh", "uh-huh", "uhhuh", "right", "okay", "ok", "sure", "ah",
+    "cool", "wow", "yup", "ha", "haha", "got", "it", "got it", "i see",
+    "exactly", "definitely", "totally", "true",
+}
+
+
+def _is_backchannel_text(text: str) -> bool:
+    """Check if text is purely a reactive token or backchannel utterance."""
+    raw_cleaned = "".join(c for c in text.lower() if c.isalnum() or c in " -").strip()
+    if raw_cleaned in BACKCHANNEL_WORDS:
+        return True
+    normalized = text.lower().replace("-", " ")
+    cleaned = "".join(c for c in normalized if c.isalnum() or c.isspace()).strip()
+    if not cleaned:
+        return True
+    if cleaned in BACKCHANNEL_WORDS:
+        return True
+    words = cleaned.split()
+    if len(words) <= 2 and all(w in BACKCHANNEL_WORDS for w in words):
+        return True
+    return False
+
+
+def _load_speech_utterances(project_directory: Path) -> list[dict[str, Any]]:
+    """Load transcript segments with backchannel classification."""
+    transcript_path = project_directory / "transcription" / "transcript.json"
+    if not transcript_path.is_file():
+        transcript_path = project_directory / "transcript.json"
+    if not transcript_path.is_file():
+        return []
+
+    try:
+        transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    raw_segments = transcript.get("segments", [])
+    if not isinstance(raw_segments, list):
+        return []
+
+    utterances: list[dict[str, Any]] = []
+    for seg in raw_segments:
+        if not isinstance(seg, dict):
+            continue
+        try:
+            start = float(seg.get("start", 0.0))
+            end = float(seg.get("end", 0.0))
+        except (ValueError, TypeError):
+            continue
+
+        duration = end - start
+        if duration <= 0:
+            continue
+
+        text = str(seg.get("text", "")).strip()
+
+        # Classify backchannels: short acknowledgment utterances (< 0.7s or recognized reactive phrases)
+        is_backchannel = False
+        if duration < 0.4:
+            is_backchannel = True
+        elif duration < 0.8 and _is_backchannel_text(text):
+            is_backchannel = True
+        elif duration < 1.2 and _is_backchannel_text(text):
+            is_backchannel = True
+
+        utterances.append({
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "duration": round(duration, 3),
+            "text": text,
+            "is_backchannel": is_backchannel,
+        })
+
+    utterances.sort(key=lambda u: u["start"])
+    return utterances
+
+
+def _merge_short_shots(
+    shots: list[dict[str, Any]],
+    min_duration: float = 1.6,
+    crop_width: float = 400.0,
+) -> list[dict[str, Any]]:
+    """
+    Merge shots shorter than min_duration into adjacent dominant shots in Pass 2.
+    Eliminates forward-locking during frame tracking and absorbs transient blips.
+    """
+    if len(shots) <= 1:
+        return shots
+
+    shots = [dict(s) for s in shots]
+    changed = True
+    while changed and len(shots) > 1:
+        changed = False
+        for i in range(len(shots)):
+            shot = shots[i]
+            dur = shot["end"] - shot["start"]
+            if dur < min_duration:
+                if i == 0:
+                    shots[1]["start"] = shot["start"]
+                    shots.pop(0)
+                elif i == len(shots) - 1:
+                    shots[i - 1]["end"] = shot["end"]
+                    shots.pop(i)
+                else:
+                    prev_s = shots[i - 1]
+                    next_s = shots[i + 1]
+                    # If flanked by same speaker / position, absorb into prev
+                    if abs(prev_s["x"] - next_s["x"]) <= (crop_width * 0.35):
+                        prev_s["end"] = next_s["end"]
+                        shots.pop(i + 1)
+                        shots.pop(i)
+                    else:
+                        diff_prev = abs(shot["x"] - prev_s["x"])
+                        diff_next = abs(shot["x"] - next_s["x"])
+                        if diff_prev <= diff_next:
+                            prev_s["end"] = shot["end"]
+                            shots.pop(i)
+                        else:
+                            next_s["start"] = shot["start"]
+                            shots.pop(i)
+                changed = True
+                break
+
+    return shots
+
+
 def _compute_iou(box1: tuple[float, float, float, float], box2: tuple[float, float, float, float]) -> float:
     """Compute IoU between [x, y, w, h] boxes."""
     x1, y1, w1, h1 = box1
@@ -172,7 +300,7 @@ def _compute_iou(box1: tuple[float, float, float, float], box2: tuple[float, flo
 
 
 class _FaceTrack:
-    def __init__(self, track_id: int, bbox: tuple[float, float, float, float], landmarks: np.ndarray, t: float):
+    def __init__(self, track_id: int, bbox: tuple[float, float, float, float], landmarks: np.ndarray, t: float, center_x_orig: float):
         self.track_id = track_id
         self.last_bbox = bbox
         self.last_landmarks = landmarks
@@ -182,12 +310,24 @@ class _FaceTrack:
         self.last_mouth_patch: np.ndarray | None = None
         self.mouth_motion_history: list[tuple[float, float]] = []  # (t, motion)
         self.speech_score_history: list[tuple[float, float]] = []  # (t, score)
+        self.positions: list[tuple[float, float]] = [(t, center_x_orig)]  # (t, orig_center_x)
 
-    def update(self, bbox: tuple[float, float, float, float], landmarks: np.ndarray, t: float, mouth_patch: np.ndarray | None, is_speaking_audio: bool):
+    def update(
+        self,
+        bbox: tuple[float, float, float, float],
+        landmarks: np.ndarray,
+        t: float,
+        mouth_patch: np.ndarray | None,
+        is_speaking_audio: bool,
+        center_x_orig: float,
+    ):
         self.last_bbox = bbox
         self.last_landmarks = landmarks
         self.last_t = t
         self.frame_count += 1
+        self.positions.append((t, center_x_orig))
+        if len(self.positions) > 3000:
+            self.positions.pop(0)
 
         motion = 0.0
         if mouth_patch is not None and self.last_mouth_patch is not None:
@@ -214,6 +354,18 @@ class _FaceTrack:
         cutoff = self.last_t - window_seconds
         recent = [score for t, score in self.speech_score_history if t >= cutoff]
         return float(np.mean(recent)) if recent else 0.0
+
+    def speech_score_in_window(self, start_t: float, end_t: float) -> float:
+        """Calculate mean speech score in a given time window."""
+        scores = [score for t, score in self.speech_score_history if (start_t - 0.25) <= t <= (end_t + 0.25)]
+        return float(np.mean(scores)) if scores else 0.0
+
+    def center_x_at_time(self, target_t: float) -> float:
+        """Return the closest known center X position for this track."""
+        if not self.positions:
+            return float(self.last_bbox[0] + self.last_bbox[2] / 2.0)
+        closest = min(self.positions, key=lambda pt: abs(pt[0] - target_t))
+        return closest[1]
 
 
 def analyze_speaker_tracking(
@@ -258,8 +410,9 @@ def analyze_speaker_tracking(
         analysis_cache.write_text(json.dumps(result, indent=2), encoding="utf-8")
         return result
 
-    # Prepare speech windows from VAD / faster-whisper transcript
+    # Prepare speech windows and utterances from VAD / faster-whisper transcript
     speech_windows = _load_speech_windows(project_directory)
+    speech_utterances = _load_speech_utterances(project_directory)
 
     # Initialize OpenCV FaceDetectorYN
     import cv2
@@ -301,6 +454,7 @@ def analyze_speaker_tracking(
         stderr=subprocess.DEVNULL,
     )
 
+    all_tracks: dict[int, _FaceTrack] = {}
     active_tracks: dict[int, _FaceTrack] = {}
     next_track_id = 1
     frame_idx = 0
@@ -309,6 +463,7 @@ def analyze_speaker_tracking(
 
     last_active_speaker_track_id: int | None = None
     last_speaker_time = -10.0
+    last_known_center_x: float | None = None
 
     try:
         while True:
@@ -378,17 +533,20 @@ def analyze_speaker_tracking(
 
                 if best_iou >= 0.20 and best_det_idx >= 0:
                     bbox, lms, mpatch = current_frame_detections[best_det_idx]
-                    track.update(bbox, lms, t, mpatch, is_speech)
+                    det_cx_orig = (bbox[0] + bbox[2] / 2.0) * scale_to_orig
+                    track.update(bbox, lms, t, mpatch, is_speech, det_cx_orig)
                     unmatched_detections.remove(best_det_idx)
                     matched_tracks.add(track_id)
 
             # Create new tracks for unmatched detections
             for det_idx in unmatched_detections:
                 bbox, lms, mpatch = current_frame_detections[det_idx]
-                new_track = _FaceTrack(next_track_id, bbox, lms, t)
+                det_cx_orig = (bbox[0] + bbox[2] / 2.0) * scale_to_orig
+                new_track = _FaceTrack(next_track_id, bbox, lms, t, det_cx_orig)
                 if mpatch is not None:
                     new_track.last_mouth_patch = mpatch
                 active_tracks[next_track_id] = new_track
+                all_tracks[next_track_id] = new_track
                 next_track_id += 1
 
             # Determine who to frame in this frame (Fallback Order)
@@ -399,8 +557,9 @@ def analyze_speaker_tracking(
             recent_tracks = [tr for tr in active_tracks.values() if abs(tr.last_t - t) <= 0.25 and tr.frame_count >= 2]
 
             if not recent_tracks:
-                # Fallback 5: No faces at all -> Center crop
-                chosen_center_x = frame_center_x
+                # Layer 1 fix: Do NOT jump to dead center (orig_w / 2.0) when detections drop!
+                # Hold the last known face position. Only fall back to center if no face has EVER been detected.
+                chosen_center_x = last_known_center_x if last_known_center_x is not None else frame_center_x
             elif len(recent_tracks) >= 2:
                 # Check Fallback 4: Both people fit in the crop
                 boxes_orig = [
@@ -413,31 +572,38 @@ def analyze_speaker_tracking(
                 if span <= (crop_w * 0.88):
                     # Both fit in the crop! Center the pair
                     chosen_center_x = (min_x + max_x) / 2.0
+                    last_known_center_x = chosen_center_x
                 else:
                     # Score speaker between the tracks
                     speaker_track = max(recent_tracks, key=lambda tr: tr.recent_speech_score())
                     if speaker_track.recent_speech_score() > 0.04 and is_speech:
                         # Fallback 1: Active speaker
-                        chosen_center_x = (speaker_track.last_bbox[0] + speaker_track.last_bbox[2] / 2.0) * scale_to_orig
+                        chosen_center_x = speaker_track.center_x_at_time(t)
                         last_active_speaker_track_id = speaker_track.track_id
                         last_speaker_time = t
-                    elif last_active_speaker_track_id and (t - last_speaker_time) < 2.0:
+                        last_known_center_x = chosen_center_x
+                    elif last_active_speaker_track_id:
                         # Fallback 2: Hold last confirmed speaker during speech or short pause
                         hold_tr = active_tracks.get(last_active_speaker_track_id)
                         if hold_tr and abs(hold_tr.last_t - t) <= 0.3:
-                            chosen_center_x = (hold_tr.last_bbox[0] + hold_tr.last_bbox[2] / 2.0) * scale_to_orig
+                            chosen_center_x = hold_tr.center_x_at_time(t)
+                        elif last_known_center_x is not None:
+                            chosen_center_x = last_known_center_x
                         else:
-                            # Fallback 3: Most prominent face (area * centrality)
+                            # Fallback 3: Most prominent face
                             prominent = max(recent_tracks, key=lambda tr: tr.last_bbox[2] * tr.last_bbox[3])
                             chosen_center_x = (prominent.last_bbox[0] + prominent.last_bbox[2] / 2.0) * scale_to_orig
+                        last_known_center_x = chosen_center_x
                     else:
                         # Fallback 3: Most prominent face
                         prominent = max(recent_tracks, key=lambda tr: tr.last_bbox[2] * tr.last_bbox[3])
                         chosen_center_x = (prominent.last_bbox[0] + prominent.last_bbox[2] / 2.0) * scale_to_orig
+                        last_known_center_x = chosen_center_x
             else:
                 # Single face track
                 tr = recent_tracks[0]
-                chosen_center_x = (tr.last_bbox[0] + tr.last_bbox[2] / 2.0) * scale_to_orig
+                chosen_center_x = tr.center_x_at_time(t)
+                last_known_center_x = chosen_center_x
                 if tr.recent_speech_score() > 0.03:
                     last_active_speaker_track_id = tr.track_id
                     last_speaker_time = t
@@ -465,7 +631,91 @@ def analyze_speaker_tracking(
         analysis_cache.write_text(json.dumps(result, indent=2), encoding="utf-8")
         return result
 
-    # Convert target center X to crop left X with Dead Zones and Ping-Pong / Hysteresis
+    # -----------------------------------------------------------------
+    # Pass 2: Backward Alignment to Whisper/VAD Speech Starts
+    # -----------------------------------------------------------------
+    substantive_utterances = [u for u in speech_utterances if not u.get("is_backchannel", False)]
+
+    if substantive_utterances and all_tracks:
+        # Determine confirmed speaker track for each substantive utterance
+        confirmed_utterances: list[dict[str, Any]] = []
+        for u in substantive_utterances:
+            u_start = u["start"]
+            u_end = u["end"]
+
+            # Candidate tracks active near or during this utterance
+            candidate_tracks = [
+                tr for tr in all_tracks.values()
+                if any((u_start - 0.6) <= pt[0] <= (u_end + 0.6) for pt in tr.positions)
+            ]
+            if not candidate_tracks:
+                continue
+
+            if len(candidate_tracks) == 1:
+                best_track = candidate_tracks[0]
+            else:
+                best_track = max(candidate_tracks, key=lambda tr: tr.speech_score_in_window(u_start, u_end))
+                # If speech score is negligible, fallback to the one with largest face or keep previous speaker
+                if best_track.speech_score_in_window(u_start, u_end) < 0.02 and confirmed_utterances:
+                    prev_id = confirmed_utterances[-1].get("track_id")
+                    match_prev = [tr for tr in candidate_tracks if tr.track_id == prev_id]
+                    if match_prev:
+                        best_track = match_prev[0]
+
+            speaker_cx = best_track.center_x_at_time(u_start)
+            confirmed_utterances.append({
+                "start": u_start,
+                "end": u_end,
+                "track_id": best_track.track_id,
+                "center_x": speaker_cx,
+            })
+
+        # Identify speaker switch cuts with ~150ms J-cut lead-in
+        switch_cuts: list[tuple[float, float, int]] = []  # (cut_time, speaker_center_x, track_id)
+        last_confirmed_cx: float | None = None
+        last_track_id: int | None = None
+
+        for u in confirmed_utterances:
+            cx = u["center_x"]
+            tid = u["track_id"]
+            if last_confirmed_cx is None:
+                lead_in = max(0.0, u["start"] - 0.15)
+                switch_cuts.append((lead_in, cx, tid))
+                last_confirmed_cx = cx
+                last_track_id = tid
+            else:
+                diff = abs(cx - last_confirmed_cx)
+                if diff > (crop_w * 0.35) and tid != last_track_id:
+                    # Confirmed speaker switch! Cut backwards ~150ms before speech start
+                    cut_t = max(0.0, u["start"] - 0.15)
+                    switch_cuts.append((cut_t, cx, tid))
+                    last_confirmed_cx = cx
+                    last_track_id = tid
+
+        # Align the per_frame_target_x timeline backwards
+        if switch_cuts:
+            refined_frame_targets: list[tuple[float, float]] = []
+            cut_idx = 0
+            current_target = switch_cuts[0][1]
+            current_track = all_tracks.get(switch_cuts[0][2])
+
+            for t, orig_cx in per_frame_target_x:
+                while cut_idx + 1 < len(switch_cuts) and t >= switch_cuts[cut_idx + 1][0]:
+                    cut_idx += 1
+                    current_target = switch_cuts[cut_idx][1]
+                    current_track = all_tracks.get(switch_cuts[cut_idx][2])
+
+                if t < switch_cuts[0][0]:
+                    chosen = switch_cuts[0][1]
+                else:
+                    if current_track:
+                        chosen = current_track.center_x_at_time(t)
+                    else:
+                        chosen = current_target
+                refined_frame_targets.append((t, chosen))
+            per_frame_target_x = refined_frame_targets
+
+    # Convert target center X to crop left X with Dead Zones
     max_left = max(0, orig_w - crop_w)
     dead_zone_pixels = crop_w * 0.08  # 8% dead zone to eliminate micro-jitter
 
@@ -475,26 +725,19 @@ def analyze_speaker_tracking(
     current_center_x = per_frame_target_x[0][1]
     current_crop_left = max(0.0, min(max_left, current_center_x - crop_w / 2.0))
 
-    last_cut_time = 0.0
-    min_shot_duration = 1.6  # Hold each choice for >= 1.6s (hysteresis against ping-pong)
-
     for i in range(len(per_frame_target_x)):
         t, target_center_x = per_frame_target_x[i]
         diff_from_current = abs(target_center_x - current_center_x)
-
-        # Check if speaker has moved outside the dead zone OR switched speaker
         is_speaker_switch = diff_from_current > (crop_w * 0.35)
-        time_since_cut = t - last_cut_time
 
-        if is_speaker_switch and time_since_cut >= min_shot_duration:
-            # Hard cut to the new speaker!
+        if is_speaker_switch:
+            # Cut directly! (No forward lock here; min_shot_duration is handled in Pass 2 via merging)
             raw_shots.append({
                 "start": round(current_shot_start, 3),
                 "end": round(t, 3),
                 "x": int(round(current_crop_left)),
             })
             current_shot_start = t
-            last_cut_time = t
             current_center_x = target_center_x
             current_crop_left = max(0.0, min(max_left, target_center_x - crop_w / 2.0))
         elif diff_from_current > dead_zone_pixels and not is_speaker_switch:
@@ -510,9 +753,12 @@ def analyze_speaker_tracking(
         "x": int(round(current_crop_left)),
     })
 
-    # Merge contiguous shots with identical or near-identical x
+    # Pass 2: Merge shots shorter than min_shot_duration (1.6s)
+    merged_shots = _merge_short_shots(raw_shots, min_duration=1.6, crop_width=crop_w)
+
+    # Consolidate adjacent shots with near-identical x
     consolidated_shots: list[dict[str, Any]] = []
-    for shot in raw_shots:
+    for shot in merged_shots:
         if not consolidated_shots:
             consolidated_shots.append(shot)
         else:

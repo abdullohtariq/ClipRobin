@@ -3,9 +3,13 @@ from pathlib import Path
 import pytest
 
 from app.services.smart_framing import (
+    _FaceTrack,
     _compute_iou,
+    _is_backchannel_text,
     _is_speech_active,
+    _load_speech_utterances,
     _load_speech_windows,
+    _merge_short_shots,
     analyze_speaker_tracking,
     get_crop_filter_for_clip,
     get_yunet_model_path,
@@ -115,4 +119,129 @@ def test_analyze_speaker_tracking_already_vertical(tmp_path: Path):
         assert len(data.get("shots", [])) == 1
     finally:
         sf.probe_video_dimensions = orig_probe
+
+
+def test_is_backchannel_text():
+    assert _is_backchannel_text("Yeah") is True
+    assert _is_backchannel_text("yeah!") is True
+    assert _is_backchannel_text("mm-hm") is True
+    assert _is_backchannel_text("right") is True
+    assert _is_backchannel_text("uh-huh") is True
+    assert _is_backchannel_text("ok sure") is True
+    assert _is_backchannel_text("i see") is True
+    assert _is_backchannel_text("Wait, what are you doing here?") is False
+    assert _is_backchannel_text("In this episode we discuss AI models") is False
+
+
+def test_load_speech_utterances(tmp_path: Path):
+    transcript_dir = tmp_path / "transcription"
+    transcript_dir.mkdir()
+    transcript_file = transcript_dir / "transcript.json"
+    transcript_file.write_text(
+        json.dumps({
+            "segments": [
+                {"start": 1.0, "end": 4.5, "text": "Welcome to the podcast today."},
+                {"start": 5.0, "end": 5.4, "text": "Yeah"},
+                {"start": 6.0, "end": 6.3, "text": "Right."},
+                {"start": 7.0, "end": 12.0, "text": "I really wanted to ask about the design process."},
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    utterances = _load_speech_utterances(tmp_path)
+    assert len(utterances) == 4
+    # Utterance 0: substantive speech
+    assert utterances[0]["is_backchannel"] is False
+    assert utterances[0]["start"] == 1.0
+    # Utterance 1 & 2: backchannels
+    assert utterances[1]["is_backchannel"] is True
+    assert utterances[2]["is_backchannel"] is True
+    # Utterance 3: substantive speech
+    assert utterances[3]["is_backchannel"] is False
+
+
+def test_merge_short_shots():
+    # Shot 1 is 0.6s (< 1.6s) and flanked by shots with same position (x=100)
+    raw_shots = [
+        {"start": 0.0, "end": 4.0, "x": 100},
+        {"start": 4.0, "end": 4.6, "x": 800},
+        {"start": 4.6, "end": 10.0, "x": 100},
+    ]
+    merged = _merge_short_shots(raw_shots, min_duration=1.6, crop_width=404)
+    # The short middle shot should be absorbed
+    assert len(merged) == 1
+    assert merged[0]["start"] == 0.0
+    assert merged[0]["end"] == 10.0
+    assert merged[0]["x"] == 100
+
+
+def test_merge_short_shots_boundary():
+    # Lead shot is only 0.8s (< 1.6s)
+    raw_shots = [
+        {"start": 0.0, "end": 0.8, "x": 100},
+        {"start": 0.8, "end": 10.0, "x": 800},
+    ]
+    merged = _merge_short_shots(raw_shots, min_duration=1.6, crop_width=404)
+    assert len(merged) == 1
+    assert merged[0]["start"] == 0.0
+    assert merged[0]["end"] == 10.0
+    assert merged[0]["x"] == 800
+
+
+def test_face_track_positions_and_scoring():
+    import numpy as np
+    lms = np.zeros((5, 2))
+    track = _FaceTrack(track_id=1, bbox=(10.0, 10.0, 50.0, 50.0), landmarks=lms, t=1.0, center_x_orig=300.0)
+
+    # Initially at t=1.0, cx=300
+    assert track.center_x_at_time(1.0) == 300.0
+
+    # Update at t=1.5 with new center_x=320.0
+    patch = np.zeros((16, 24), dtype=np.uint8)
+    track.update(bbox=(15.0, 10.0, 50.0, 50.0), landmarks=lms, t=1.5, mouth_patch=patch, is_speaking_audio=True, center_x_orig=320.0)
+
+    # Nearest time query
+    assert track.center_x_at_time(1.4) == 320.0
+    assert track.center_x_at_time(1.1) == 300.0
+
+
+def test_speaker_switch_backward_alignment_and_no_center_drop(tmp_path: Path):
+    # Setup mock transcript with two distinct substantive utterances
+    transcript_dir = tmp_path / "transcription"
+    transcript_dir.mkdir()
+    transcript_file = transcript_dir / "transcript.json"
+    transcript_file.write_text(
+        json.dumps({
+            "segments": [
+                {"start": 1.0, "end": 4.5, "text": "Host speaking on the left side of the table."},
+                {"start": 7.0, "end": 12.0, "text": "Guest replying on the right side of the room."},
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    utterances = _load_speech_utterances(tmp_path)
+    assert len(utterances) == 2
+    assert utterances[0]["is_backchannel"] is False
+    assert utterances[1]["is_backchannel"] is False
+
+    # In Pass 2: Speaker switch from Host to Guest
+    # The cut time is aligned backward by 150ms before Guest's speech (7.0 - 0.15 = 6.85s)
+    cut_t = max(0.0, utterances[1]["start"] - 0.15)
+    assert cut_t == pytest.approx(6.85)
+
+    # In FFmpeg crop filter, this produces an instant step cut at t=6.850 without panning across empty middle
+    tracking_data = {
+        "crop_width": 607,
+        "crop_height": 1080,
+        "shots": [
+            {"start": 0.0, "end": 6.85, "x": 100},
+            {"start": 6.85, "end": 15.0, "x": 1200},
+        ],
+    }
+    cw, ch, expr = get_crop_filter_for_clip(tracking_data, 0.0, 15.0)
+    assert expr == "if(lt(t,6.850),100,1200)"
+
+
 
