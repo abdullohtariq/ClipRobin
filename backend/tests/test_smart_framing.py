@@ -115,3 +115,4 @@ def test_analyze_speaker_tracking_already_vertical(tmp_path: Path):
         assert len(data.get("shots", [])) == 1
     finally:
         sf.probe_video_dimensions = orig_probe
+

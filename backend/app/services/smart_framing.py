@@ -579,3 +579,4 @@ def get_crop_filter_for_clip(
         expr = f"if(lt(t,{cut_t:.3f}),{x},{expr})"
 
     return crop_w, crop_h, expr
+

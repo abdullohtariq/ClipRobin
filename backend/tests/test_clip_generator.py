@@ -406,4 +406,51 @@ def test_render_single_clip_true_9_16_framing(tmp_path: Path, monkeypatch: pytes
     assert saved.get("generation_options", {}).get("framing_mode") == "true_9_16"
 
 
+def test_create_clip_true_9_16_audio_mapping_with_watermark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import create_clip
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"dummy")
+    output = tmp_path / "output.mp4"
+    watermark = tmp_path / "watermark.png"
+    watermark.write_bytes(b"dummy_wm")
+
+    monkeypatch.setattr("app.services.video_editor.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: True)
+    monkeypatch.setattr("app.services.video_editor.find_watermark_file", lambda: watermark)
+    monkeypatch.setattr(
+        "app.services.smart_framing.analyze_speaker_tracking",
+        lambda *args, **kwargs: {"crop_width": 404, "crop_height": 720, "shots": [{"start": 0.0, "end": 10.0, "x": 100}]},
+    )
+
+    captured_command = []
+
+    class MockProcess:
+        returncode = 0
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def mock_popen(cmd, *args, **kwargs):
+        captured_command.extend(cmd)
+        output.write_bytes(b"rendered")
+        return MockProcess()
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+
+    create_clip(
+        source_path=source,
+        output_path=output,
+        start_time=0.0,
+        end_time=5.0,
+        show_watermark=True,
+        framing_mode="true_9_16",
+    )
+
+    # When watermark is present and has_audio is True, -map 0:a? MUST be present alongside -map [v]
+    assert "-map" in captured_command
+    assert "[v]" in captured_command
+    assert "0:a?" in captured_command
+    assert "libmp3lame" in captured_command
+
+
 

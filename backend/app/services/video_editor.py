@@ -620,6 +620,11 @@ def create_clip(
                         "23",
                     ]
                 if has_audio:
+                    if watermark_path and watermark_path.is_file():
+                        command.extend([
+                            "-map",
+                            "0:a?",
+                        ])
                     command.extend([
                         "-c:a",
                         "libmp3lame",
