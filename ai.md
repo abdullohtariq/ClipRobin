@@ -376,6 +376,24 @@ projects/
   - **Single & Batch Downloads**: Hooked up to both individual "Download clip" buttons (with spinning "Saving..." indicators) and the header "Download all clips (ZIP)" action.
 - **Tests**: `backend/tests/test_routes_clips.py::test_export_clip_with_dialog_saved`, `test_export_clip_with_dialog_cancelled`, `test_export_clip_with_dialog_not_found`, and `test_export_all_clips_with_dialog`.
 
+#### 21. 1:1 Rounded Square Framing for Vertical Canvas (v0.1.17) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/services/video_editor.py`, `backend/app/services/clip_generator.py`, `backend/app/routes/clips.py`, `frontend/app/page.tsx`, `frontend/src/lib/api.ts`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Feature**: Centered square video (660×660) with anti-aliased rounded corners (`radius=36`) placed inside a vertical 720×1280 canvas, popular on TikTok, Reels, and YouTube Shorts. Subtitles position below the square at `y=1010` and headline top line renders cleanly at `y=190-205`.
+
+#### 22. True 9:16 AI Smart Framing & Active Speaker Tracking (v0.1.17) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/services/smart_framing.py`, `backend/app/services/video_editor.py`, `backend/app/services/clip_generator.py`, `backend/app/routes/clips.py`, `frontend/app/page.tsx`, `frontend/app/clips/page.tsx`, `frontend/src/lib/api.ts`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Feature**: Autonomous AI active speaker tracking reframing landscape footage into true edge-to-edge 9:16 vertical video:
+  - **Local & Fast Detection**: Uses YuNet (`cv2.FaceDetectorYN` with `face_detection_yunet_2023mar.onnx`, 232 KB) running on CPU/DirectML with 0 cloud dependencies or PyTorch overhead.
+  - **Cheap VFR/Rotation Sampling**: FFmpeg streams `fps=5,scale=640:-2` raw frames into Python once per source video and caches results in `project_directory/tracking_analysis.json`.
+  - **Active Speaker Correlation**: Extracts mouth patches across tracked faces and correlates normalized inter-frame mouth motion with speech intervals from Whisper VAD (`±200ms` tolerance).
+  - **Fallback Hierarchy**: Active speaker with visible mouth motion -> Hold last speaker -> Most prominent face (area × centrality) -> Pair framing (both faces fit in 88% of 9:16 crop) -> Center crop.
+  - **Cinematic Director Rules**: Hard cuts when switching speakers, 1.6s minimum shot duration (ping-pong hysteresis), and 8% dead zone to eliminate camera micro-jitter.
+  - **Single-Pass Rendering**: Dynamic crop expressions (`crop=w:h:x='if(...)':y=0`) rendered in one pass via FFmpeg filter scripts.
+  - **Top Line Safety**: "Add top line" button is disabled for True 9:16 clips with a tooltip: *"Top line generally doesn't go with 9:16. Try 1:1 or 16:9 for that"*.
+- **Tests**: `backend/tests/test_smart_framing.py` (6 tests) and `backend/tests/test_clip_generator.py::test_generate_clips_with_true_9_16_framing`, `test_render_single_clip_true_9_16_framing`, and `backend/tests/test_routes_clips.py::test_generate_clips_route_true_9_16`.
+
 ---
 
 ---
@@ -383,17 +401,18 @@ projects/
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **55 tests** across 11 test suites in `backend/tests/` (All 55 passing via `pytest`).
+- **Active Backend Automated Tests**: **69 tests** across 12 test suites in `backend/tests/` (All 69 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (55 Implemented & Passing)
+### Backend Test Inventory (69 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
+| **`app.services.smart_framing`** | `tests/test_smart_framing.py` | ✅ Passed | • YuNet ONNX model path resolution.<br>• Bounding box IoU calculations.<br>• Speech window extraction and VAD tolerance check.<br>• Single-shot crop expression generation.<br>• Multi-cut piecewise `if(lt(t,...))` crop expression generation.<br>• Already-vertical video bypass. |
 | **`app.routes.health`** | `tests/test_routes_health.py` | ✅ Passed | • `GET /api/health` returns status 200 and `{"status": "healthy"}`. |
 | **`app.routes.jobs`** | `tests/test_routes_jobs.py` | ✅ Passed | • Empty job queue returns empty list.<br>• Active transcription & clip generation jobs reported with step progress.<br>• Thread safety and status segregation. |
 | **`app.services.project_manager`** | `tests/test_project_manager.py` | ✅ Passed | • `create_project()` generates sequential project IDs (`project_001`, `002`).<br>• `get_project_directory()` validates ID format regex.<br>• Path traversal attempts (`project_../etc`) raise `ValueError`.<br>• Missing project raises `FileNotFoundError`.<br>• `list_projects()` detects source type and clip count.<br>• `CLIPROBIN_PROJECTS_DIR` environment variable override is honored. |

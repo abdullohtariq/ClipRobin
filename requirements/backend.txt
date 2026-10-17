@@ -6,3 +6,4 @@ av>=11,<19
 pillow>=10
 python-multipart
 httpx
+opencv-python-headless

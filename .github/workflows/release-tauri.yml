@@ -45,7 +45,7 @@ jobs:
       - name: Install and package the Python backend
         run: |
           python -m pip install --disable-pip-version-check pyinstaller -r requirements/backend.txt
-          python -m PyInstaller --clean --noconfirm --onefile --name cliprobin-api --distpath backend/dist --workpath "$env:RUNNER_TEMP\pyinstaller-work" --specpath "$env:RUNNER_TEMP\pyinstaller-spec" --collect-all faster_whisper --collect-all ctranslate2 --collect-all av --collect-all tokenizers --collect-all huggingface_hub --collect-all uvicorn --collect-all yt_dlp backend/run.py
+          python -m PyInstaller --clean --noconfirm --onefile --name cliprobin-api --distpath backend/dist --workpath "$env:RUNNER_TEMP\pyinstaller-work" --specpath "$env:RUNNER_TEMP\pyinstaller-spec" --collect-all faster_whisper --collect-all ctranslate2 --collect-all av --collect-all tokenizers --collect-all huggingface_hub --collect-all uvicorn --collect-all yt_dlp --collect-all cv2 --add-data "backend/app/models;app/models" backend/run.py
 
       - name: Install frontend dependencies
         working-directory: frontend

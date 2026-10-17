@@ -135,10 +135,10 @@ def generate_project_clips(
             status_code=422,
             detail="Clip duration must be 15, 30, 60, or 90 seconds",
         )
-    if framing_mode is not None and framing_mode not in {"standard", "square_rounded"}:
+    if framing_mode is not None and framing_mode not in {"standard", "square_rounded", "true_9_16"}:
         raise HTTPException(
             status_code=422,
-            detail="Framing mode must be 'standard' or 'square_rounded'",
+            detail="Framing mode must be 'standard', 'square_rounded', or 'true_9_16'",
         )
     project_directory = project_or_404(project_id)
     job_id = uuid.uuid4().hex
@@ -321,9 +321,12 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
     clips_directory = get_clips_directory(project_id)
     analysis_path = project_directory / "analysis.json"
     analysis_clips = {}
+    framing_mode = "standard"
     if analysis_path.is_file():
         try:
-            analysis_clips = {clip["id"]: clip for clip in json.loads(analysis_path.read_text(encoding="utf-8")).get("clips", [])}
+            analysis_data = json.loads(analysis_path.read_text(encoding="utf-8"))
+            analysis_clips = {clip["id"]: clip for clip in analysis_data.get("clips", [])}
+            framing_mode = analysis_data.get("generation_options", {}).get("framing_mode", "standard")
         except json.JSONDecodeError:
             analysis_clips = {}
 
@@ -340,6 +343,7 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "duration": round(end - start, 3),
             "file": path.name,
             "top_line": metadata.get("top_line", ""),
+            "framing_mode": metadata.get("framing_mode", framing_mode),
             "status": "ready",
         })
     return {"clips": clips}

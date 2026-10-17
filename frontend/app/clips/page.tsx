@@ -46,6 +46,7 @@ const ClipCard = memo(function ClipCard({
   const [topLineError, setTopLineError] = useState("");
 
   const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
+  const isTrue916 = clip.framing_mode === "true_9_16";
 
   useEffect(() => {
     setTopLineInput(clip.top_line || "");
@@ -400,24 +401,37 @@ const ClipCard = memo(function ClipCard({
           )}
         </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            setIsEditingTopLine((prev) => !prev);
-            setTopLineInput(clip.top_line || "");
-            setTopLineError("");
-          }}
-          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-1.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-            clip.top_line
-              ? "border-emerald-600/40 bg-emerald-950/20 text-emerald-300 hover:border-emerald-500 hover:text-white"
-              : "border-[#232326] text-zinc-200 hover:border-zinc-700 hover:text-white"
-          }`}
-        >
-          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-          </svg>
-          {clip.top_line ? "Edit top line" : "Add top line"}
-        </button>
+        <div className="relative group inline-block">
+          <button
+            type="button"
+            disabled={isTrue916}
+            aria-disabled={isTrue916}
+            onClick={() => {
+              if (isTrue916) return;
+              setIsEditingTopLine((prev) => !prev);
+              setTopLineInput(clip.top_line || "");
+              setTopLineError("");
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-1.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+              isTrue916
+                ? "border-zinc-800 bg-zinc-900/40 text-zinc-500 cursor-not-allowed opacity-50"
+                : clip.top_line
+                ? "border-emerald-600/40 bg-emerald-950/20 text-emerald-300 hover:border-emerald-500 hover:text-white"
+                : "border-[#232326] text-zinc-200 hover:border-zinc-700 hover:text-white"
+            }`}
+          >
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+            </svg>
+            {clip.top_line ? "Edit top line" : "Add top line"}
+          </button>
+          {isTrue916 && (
+            <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-[11px] font-medium text-amber-300 shadow-xl whitespace-nowrap z-30">
+              Top line generally doesn&apos;t go with 9:16. Try 1:1 or 16:9 for that
+              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
+            </div>
+          )}
+        </div>
       </div>
 
       {downloadMessage && (

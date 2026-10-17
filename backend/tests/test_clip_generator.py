@@ -345,4 +345,65 @@ def test_render_single_clip_square_rounded_framing(tmp_path: Path, monkeypatch: 
     assert saved.get("generation_options", {}).get("framing_mode") == "square_rounded"
 
 
+def test_generate_clips_with_true_9_16_framing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 15.0, "reason": "Test"}
+            ]
+        }),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def mock_create_clip(source, output, start, end, **kwargs):
+        captured.update(kwargs)
+        output.write_bytes(b"true 9:16 clip content")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    results = generate_clips(tmp_path, framing_mode="true_9_16")
+    assert len(results) == 1
+    assert captured.get("framing_mode") == "true_9_16"
+    assert results[0].get("framing_mode") == "true_9_16"
+
+    saved_analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved_analysis.get("generation_options", {}).get("framing_mode") == "true_9_16"
+
+
+def test_render_single_clip_true_9_16_framing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.clip_generator import render_single_clip
+
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 10.0, "reason": "Test"}
+            ],
+            "generation_options": {
+                "framing_mode": "true_9_16"
+            }
+        }),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def mock_create_clip(source_path, output_path, start_time, end_time, **kwargs):
+        captured.update(kwargs)
+        output_path.write_bytes(b"true 9:16 single clip")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    result = render_single_clip(tmp_path, "clip_001")
+    assert captured.get("framing_mode") == "true_9_16"
+    assert result.get("framing_mode") == "true_9_16"
+    saved = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved.get("generation_options", {}).get("framing_mode") == "true_9_16"
+
+
 

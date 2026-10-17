@@ -194,7 +194,7 @@ def test_generate_clips_route_invalid_framing_mode(tmp_path: Path, monkeypatch: 
 
     response = client.post("/api/projects/project_001/generate-clips?framing_mode=circle")
     assert response.status_code == 422
-    assert "Framing mode must be 'standard' or 'square_rounded'" in response.json()["detail"]
+    assert "Framing mode must be 'standard', 'square_rounded', or 'true_9_16'" in response.json()["detail"]
 
 
 def test_generate_clips_route_square_rounded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -215,5 +215,25 @@ def test_generate_clips_route_square_rounded(tmp_path: Path, monkeypatch: pytest
     assert response.status_code == 200
     assert "job_id" in response.json()
     assert "square_rounded" in captured_args.get("args", ())
+
+
+def test_generate_clips_route_true_9_16(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_dir = tmp_path / "project_002"
+    project_dir.mkdir(parents=True)
+    (project_dir / "source.mp4").write_bytes(b"dummy video")
+
+    captured_args = {}
+
+    def mock_run_generation(*args, **kwargs):
+        captured_args["args"] = args
+        captured_args["kwargs"] = kwargs
+
+    monkeypatch.setattr("app.routes.clips.run_clip_generation", mock_run_generation)
+
+    response = client.post("/api/projects/project_002/generate-clips?framing_mode=true_9_16")
+    assert response.status_code == 200
+    assert "job_id" in response.json()
+    assert "true_9_16" in captured_args.get("args", ())
 
 

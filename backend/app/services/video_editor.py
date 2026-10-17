@@ -364,6 +364,10 @@ def _build_filter_graph(
             "[sq][mask]alphamerge[rounded];"
             "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
         )
+    elif framing_mode == "true_9_16":
+        base_filter = (
+            "crop=w=min(iw\\,ih*9/16):h=ih:x=(iw-ow)/2:y=0,scale=720:1280,format=yuv420p"
+        )
     else:
         base_filter = (
             "scale=720:1280:force_original_aspect_ratio=decrease,"
@@ -515,6 +519,108 @@ def create_clip(
                     command.extend([
                         "-map",
                         "0:a?",
+                        "-c:a",
+                        "libmp3lame",
+                        "-b:a",
+                        "192k",
+                    ])
+                else:
+                    command.extend(["-an"])
+                command.extend([
+                    "-movflags",
+                    "+faststart",
+                    str(output_path),
+                ])
+            elif framing_mode == "true_9_16":
+                from app.services.smart_framing import analyze_speaker_tracking, get_crop_filter_for_clip
+                project_dir = output_path.parent.parent if output_path.parent.name == "clips" else source_path.parent
+                try:
+                    tracking_data = analyze_speaker_tracking(
+                        project_directory=project_dir,
+                        ffmpeg_path=ffmpeg_path,
+                        cancel_event=cancel_event,
+                    )
+                    crop_w, crop_h, x_expr = get_crop_filter_for_clip(tracking_data, start_time, end_time)
+                except Exception:
+                    crop_w = int(round(1080 * 9 / 16))
+                    crop_h = 1080
+                    x_expr = "(in_w-out_w)/2"
+                    tracking_data = {}
+
+                if tracking_data.get("already_vertical"):
+                    base_filter = (
+                        "scale=720:1280:force_original_aspect_ratio=decrease,"
+                        "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
+                    )
+                else:
+                    base_filter = f"crop=w={crop_w}:h={crop_h}:x='{x_expr}':y=0,scale=720:1280,format=yuv420p"
+
+                if watermark_path and watermark_path.is_file():
+                    wm_y = "round(H*0.07)"
+                    base_filter_complex = (
+                        f"[0:v]{base_filter}[base];"
+                        f"[1:v]scale=240:-2[wm];"
+                        f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                    )
+                    if all_text_filters:
+                        filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
+                    else:
+                        filter_graph = base_filter_complex + "[v]"
+
+                    filter_script = subtitle_directory / "filter-complex.txt"
+                    filter_script.write_text(filter_graph, encoding="utf-8")
+
+                    command = [
+                        ffmpeg_path,
+                        "-y",
+                        "-ss",
+                        str(start_time),
+                        "-i",
+                        str(source_path),
+                        "-i",
+                        str(watermark_path),
+                        "-t",
+                        str(end_time - start_time),
+                        "-/filter_complex",
+                        filter_script.name,
+                        "-map",
+                        "[v]",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "medium",
+                        "-crf",
+                        "23",
+                    ]
+                else:
+                    filter_graph = (
+                        base_filter + "," + ",".join(all_text_filters)
+                        if all_text_filters
+                        else base_filter
+                    )
+                    filter_script = subtitle_directory / "video-filters.txt"
+                    filter_script.write_text(filter_graph, encoding="utf-8")
+
+                    command = [
+                        ffmpeg_path,
+                        "-y",
+                        "-ss",
+                        str(start_time),
+                        "-i",
+                        str(source_path),
+                        "-t",
+                        str(end_time - start_time),
+                        "-/filter:v",
+                        filter_script.name,
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "medium",
+                        "-crf",
+                        "23",
+                    ]
+                if has_audio:
+                    command.extend([
                         "-c:a",
                         "libmp3lame",
                         "-b:a",

@@ -71,6 +71,7 @@ export type Clip = {
   reason?: string;
   file: string;
   top_line?: string;
+  framing_mode?: FramingMode;
   status: string;
 };
 
@@ -269,7 +270,7 @@ export async function getLocalTranscriptionJob(
   return response.json();
 }
 
-export type FramingMode = "standard" | "square_rounded";
+export type FramingMode = "standard" | "square_rounded" | "true_9_16";
 
 export async function generateClips(
   projectId: string,

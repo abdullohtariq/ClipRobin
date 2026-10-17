@@ -808,7 +808,7 @@ export default function Home() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Video framing mode">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="radiogroup" aria-label="Video framing mode">
                   {/* Option 1: Standard Vertical (Letterbox) */}
                   <button
                     type="button"
@@ -912,7 +912,70 @@ export default function Home() {
                         )}
                       </div>
                       <p className="mt-0.5 text-[10px] text-emerald-400 font-medium">
-                        TikTok & Reels square
+                        TikTok &amp; Reels square
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Option 3: True 9:16 (Powered by AI Active Speaker Tracking) */}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={framingMode === "true_9_16"}
+                    disabled={isProcessingVideo}
+                    onClick={() => setFramingMode("true_9_16")}
+                    className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                      framingMode === "true_9_16"
+                        ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
+                        : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
+                    }`}
+                  >
+                    {/* AI Powered Badge */}
+                    <div className="absolute -top-2 right-2 z-10 rounded-full bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-400 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-md flex items-center gap-1">
+                      <svg className="size-2.5 text-amber-300" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
+                      </svg>
+                      AI POWERED
+                    </div>
+
+                    {/* Visual Phone Mockup */}
+                    <div className="relative mb-3 flex h-24 w-14 items-center justify-center rounded-lg border border-zinc-700 bg-black p-0 shadow-inner overflow-hidden">
+                      {/* Full bleed 9:16 vertical video background */}
+                      <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/70 via-zinc-900 to-black flex items-center justify-center">
+                        {/* AI Face Detection tracking reticle */}
+                        <div className="relative flex flex-col items-center -mt-2">
+                          <div className="size-7 rounded-full border border-dashed border-emerald-400/90 bg-emerald-500/15 flex items-center justify-center shadow-xs">
+                            <svg className="size-4 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                            </svg>
+                          </div>
+                          <span className="mt-0.5 text-[7px] font-mono font-bold text-emerald-400 uppercase tracking-tighter">SPEAKER</span>
+                        </div>
+                      </div>
+
+                      {/* Subtle notch */}
+                      <div className="absolute top-1 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-zinc-700 z-10" />
+
+                      {/* Bottom subtitle mock lines */}
+                      <div className="absolute bottom-2 left-1.5 right-1.5 space-y-0.5 z-10">
+                        <div className="h-0.5 w-3/4 mx-auto rounded bg-white/90 shadow-xs" />
+                        <div className="h-0.5 w-1/2 mx-auto rounded bg-yellow-400/90 shadow-xs" />
+                      </div>
+                    </div>
+
+                    <div className="w-full text-center">
+                      <div className="flex items-center justify-center gap-1.5">
+                        <span className={`text-xs font-semibold ${framingMode === "true_9_16" ? "text-white" : "text-zinc-300"}`}>
+                          True 9:16
+                        </span>
+                        {framingMode === "true_9_16" && (
+                          <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
+                            ✓
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-[10px] text-purple-300 font-medium">
+                        AI speaker tracking
                       </p>
                     </div>
                   </button>

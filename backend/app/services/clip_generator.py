@@ -175,6 +175,7 @@ def generate_clips(
                     "duration": round(clip["end"] - clip["start"], 3),
                     "file": final_output.name,
                     "top_line": clip.get("top_line", ""),
+                    "framing_mode": use_framing_mode,
                     "status": "ready",
                 }
                 generated.append(clip_metadata)
@@ -320,5 +321,6 @@ def render_single_clip(
         "duration": round(target_clip["end"] - target_clip["start"], 3),
         "file": final_output.name,
         "top_line": cleaned_top_line or "",
+        "framing_mode": use_framing_mode,
         "status": "ready",
     }
