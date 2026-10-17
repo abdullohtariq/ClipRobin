@@ -47,6 +47,7 @@ frontend/src-tauri/gen/schemas/
 
 # Generated media and local work products
 *.mp4
+!frontend/public/caption-previews/*.mp4
 *.mov
 *.mkv
 *.avi
