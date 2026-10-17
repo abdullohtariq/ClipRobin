@@ -1,82 +1,57 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { CaptionAnimation, CaptionStyle } from "@/src/lib/api";
+import { CaptionStyle } from "@/src/lib/api";
 
 export interface StyleOption {
   id: CaptionStyle;
   name: string;
   description: string;
-  defaultAnimation: CaptionAnimation;
-  allowedAnimations: CaptionAnimation[];
 }
 
 export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
   {
     id: "classic",
     name: "Classic",
-    description: "The original Clip Robin word-by-word look.",
-    defaultAnimation: "pop",
-    allowedAnimations: ["pop"],
+    description: "The original Clip Robin word-by-word look with dark box.",
   },
   {
     id: "robin",
     name: "Robin",
     description: "Signature viral all-caps style with emerald highlight.",
-    defaultAnimation: "grow",
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"],
   },
   {
     id: "clean",
     name: "Clean",
     description: "Clean minimal typography with soft shadow.",
-    defaultAnimation: "fade",
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"],
   },
   {
     id: "punch",
     name: "Punch",
-    description: "High-impact bold all-caps with golden accent pop.",
-    defaultAnimation: "pop",
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"],
+    description: "High-impact bold all-caps with golden accent highlight.",
   },
   {
     id: "pill",
     name: "Pill",
-    description: "Translucent dark box with popping active word highlight.",
-    defaultAnimation: "pop",
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"],
+    description: "Translucent dark box with active emerald word highlight.",
   },
   {
     id: "karaoke",
     name: "Karaoke",
-    description: "Smooth fill sweep across the phrase.",
-    defaultAnimation: "sweep",
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"],
+    description: "Smooth karaoke sweep highlight across words.",
   },
 ];
 
-export const ANIMATION_OPTIONS: { id: CaptionAnimation; name: string }[] = [
-  { id: "pop", name: "Pop" },
-  { id: "grow", name: "Grow" },
-  { id: "sweep", name: "Sweep" },
-  { id: "fade", name: "Fade" },
-  { id: "glide", name: "Glide" },
-];
-
-export function getPreviewUrls(styleId: CaptionStyle, animationId: CaptionAnimation) {
-  const effectiveAnim = styleId === "classic" ? "pop" : animationId;
-  const key = `${styleId}__${effectiveAnim}`;
+export function getPreviewUrls(styleId: CaptionStyle) {
   return {
-    videoUrl: `/caption-previews/${key}.mp4`,
-    posterUrl: `/caption-previews/${key}.jpg`,
+    videoUrl: `/caption-previews/${styleId}.mp4`,
+    posterUrl: `/caption-previews/${styleId}.jpg`,
   };
 }
 
 interface VideoPreviewCardProps {
   styleOption: StyleOption;
   isSelected: boolean;
-  selectedAnimation: CaptionAnimation;
   showSafeZones: boolean;
   prefersReducedMotion: boolean;
   onSelect: () => void;
@@ -85,7 +60,6 @@ interface VideoPreviewCardProps {
 function VideoPreviewCard({
   styleOption,
   isSelected,
-  selectedAnimation,
   showSafeZones,
   prefersReducedMotion,
   onSelect,
@@ -95,12 +69,7 @@ function VideoPreviewCard({
   const [isPlaying, setIsPlaying] = useState(!prefersReducedMotion);
   const [hasError, setHasError] = useState(false);
 
-  // When selected, use the user's active animation. Otherwise use this style's default animation.
-  const activeAnim = isSelected
-    ? (styleOption.id === "classic" ? "pop" : selectedAnimation)
-    : styleOption.defaultAnimation;
-
-  const { videoUrl, posterUrl } = getPreviewUrls(styleOption.id, activeAnim);
+  const { videoUrl, posterUrl } = getPreviewUrls(styleOption.id);
 
   // IntersectionObserver: Pause video when scrolled out of view to preserve resources
   useEffect(() => {
@@ -152,51 +121,53 @@ function VideoPreviewCard({
 
   return (
     <div
-      ref={containerRef}
       role="radio"
       aria-checked={isSelected}
       tabIndex={isSelected ? 0 : -1}
       onClick={onSelect}
       onKeyDown={(e) => {
-        if (e.key === " " || e.key === "Enter") {
+        if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           onSelect();
         }
       }}
-      className={`group relative flex flex-col items-center rounded-2xl border p-4 sm:p-5 transition-all duration-200 cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#34D399] ${
+      className={`group relative flex flex-col items-center rounded-2xl border p-4 transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#34D399] ${
         isSelected
-          ? "border-[#34D399] bg-[#34D399]/5 ring-1 ring-[#34D399]/60 shadow-[0_0_24px_rgba(52,211,153,0.12)]"
-          : "border-[#232326] bg-[#111113] hover:border-zinc-600 hover:-translate-y-1 hover:shadow-lg"
+          ? "border-[#34D399] bg-[#34D399]/5 ring-1 ring-[#34D399] shadow-lg shadow-emerald-950/20"
+          : "border-[#232326] bg-[#0c0c0e] hover:border-zinc-700 hover:bg-[#111113]"
       }`}
     >
-      {/* 9:16 Video Canvas Frame */}
-      <div className="relative w-full aspect-[9/16] max-w-[200px] rounded-xl overflow-hidden bg-black border border-zinc-800/80 shadow-inner">
+      {/* 9:16 Video Container */}
+      <div
+        ref={containerRef}
+        className="relative w-full aspect-[9/16] rounded-xl overflow-hidden bg-black border border-[#232326] shadow-inner select-none"
+      >
         {!hasError ? (
           <video
             ref={videoRef}
             src={videoUrl}
             poster={posterUrl}
-            muted
             loop
+            muted
             playsInline
             autoPlay={!prefersReducedMotion}
             onError={() => setHasError(true)}
-            className="w-full h-full object-cover"
+            className="size-full object-cover"
           />
         ) : (
           <img
             src={posterUrl}
             alt={`${styleOption.name} preview`}
-            className="w-full h-full object-cover"
+            className="size-full object-cover"
           />
         )}
 
-        {/* Reduced motion play toggle */}
+        {/* Play/Pause manual toggle button for prefers-reduced-motion or user control */}
         {prefersReducedMotion && (
           <button
             type="button"
             onClick={togglePlayback}
-            className="absolute bottom-2.5 right-2.5 rounded-full bg-black/75 border border-white/20 p-1.5 text-white shadow-md hover:bg-black transition-all"
+            className="absolute bottom-2.5 right-2.5 z-30 flex size-7 items-center justify-center rounded-full bg-black/75 text-white hover:bg-black transition-all border border-white/20"
             aria-label={isPlaying ? "Pause preview" : "Play preview"}
           >
             {isPlaying ? (
@@ -269,20 +240,17 @@ export interface CaptionStylePickerProps {
   isOpen: boolean;
   onClose: () => void;
   selectedStyle: CaptionStyle;
-  selectedAnimation: CaptionAnimation;
-  onSelect: (style: CaptionStyle, animation: CaptionAnimation) => void;
+  onSelect: (style: CaptionStyle) => void;
 }
 
 export function CaptionStylePicker({
   isOpen,
   onClose,
   selectedStyle,
-  selectedAnimation,
   onSelect,
 }: CaptionStylePickerProps) {
   const [showSafeZones, setShowSafeZones] = useState(true);
   const [tempStyle, setTempStyle] = useState<CaptionStyle>(selectedStyle);
-  const [tempAnimation, setTempAnimation] = useState<CaptionAnimation>(selectedAnimation);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -290,9 +258,8 @@ export function CaptionStylePicker({
   useEffect(() => {
     if (isOpen) {
       setTempStyle(selectedStyle);
-      setTempAnimation(selectedAnimation);
     }
-  }, [isOpen, selectedStyle, selectedAnimation]);
+  }, [isOpen, selectedStyle]);
 
   // Check prefers-reduced-motion
   useEffect(() => {
@@ -328,21 +295,24 @@ export function CaptionStylePicker({
         const prevIndex =
           (currentIndex - 1 + CAPTION_STYLE_OPTIONS.length) % CAPTION_STYLE_OPTIONS.length;
         setTempStyle(CAPTION_STYLE_OPTIONS[prevIndex].id);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        onSelect(tempStyle);
+        onClose();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, tempStyle, onClose]);
+  }, [isOpen, tempStyle, onSelect, onClose]);
 
   if (!isOpen) return null;
 
   const activeStyleDef =
     CAPTION_STYLE_OPTIONS.find((s) => s.id === tempStyle) || CAPTION_STYLE_OPTIONS[0];
-  const isClassic = tempStyle === "classic";
 
   const handleApply = () => {
-    onSelect(tempStyle, isClassic ? "pop" : tempAnimation);
+    onSelect(tempStyle);
     onClose();
   };
 
@@ -362,18 +332,18 @@ export function CaptionStylePicker({
           <div>
             <h2
               id="caption-style-picker-title"
-              className="text-lg font-semibold text-white tracking-tight"
+              className="text-lg font-bold text-white tracking-tight sm:text-xl"
             >
               Caption style
             </h2>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Select a typographic look and motion effect for your vertical clips
+            <p className="mt-0.5 text-xs text-zinc-400">
+              Select a typographic look for your vertical clips
             </p>
           </div>
 
           <div className="flex items-center gap-4">
             {/* Safe zones toggle */}
-            <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-zinc-300 hover:text-white transition-colors">
+            <label className="flex items-center gap-2 cursor-pointer text-xs text-zinc-300 hover:text-white select-none">
               <input
                 type="checkbox"
                 checked={showSafeZones}
@@ -411,7 +381,6 @@ export function CaptionStylePicker({
                   key={styleOpt.id}
                   styleOption={styleOpt}
                   isSelected={isSelected}
-                  selectedAnimation={tempAnimation}
                   showSafeZones={showSafeZones}
                   prefersReducedMotion={prefersReducedMotion}
                   onSelect={() => setTempStyle(styleOpt.id)}
@@ -419,73 +388,12 @@ export function CaptionStylePicker({
               );
             })}
           </div>
-
-          {/* Animation Chip Row */}
-          <div className="rounded-xl border border-[#232326] bg-[#111113] p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="block text-xs font-semibold text-white">
-                  Animation effect
-                </label>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Controls word highlight entrance and motion
-                </p>
-              </div>
-
-              {isClassic && (
-                <span
-                  title="Classic uses its own highlight"
-                  className="text-xs font-medium text-amber-400/90 bg-amber-400/10 px-2.5 py-1 rounded-md border border-amber-400/20"
-                >
-                  Classic uses its own highlight
-                </span>
-              )}
-            </div>
-
-            <div
-              className={`flex flex-wrap gap-2.5 ${isClassic ? "opacity-50 pointer-events-none" : ""}`}
-              role="radiogroup"
-              aria-label="Animation effect"
-            >
-              {ANIMATION_OPTIONS.map((anim) => {
-                const isSelected = !isClassic && tempAnimation === anim.id;
-                return (
-                  <button
-                    key={anim.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={isSelected}
-                    disabled={isClassic}
-                    onClick={() => setTempAnimation(anim.id)}
-                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs transition-all duration-150 border focus:outline-none focus:ring-2 focus:ring-[#34D399] ${
-                      isSelected
-                        ? "border-[#34D399] bg-[#34D399]/20 text-emerald-400 font-semibold ring-1 ring-[#34D399]/50 shadow-sm"
-                        : "border-[#232326] bg-[#0c0c0e] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                    }`}
-                  >
-                    <span>{anim.name}</span>
-                    {isSelected && (
-                      <span className="size-1.5 rounded-full bg-emerald-400" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-[#232326] px-6 py-4 bg-[#111113]">
           <div className="text-xs text-zinc-400">
             Current: <span className="text-white font-medium">{activeStyleDef.name}</span>
-            {!isClassic && (
-              <>
-                {" · "}
-                <span className="text-emerald-400 font-medium capitalize">
-                  {tempAnimation}
-                </span>
-              </>
-            )}
           </div>
 
           <div className="flex items-center gap-3">

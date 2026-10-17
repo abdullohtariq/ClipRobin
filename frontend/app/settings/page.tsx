@@ -12,7 +12,6 @@ interface AppSettings {
   aspectRatio: string;
   quality: string;
   defaultCaptionStyle: string;
-  defaultCaptionAnimation: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -23,7 +22,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   aspectRatio: "9:16 (Vertical)",
   quality: "High",
   defaultCaptionStyle: "classic",
-  defaultCaptionAnimation: "pop",
 };
 
 export default function SettingsPage() {
@@ -55,7 +53,7 @@ export default function SettingsPage() {
     });
   };
 
-  const { directory, openClips, confirmDelete, outputFormat, aspectRatio, quality, defaultCaptionStyle, defaultCaptionAnimation } = settings;
+  const { directory, openClips, confirmDelete, outputFormat, aspectRatio, quality, defaultCaptionStyle } = settings;
 
   return (
     <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
@@ -178,38 +176,21 @@ export default function SettingsPage() {
 
           <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150 space-y-4">
             <h2 className="text-base font-semibold text-white">Caption Defaults</h2>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="settings-caption-style-select" className="block text-xs font-medium text-zinc-400 mb-1.5">Default caption style</label>
-                <select
-                  id="settings-caption-style-select"
-                  value={defaultCaptionStyle}
-                  onChange={(e) => updateSetting("defaultCaptionStyle", e.target.value)}
-                  className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                >
-                  <option value="classic">Classic (Original Clip Robin word-by-word)</option>
-                  <option value="robin">Robin (Signature viral all-caps)</option>
-                  <option value="punch">Punch (High-impact Anton all-caps)</option>
-                  <option value="clean">Clean (Minimalist Montserrat Bold)</option>
-                  <option value="pill">Pill (Translucent dark box)</option>
-                  <option value="karaoke">Karaoke (Smooth sweep fill)</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="settings-caption-animation-select" className="block text-xs font-medium text-zinc-400 mb-1.5">Default animation</label>
-                <select
-                  id="settings-caption-animation-select"
-                  value={defaultCaptionAnimation}
-                  onChange={(e) => updateSetting("defaultCaptionAnimation", e.target.value)}
-                  className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                >
-                  <option value="grow">Grow (Smooth scale &amp; accent)</option>
-                  <option value="pop">Pop (Bouncy scale)</option>
-                  <option value="sweep">Sweep (Karaoke fill)</option>
-                  <option value="fade">Fade (Subtle fade)</option>
-                  <option value="glide">Glide (Upward rise &amp; fade)</option>
-                </select>
-              </div>
+            <div>
+              <label htmlFor="settings-caption-style-select" className="block text-xs font-medium text-zinc-400 mb-1.5">Default caption style</label>
+              <select
+                id="settings-caption-style-select"
+                value={defaultCaptionStyle}
+                onChange={(e) => updateSetting("defaultCaptionStyle", e.target.value)}
+                className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+              >
+                <option value="classic">Classic (Original Clip Robin word-by-word)</option>
+                <option value="robin">Robin (Signature viral all-caps)</option>
+                <option value="punch">Punch (High-impact Anton all-caps)</option>
+                <option value="clean">Clean (Minimalist Montserrat Bold)</option>
+                <option value="pill">Pill (Translucent dark box)</option>
+                <option value="karaoke">Karaoke (Smooth sweep fill)</option>
+              </select>
             </div>
           </section>
         </div>

@@ -148,7 +148,7 @@ def _extract_timed_words(
 
     normalized.sort(key=lambda x: x["start"])
 
-    # Resolve overlaps and hold short gaps up to 400ms
+    # Resolve overlaps and hold short gaps up to 1.20s (so captions don't disappear for less than a second)
     cleaned: list[dict[str, Any]] = []
     for i, word in enumerate(normalized):
         cur_start = word["start"]
@@ -158,8 +158,8 @@ def _extract_timed_words(
             next_start = normalized[i + 1]["start"]
             if cur_end > next_start:
                 cur_end = max(cur_start + 0.08, next_start)
-            elif next_start - cur_end <= 0.40:
-                # Bridge small gap (hold word up to 400ms)
+            elif next_start - cur_end <= 1.20:
+                # Bridge gap (hold word up to 1.20s so captions don't flash/disappear)
                 cur_end = next_start
 
         cleaned.append({
@@ -173,16 +173,14 @@ def _extract_timed_words(
 
 def _chunk_words(
     words: list[dict[str, Any]],
-    animation: str,
+    animation: str | None = None,
 ) -> list[list[dict[str, Any]]]:
-    """Group words into chunks based on style animation requirements."""
+    """Group words into chunks of at most 2 words per line for high visibility."""
     if not words:
         return []
 
-    # Sweep animation forces phrase chunking (3-6 words)
-    is_phrase = animation == "sweep"
-    max_chunk_size = 5 if is_phrase else 3
-    min_chunk_size = 3 if is_phrase else 2
+    # Exactly 2 words per line as requested by user
+    max_chunk_size = 2
 
     chunks: list[list[dict[str, Any]]] = []
     current_chunk: list[dict[str, Any]] = []
@@ -195,8 +193,8 @@ def _chunk_words(
         prev_word = current_chunk[-1]
         gap = word["start"] - prev_word["end"]
 
-        # If gap is significant (> 400ms) or max chunk reached, finalize chunk
-        if gap > 0.40 or len(current_chunk) >= max_chunk_size:
+        # If gap is significant (> 1.20s) or chunk reaches 2 words, finalize chunk
+        if gap > 1.20 or len(current_chunk) >= max_chunk_size:
             chunks.append(current_chunk)
             current_chunk = [word]
         else:
@@ -250,13 +248,17 @@ def generate_ass_subtitles(
         margin_v = play_res_y - pos_y  # 340
 
     primary_ass = hex_to_ass_color(style_def.primary_color, alpha_fraction=0.0)
-    secondary_ass = hex_to_ass_color(style_def.accent_color or style_def.primary_color, alpha_fraction=0.0)
-    accent_ass = hex_to_ass_color(style_def.accent_color or "#34D399", alpha_fraction=0.0)
+    if style_def.accent_color:
+        secondary_ass = hex_to_ass_color(style_def.primary_color, alpha_fraction=0.0)
+        accent_ass = hex_to_ass_color(style_def.accent_color, alpha_fraction=0.0)
+    else:
+        secondary_ass = hex_to_ass_color("#B8B8B8", alpha_fraction=0.0)
+        accent_ass = hex_to_ass_color("#FFFFFF", alpha_fraction=0.0)
     outline_ass = hex_to_ass_color("#000000", alpha_fraction=0.0)
     back_ass = hex_to_ass_color("#000000", alpha_fraction=1.0 - style_def.box_opacity if style_def.border_style == 3 else 0.5)
 
-    # Header and V4+ Styles definition
-    font_size = 44
+    # Header and V4+ Styles definition (font size 52 for high visibility with 2 words per line)
+    font_size = 52
     border_style = style_def.border_style
     outline_w = style_def.outline_width
     shadow_d = style_def.shadow_depth
@@ -340,11 +342,26 @@ def generate_ass_subtitles(
 
     pos_tag = f"\\an2\\pos({play_res_x // 2},{pos_y})"
 
-    for chunk in chunks:
+    for c_idx, chunk in enumerate(chunks):
         chunk_start = chunk[0]["start"]
         chunk_end = chunk[-1]["end"]
         if chunk_end <= chunk_start:
             continue
+
+        # Hold chunk on screen longer so captions never disappear for less than a second!
+        if c_idx + 1 < len(chunks):
+            next_chunk_start = chunks[c_idx + 1][0]["start"]
+            gap = next_chunk_start - chunk_end
+            if gap <= 1.25:
+                # Bridge gap completely to the start of the next chunk
+                chunk_end = next_chunk_start
+            else:
+                # Even for longer pauses, hold the caption for an extra 0.8s
+                chunk_end = min(chunk_end + 0.80, next_chunk_start - 0.05)
+        else:
+            # Last chunk in the clip: hold for an extra 1.0s (capped by clip duration)
+            clip_dur = max(0.1, clip_end - clip_start)
+            chunk_end = min(clip_dur, chunk_end + 1.0)
 
         # Format tokens according to style text_case
         formatted_chunk = []
@@ -353,8 +370,8 @@ def generate_ass_subtitles(
             t = raw_t.upper() if style_def.text_case == "upper" else raw_t
             formatted_chunk.append({**w, "text": escape_ass_text(t)})
 
-        if anim_id == "sweep":
-            # Karaoke sweep (\kf tag) across the phrase
+        if style_def.id == "karaoke" or anim_id == "sweep":
+            # Karaoke sweep (\kf tag) across the 2-word phrase
             phrase_parts = []
             for w in formatted_chunk:
                 w_duration_cs = max(8, int(round((w["end"] - w["start"]) * 100)))
@@ -365,60 +382,28 @@ def generate_ass_subtitles(
             events.append(
                 f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{{{pos_tag}}}{phrase_text}"
             )
-
-        elif anim_id == "fade":
-            # Fade animation with 95 -> 100% scale
-            chunk_text = " ".join(w["text"] for w in formatted_chunk)
-            start_str = format_ass_time(chunk_start)
-            end_str = format_ass_time(chunk_end)
-            anim_tag = f"{pos_tag}\\fad(120,0)\\fscx95\\fscy95\\t(0,120,\\fscx100\\fscy100)"
-            events.append(
-                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{{{anim_tag}}}{chunk_text}"
-            )
-
-        elif anim_id == "glide":
-            # Glide: rises 12px while fading in over 160ms
-            chunk_text = " ".join(w["text"] for w in formatted_chunk)
-            start_str = format_ass_time(chunk_start)
-            end_str = format_ass_time(chunk_end)
-            move_tag = f"\\an2\\move({play_res_x // 2},{pos_y + 12},{play_res_x // 2},{pos_y},0,160)\\fad(160,0)"
-            events.append(
-                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{{{move_tag}}}{chunk_text}"
-            )
-
-        elif anim_id == "pop":
-            # Pop: word enters at 50% scale, grows to 115% over ~100ms, settles at 100% by 200ms
-            for active_idx, active_word in enumerate(formatted_chunk):
-                w_start = active_word["start"]
-                w_end = active_word["end"]
-                line_parts = []
-                for idx, w in enumerate(formatted_chunk):
-                    if idx == active_idx:
-                        # Pop animation tags on active word
-                        pop_tags = f"\\1c{accent_ass}\\fscx50\\fscy50\\t(0,100,\\fscx115\\fscy115)\\t(100,200,\\fscx100\\fscy100)"
-                        line_parts.append(f"{{{pop_tags}}}{w['text']}{{\\1c{primary_ass}\\fscx100\\fscy100}}")
-                    else:
-                        line_parts.append(w["text"])
-                line_text = " ".join(line_parts)
-                start_str = format_ass_time(w_start)
-                end_str = format_ass_time(w_end)
-                events.append(
-                    f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{{{pos_tag}}}{line_text}"
-                )
-
         else:
-            # Default: Grow
-            # Whole chunk visible; active word changes to accent color and scales 100 -> 115 -> 100% over ~300ms
+            # Clean word-by-word active highlight without distracting animation effects (pop/grow/fade/glide bouncing)
             for active_idx, active_word in enumerate(formatted_chunk):
                 w_start = active_word["start"]
-                w_end = active_word["end"]
+                if active_idx == 0:
+                    w_start = chunk_start
+
+                if active_idx + 1 < len(formatted_chunk):
+                    w_end = formatted_chunk[active_idx + 1]["start"]
+                else:
+                    w_end = chunk_end
+
+                if w_end <= w_start:
+                    w_end = w_start + 0.08
+
                 line_parts = []
                 for idx, w in enumerate(formatted_chunk):
                     if idx == active_idx:
-                        grow_tags = f"\\1c{accent_ass}\\t(0,150,\\fscx115\\fscy115)\\t(150,300,\\fscx100\\fscy100)"
-                        line_parts.append(f"{{{grow_tags}}}{w['text']}{{\\1c{primary_ass}\\fscx100\\fscy100}}")
+                        line_parts.append(f"{{\\1c{accent_ass}}}{w['text']}{{\\1c{primary_ass}}}")
                     else:
-                        line_parts.append(w["text"])
+                        line_parts.append(f"{{\\1c{secondary_ass}}}{w['text']}")
+
                 line_text = " ".join(line_parts)
                 start_str = format_ass_time(w_start)
                 end_str = format_ass_time(w_end)

@@ -59,6 +59,18 @@ def test_caption_previews_manifest_matches_registry():
 
             total_bytes += mp4_file.stat().st_size + jpg_file.stat().st_size
 
+        # Verify direct style preview files used by the UI
+        style_mp4 = previews_dir / f"{style_id}.mp4"
+        style_jpg = previews_dir / f"{style_id}.jpg"
+        assert style_mp4.is_file() and style_mp4.stat().st_size > 0, (
+            f"Style preview video '{style_mp4.name}' missing; run backend/scripts/build_caption_previews.py"
+        )
+        assert style_jpg.is_file() and style_jpg.stat().st_size > 0, (
+            f"Style preview poster '{style_jpg.name}' missing; run backend/scripts/build_caption_previews.py"
+        )
+        total_bytes += style_mp4.stat().st_size + style_jpg.stat().st_size
+
     assert total_bytes < MAX_TOTAL_BYTES, (
         f"Preview assets total size ({total_bytes} bytes) exceeds 10 MB limit!"
     )
+

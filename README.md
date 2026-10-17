@@ -103,7 +103,7 @@ Clip Robin is in early development, but the first end-to-end filesystem pipeline
 - Filesystem project storage under `backend/data/projects`.
 - Mock transcript analysis that creates `analysis.json`.
 - Background FFmpeg clip generation with progress reporting, cancellation with generated-clip cleanup, and regeneration that replaces existing clips.
-- Optional burned-in captions featuring 6 styles (Classic, Robin, Clean, Punch, Pill, Karaoke) and 5 animation presets (Pop, Grow, Sweep, Fade, Glide). Classic retains its original word-by-word highlight on the legacy drawtext pipeline, while modern styles render via libass with bundled OFL fonts. Includes build-time pre-rendered moving 9:16 previews (<0.45 MB total) in a responsive modal picker with safe zone overlays.
+- Optional burned-in captions featuring 6 styles (Classic, Robin, Clean, Punch, Pill, Karaoke) with punchy 2-words-per-line chunking, high-contrast active word highlights, and extended gap hold times to prevent flickering during pauses. Classic retains its original word-by-word highlight on the legacy drawtext pipeline, while modern styles render via libass with bundled OFL fonts. Includes build-time pre-rendered moving 9:16 previews (<0.5 MB total) in a responsive modal picker with safe zone overlays.
 - Project-specific clip previews, playback controls, individual MP4 downloads, and a ZIP download of all clips.
 - Project listing and deletion, plus basic Settings pages.
 - OpenAI, DeepSeek, and Gemini analyzer adapters are implemented but not called by the mock clip-generation flow.

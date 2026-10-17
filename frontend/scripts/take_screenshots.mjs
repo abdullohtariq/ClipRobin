@@ -80,7 +80,27 @@ server.listen(3456, async () => {
     const summaryShot = path.join(outputDir, 'caption_summary_row.png');
     await page0.screenshot({ path: summaryShot });
     console.log(`Saved summary row screenshot to ${summaryShot}`);
+
+    // Click Change to open modal at 1280x800
+    await changeBtn.click();
+    await page0.waitForTimeout(1000);
+    const modal1280 = path.join(outputDir, 'caption_dialog_1280x800.png');
+    await page0.screenshot({ path: modal1280 });
+    console.log(`Saved modal 1280x800 screenshot to ${modal1280}`);
     await page0.close();
+
+    // Modal at 960x640
+    const page1 = await browser.newPage({ viewport: { width: 960, height: 640 } });
+    await page1.goto('http://localhost:3456');
+    await page1.waitForTimeout(1000);
+    const changeBtn1 = page1.locator('button:has-text("Change")');
+    await changeBtn1.scrollIntoViewIfNeeded();
+    await changeBtn1.click();
+    await page1.waitForTimeout(1000);
+    const modal960 = path.join(outputDir, 'caption_dialog_960x640.png');
+    await page1.screenshot({ path: modal960 });
+    console.log(`Saved modal 960x640 screenshot to ${modal960}`);
+    await page1.close();
 
     await browser.close();
   } catch (err) {
@@ -89,3 +109,4 @@ server.listen(3456, async () => {
     server.close();
   }
 });
+

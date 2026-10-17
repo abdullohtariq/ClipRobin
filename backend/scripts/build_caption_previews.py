@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -195,6 +196,11 @@ def build_previews(output_dir: Path | None = None) -> dict[str, object]:
 
                 if temp_720.is_file():
                     temp_720.unlink()
+
+                # Also save style default alias {style_id}.mp4 and {style_id}.jpg for direct preview
+                if anim_id == style_def.default_animation:
+                    shutil.copyfile(dest_video, output_dir / f"{style_id}.mp4")
+                    shutil.copyfile(dest_poster, output_dir / f"{style_id}.jpg")
 
                 item_hash = compute_style_hash(style_def, anim_id)
                 manifest["items"][key] = {

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import {
   ActiveJob,
-  CaptionAnimation,
   CaptionStyle,
   Clip,
   downloadVideo,
@@ -23,7 +22,6 @@ import { RecentProjectSkeletonItem } from "@/src/components/skeletons";
 import {
   CaptionStylePicker,
   CAPTION_STYLE_OPTIONS,
-  ANIMATION_OPTIONS,
   getPreviewUrls,
 } from "@/src/components/caption-style-picker";
 
@@ -49,7 +47,6 @@ export default function Home() {
   const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
-  const [captionAnimation, setCaptionAnimation] = useState<CaptionAnimation>("pop");
   const [isCaptionPickerOpen, setIsCaptionPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -66,12 +63,7 @@ export default function Home() {
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed.defaultCaptionStyle) setCaptionStyle(parsed.defaultCaptionStyle);
-          if (parsed.defaultCaptionAnimation) setCaptionAnimation(parsed.defaultCaptionAnimation);
         }
-      }
-      const savedAnim = localStorage.getItem("cliprobin_caption_animation");
-      if (savedAnim && ["pop", "grow", "sweep", "fade", "glide"].includes(savedAnim)) {
-        setCaptionAnimation(savedAnim as CaptionAnimation);
       }
     } catch {}
   }, []);
@@ -83,35 +75,16 @@ export default function Home() {
     } catch {}
   };
 
-  const handleCaptionStyleChange = (styleId: CaptionStyle, animId?: CaptionAnimation) => {
+  const handleCaptionStyleChange = (styleId: CaptionStyle) => {
     setCaptionStyle(styleId);
     try {
       localStorage.setItem("cliprobin_caption_style", styleId);
-    } catch {}
-    const chosenAnim = animId || (styleId === "classic" ? "pop" : captionAnimation);
-    const found = CAPTION_STYLE_OPTIONS.find((s) => s.id === styleId);
-    const finalAnim =
-      found && !found.allowedAnimations.includes(chosenAnim)
-        ? found.defaultAnimation
-        : chosenAnim;
-    setCaptionAnimation(finalAnim);
-    try {
-      localStorage.setItem("cliprobin_caption_animation", finalAnim);
-    } catch {}
-  };
-
-  const handleCaptionAnimationChange = (animId: CaptionAnimation) => {
-    setCaptionAnimation(animId);
-    try {
-      localStorage.setItem("cliprobin_caption_animation", animId);
     } catch {}
   };
 
   const activeStyleOption =
     CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle) || CAPTION_STYLE_OPTIONS[0];
-  const activeAnimOption =
-    ANIMATION_OPTIONS.find((a) => a.id === captionAnimation) || ANIMATION_OPTIONS[0];
-  const previewUrls = getPreviewUrls(captionStyle, captionAnimation);
+  const previewUrls = getPreviewUrls(captionStyle);
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
   const [transcriptionProgress, setTranscriptionProgress] = useState<VideoProcessingProgress | null>(null);
@@ -323,7 +296,6 @@ export default function Home() {
         showWatermark,
         framingMode,
         captionStyle,
-        captionAnimation,
       );
 
       if (generation.cancelled) {
@@ -474,7 +446,6 @@ export default function Home() {
         showWatermark,
         framingMode,
         captionStyle,
-        captionAnimation,
       );
 
       if (generation.cancelled) {
@@ -1103,7 +1074,7 @@ export default function Home() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-white truncate">
-                          Caption style: {activeStyleOption.name} · {captionStyle === "classic" ? "Pop" : activeAnimOption.name}
+                          Caption style: {activeStyleOption.name}
                         </p>
                         <p className="mt-0.5 text-xs text-zinc-400 line-clamp-1">
                           {activeStyleOption.description}
@@ -1126,9 +1097,8 @@ export default function Home() {
                 isOpen={isCaptionPickerOpen}
                 onClose={() => setIsCaptionPickerOpen(false)}
                 selectedStyle={captionStyle}
-                selectedAnimation={captionAnimation}
-                onSelect={(style, anim) => {
-                  handleCaptionStyleChange(style, anim);
+                onSelect={(style) => {
+                  handleCaptionStyleChange(style);
                 }}
               />
 

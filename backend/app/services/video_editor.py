@@ -229,7 +229,7 @@ def _layout_subtitle_words(
             continue
         word_width = float(font.getlength(word["text"]))
         next_width = line_width + (space_width if line_words else 0.0) + word_width
-        if line_words and next_width > max_width:
+        if line_words and (len(line_words) >= 2 or next_width > max_width):
             lines.append({"words": line_words, "width": line_width})
             line_words = []
             line_width = 0.0
@@ -309,7 +309,9 @@ def _build_subtitle_filters(
             0.0,
             max(start_time, float(segment.get("start", start_time))) - start_time,
         )
-        segment_end = min(end_time, float(segment.get("end", end_time))) - start_time
+        raw_segment_end = min(end_time, float(segment.get("end", end_time))) - start_time
+        # Hold segment for an extra 0.8s so captions don't disappear for less than a second
+        segment_end = min(max(0.1, end_time - start_time), raw_segment_end + 0.80)
         line_height = 48
         for line_index, line in enumerate(lines):
             line_words = line["words"]
@@ -332,11 +334,16 @@ def _build_subtitle_filters(
                     max(segment_start + 0.05, segment_end),
                 )
             )
-            for word in line_words:
+            for word_idx, word in enumerate(line_words):
                 highlight_file = subtitle_directory / f"subtitle-word-{len(subtitle_filters)}.txt"
                 highlight_file.write_text(str(word["text"]), encoding="utf-8")
                 word_start = max(0.0, float(word["start"]) - start_time)
-                word_end = max(word_start + 0.03, float(word["end"]) - start_time)
+                # If last word in line, hold highlight until segment_end
+                if word_idx == len(line_words) - 1:
+                    word_end = max(word_start + 0.08, segment_end)
+                else:
+                    next_w = line_words[word_idx + 1]
+                    word_end = max(word_start + 0.08, float(next_w["start"]) - start_time)
                 pop_font_size = font_size + pop_font_delta
                 word_x = (
                     f"(w-{line_width:.3f})/2+{float(word['x']):.3f}"

@@ -434,6 +434,17 @@ projects/
   - **Spacious Caption Style Picker Modal**: Accessible modal (`CaptionStylePicker`) with responsive 3-column (>=1100px) and 2-column (<1100px) grid, looping `<video>` previews with poster fallback, IntersectionObserver pause on scroll-out, `prefers-reduced-motion` play/pause toggle, interactive Safe Zones overlay toggle (7-24% top reserved, 20% bottom platform UI), keyboard navigation (`ArrowLeft`/`ArrowRight`/`Escape`), brand palette only, and zero "AI" wording.
 - **Tests**: `backend/tests/test_caption_previews.py`, `backend/tests/test_caption_styles.py`, `backend/tests/test_clip_generator.py::test_create_clip_classic_drawtext_regression`, and Playwright screenshots captured at 1280x800 and 960x640.
 
+#### 26. Streamlined Caption System: 2 Words Per Line, Extended Hold, Clean Highlights (v0.1.18+) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/services/ass_captions.py`, `backend/app/services/video_editor.py`, `backend/scripts/build_caption_previews.py`, `backend/tests/test_caption_previews.py`, `frontend/src/components/caption-style-picker.tsx`, `frontend/app/page.tsx`, `frontend/app/settings/page.tsx`, `frontend/public/caption-previews/`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Feature**:
+  - **Animation Effects Selector Removed**: Eliminated distracting bouncy transform scale/fade/glide tags from ASS subtitle rendering and removed the animation selector chips and settings dropdown from the user interface.
+  - **High-Contrast Active Word Highlight**: Focused caption readability on a crisp, high-contrast active word color highlight (`{\1c<accent_ass>}` for active word, `{\1c<secondary_ass>}` for remaining words, with smooth sweep reserved for Karaoke).
+  - **2 Words in One Line**: Enforced a strict maximum of 2 words per chunk/line across both ASS (`_chunk_words`) and legacy drawtext (`_layout_subtitle_words`) pipelines, and increased ASS font size from 44px to 52px for punchy, bold readability on 9:16 mobile screens.
+  - **Hold Duration & Gap Bridging**: Eliminated subtitle flickering and brief disappearances (<1 second) during natural speech pauses by increasing the gap bridge threshold from 400ms to 1.20s and extending chunk display duration until the next chunk begins (+0.80s / +1.0s on pauses and clip boundaries).
+  - **Preview Assets Regenerated**: Rebuilt moving preview videos and posters for all 6 styles with the 2-words-per-line layout and clean highlights, updating `manifest.json` and generating direct `{style_id}.mp4` and `{style_id}.jpg` files for direct preview rendering.
+- **Tests**: `backend/tests/test_caption_previews.py` (all styles + aliases verified), `backend/tests/test_ass_captions.py`, `backend/tests/test_clip_generator.py` (all 97 backend tests passing), and Next.js production build passing with 0 errors.
+
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status

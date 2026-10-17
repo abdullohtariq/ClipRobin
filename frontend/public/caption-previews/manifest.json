@@ -10,8 +10,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 15784,
-      "poster_size_bytes": 5270,
+      "size_bytes": 14675,
+      "poster_size_bytes": 5574,
       "definition_hash": "8cf02bdb8a082a7a9f35bbf4dda3300fa2e246e5c178b24ffcad4299ec31ce7d"
     },
     "clean__pop": {
@@ -22,8 +22,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 14293,
-      "poster_size_bytes": 3032,
+      "size_bytes": 11402,
+      "poster_size_bytes": 3087,
       "definition_hash": "e95e568788811a75ff68c4c8d1fdaf29609fc5dad2a232c828a42d4a2074bfc2"
     },
     "clean__grow": {
@@ -34,8 +34,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13777,
-      "poster_size_bytes": 3146,
+      "size_bytes": 11402,
+      "poster_size_bytes": 3087,
       "definition_hash": "f4c2dfb21c5dce6c90bbf9c87739c8648ba64f46ff2afff958e16bd7c105a054"
     },
     "clean__sweep": {
@@ -46,8 +46,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10681,
-      "poster_size_bytes": 3417,
+      "size_bytes": 11417,
+      "poster_size_bytes": 3023,
       "definition_hash": "fb8376ebdc60398fc5b77f245139198ef9bfac011c4f6fb5416eea458eec354b"
     },
     "clean__fade": {
@@ -58,8 +58,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 12018,
-      "poster_size_bytes": 2960,
+      "size_bytes": 11402,
+      "poster_size_bytes": 3087,
       "definition_hash": "a73b868d705b92203dd52458e6fa7d8b3bd26a10c141a6f96a3381b66724792d"
     },
     "clean__glide": {
@@ -70,8 +70,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 12156,
-      "poster_size_bytes": 3010,
+      "size_bytes": 11402,
+      "poster_size_bytes": 3087,
       "definition_hash": "84f0d0629d45346c7924205b5098c6a40ab1832c19a8fe283a62988f09fdcafa"
     },
     "punch__pop": {
@@ -82,8 +82,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 14305,
-      "poster_size_bytes": 3292,
+      "size_bytes": 11932,
+      "poster_size_bytes": 3282,
       "definition_hash": "7f805d90896c6b3db6c940e0b052d9837516ddd3b049fe43af7495587c0595ff"
     },
     "punch__grow": {
@@ -94,8 +94,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13783,
-      "poster_size_bytes": 3296,
+      "size_bytes": 11932,
+      "poster_size_bytes": 3282,
       "definition_hash": "d0ba9eb404a23607eef4b2b5087b67346ae716946beef3e4dbbdb183deb46ea3"
     },
     "punch__sweep": {
@@ -106,8 +106,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 12337,
-      "poster_size_bytes": 3803,
+      "size_bytes": 10654,
+      "poster_size_bytes": 3122,
       "definition_hash": "1a97225748a71b524281a0305af7f4dfd524dc4a09e55b7518fa4f6ad3955910"
     },
     "punch__fade": {
@@ -118,8 +118,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11477,
-      "poster_size_bytes": 3243,
+      "size_bytes": 11932,
+      "poster_size_bytes": 3282,
       "definition_hash": "3f908a3981a243f9d9239288afc117d8f77374717783063476952b7f1157c9ba"
     },
     "punch__glide": {
@@ -130,8 +130,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11775,
-      "poster_size_bytes": 3255,
+      "size_bytes": 11932,
+      "poster_size_bytes": 3282,
       "definition_hash": "45a648992cb7f41f51d3ef83824296012d38a0a5e1b71a28d85d2c4e7cca6046"
     },
     "robin__pop": {
@@ -142,8 +142,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 15095,
-      "poster_size_bytes": 3554,
+      "size_bytes": 13342,
+      "poster_size_bytes": 3386,
       "definition_hash": "c1f53709f2e337929f6ecf3bce3389da2599de2e09bdcd0780ac30c6aad318f0"
     },
     "robin__grow": {
@@ -154,8 +154,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 15289,
-      "poster_size_bytes": 3630,
+      "size_bytes": 13342,
+      "poster_size_bytes": 3386,
       "definition_hash": "6323be4c8f89f2218b5655ba2f855580440b9992ebf4869f228eaadc65154d91"
     },
     "robin__sweep": {
@@ -166,8 +166,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 12852,
-      "poster_size_bytes": 4290,
+      "size_bytes": 11453,
+      "poster_size_bytes": 3384,
       "definition_hash": "6be089086e36b2d96f206c1df558296d1468ae16de16efa88ed3e1aa7f6cde0f"
     },
     "robin__fade": {
@@ -178,8 +178,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 12974,
-      "poster_size_bytes": 3562,
+      "size_bytes": 13342,
+      "poster_size_bytes": 3386,
       "definition_hash": "885170140ae8eb7a3bb44808ae0a2efb4e44054fb7ca0864c46a37f9ad7b7939"
     },
     "robin__glide": {
@@ -190,8 +190,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13260,
-      "poster_size_bytes": 3568,
+      "size_bytes": 13342,
+      "poster_size_bytes": 3386,
       "definition_hash": "0979f330c1d324e6ab9b86330f99b90d30d78c046ff35fa3276d897f82dcb56f"
     },
     "pill__pop": {
@@ -202,8 +202,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 14609,
-      "poster_size_bytes": 3325,
+      "size_bytes": 11468,
+      "poster_size_bytes": 3199,
       "definition_hash": "1b2e3b46b17ce5fdd12cb96d50d5ba64f63a29afb21000b27ad82e3c69dee360"
     },
     "pill__grow": {
@@ -214,8 +214,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13933,
-      "poster_size_bytes": 3242,
+      "size_bytes": 11468,
+      "poster_size_bytes": 3199,
       "definition_hash": "18db85dd57a535bd5fc8d16ec88f10dfd3fcbdc556801f0fa8766d5f3e65abbb"
     },
     "pill__sweep": {
@@ -226,8 +226,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11633,
-      "poster_size_bytes": 3869,
+      "size_bytes": 10552,
+      "poster_size_bytes": 3222,
       "definition_hash": "59edf63fd676a96f7e670261f93200b38a861586f42425e96ec05286ce2f5960"
     },
     "pill__fade": {
@@ -238,8 +238,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11993,
-      "poster_size_bytes": 3286,
+      "size_bytes": 11468,
+      "poster_size_bytes": 3199,
       "definition_hash": "eeaafb25393d437ad7659211402d4e877ab94d2f6483c3b362ca7a09bfe50dbc"
     },
     "pill__glide": {
@@ -250,8 +250,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11631,
-      "poster_size_bytes": 3339,
+      "size_bytes": 11468,
+      "poster_size_bytes": 3199,
       "definition_hash": "efb4c2d7de839db08522148386785e4656a44e0a1a4030c2b3980cced702d894"
     },
     "karaoke__pop": {
@@ -262,8 +262,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 14160,
-      "poster_size_bytes": 3018,
+      "size_bytes": 10764,
+      "poster_size_bytes": 3116,
       "definition_hash": "6c3c450e9c594159a2ed929ceb44066cc24e71bae601b49139958f02cffc1680"
     },
     "karaoke__grow": {
@@ -274,8 +274,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13980,
-      "poster_size_bytes": 3173,
+      "size_bytes": 10764,
+      "poster_size_bytes": 3116,
       "definition_hash": "36bd9176637dff20074802b32d9264b06c2a674e2071be9d0d0384a2211810f1"
     },
     "karaoke__sweep": {
@@ -286,8 +286,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 12191,
-      "poster_size_bytes": 3465,
+      "size_bytes": 10764,
+      "poster_size_bytes": 3116,
       "definition_hash": "a64b689a958b5025ab2c240e0b80f5fcb24159bfc8946a3cebceb46dd67e3688"
     },
     "karaoke__fade": {
@@ -298,8 +298,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11816,
-      "poster_size_bytes": 2950,
+      "size_bytes": 10764,
+      "poster_size_bytes": 3116,
       "definition_hash": "d83845bed1833f6d908a081e663a64f7d5bddccab2aa8e676209818cc0649e3e"
     },
     "karaoke__glide": {
@@ -310,8 +310,8 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 12166,
-      "poster_size_bytes": 2990,
+      "size_bytes": 10764,
+      "poster_size_bytes": 3116,
       "definition_hash": "6cfcc37acf20f6bebd61285ca4e94e9611e06c4ad9d25853b6a7ae8a28f4c1cb"
     }
   }
