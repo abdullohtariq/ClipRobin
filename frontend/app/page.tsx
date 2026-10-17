@@ -1,6 +1,6 @@
 "use client";
 
-import React, { ChangeEvent, DragEvent, FormEvent, useEffect, useRef, useState } from "react";
+import React, { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   downloadVideo,
@@ -79,10 +79,31 @@ export default function Home() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const transcriptionProgressRef = useRef(transcriptionProgress);
+  const generatingProjectsRef = useRef<Set<string>>(new Set());
+  const clipDurationSecondsRef = useRef(clipDurationSeconds);
+  const showCaptionsRef = useRef(showCaptions);
+  const showWatermarkRef = useRef(showWatermark);
+  const framingModeRef = useRef(framingMode);
+  const captionStyleRef = useRef(captionStyle);
 
   useEffect(() => {
     transcriptionProgressRef.current = transcriptionProgress;
   }, [transcriptionProgress]);
+  useEffect(() => {
+    clipDurationSecondsRef.current = clipDurationSeconds;
+  }, [clipDurationSeconds]);
+  useEffect(() => {
+    showCaptionsRef.current = showCaptions;
+  }, [showCaptions]);
+  useEffect(() => {
+    showWatermarkRef.current = showWatermark;
+  }, [showWatermark]);
+  useEffect(() => {
+    framingModeRef.current = framingMode;
+  }, [framingMode]);
+  useEffect(() => {
+    captionStyleRef.current = captionStyle;
+  }, [captionStyle]);
 
   // Manage video preview object URL
   useEffect(() => {
@@ -161,6 +182,10 @@ export default function Home() {
     transcriptionProgress && ["transcription", "generation"].includes(transcriptionProgress.kind),
   );
   const activeVideoJob = isProcessingVideo ? transcriptionProgress : null;
+  const canStartOrRetry = Boolean(
+    (!isProcessingVideo && activeVideo) ||
+    (!isProcessingVideo && transcriptionProgress?.kind === "failed" && transcriptionProgress?.projectId)
+  );
 
   const refreshProjectsList = async () => {
     try {
@@ -175,6 +200,76 @@ export default function Home() {
 
   useEffect(() => {
     void refreshProjectsList();
+  }, []);
+
+  // Unified clip generation runner that guards against race conditions and concurrent calls
+  const triggerClipGeneration = useCallback(async (projectId: string) => {
+    if (generatingProjectsRef.current.has(projectId)) return;
+    generatingProjectsRef.current.add(projectId);
+
+    const dur = clipDurationSecondsRef.current;
+    const subs = showCaptionsRef.current;
+    const wm = showWatermarkRef.current;
+    const fm = framingModeRef.current;
+    const cs = captionStyleRef.current;
+
+    setTranscriptionProgress({
+      kind: "generation",
+      step: "Clip generation started",
+      progress: 0,
+      projectId,
+    });
+    setDownloadStatus("Generating vertical clips with local AI...");
+
+    try {
+      const generation = await generateClips(
+        projectId,
+        subs,
+        (stepJob) => {
+          setTranscriptionProgress({
+            kind: "generation",
+            step: stepJob.step,
+            progress: stepJob.progress,
+            projectId,
+          });
+          if (stepJob.ready_clips && stepJob.ready_clips.length > 0) {
+            setGeneratedClips(stepJob.ready_clips);
+            setGeneratedProjectId(projectId);
+          }
+        },
+        dur,
+        wm,
+        fm,
+        cs,
+      );
+
+      if (generation.cancelled) {
+        throw new Error("Clip generation was cancelled");
+      }
+
+      setGeneratedClips(generation.clips);
+      setGeneratedProjectId(projectId);
+      setTranscriptionProgress({
+        kind: "complete",
+        step: "Clip generation complete",
+        progress: 100,
+        projectId,
+      });
+      setDownloadStatus("Clips are ready.");
+      void refreshProjectsList();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "Clip generation failed";
+      // If generation is already running on the backend, let active polling track it
+      if (msg.includes("already running")) {
+        return;
+      }
+      setDownloadStatus(msg);
+      setTranscriptionProgress((current) =>
+        current ? { ...current, kind: "failed", step: "Clip generation failed" } : null,
+      );
+    } finally {
+      generatingProjectsRef.current.delete(projectId);
+    }
   }, []);
 
   // Poll for background generation/transcription updates
@@ -201,59 +296,92 @@ export default function Home() {
             setGeneratedProjectId(job.project_id);
           }
         } else if (current?.projectId && current.kind === "transcription") {
-            const transcription = await getLocalTranscriptionJob(current.projectId);
+          const transcription = await getLocalTranscriptionJob(current.projectId).catch(() => null);
+          if (!isCurrent) return;
+          if (transcription?.status === "failed") {
+            setTranscriptionProgress({
+              ...current,
+              kind: "failed",
+              step: transcription.step || "Transcription failed",
+            });
+          } else if (transcription?.status === "completed") {
+            const generation = await getLatestClipGenerationJob(current.projectId).catch(() => null);
             if (!isCurrent) return;
-            if (transcription.status === "failed") {
-              setTranscriptionProgress({
-                ...current,
-                kind: "failed",
-                step: transcription.step,
-              });
-            } else if (transcription.status === "completed") {
-              setTranscriptionProgress({
-                ...current,
-                kind: "generation",
-                step: "Clip generation started",
-                progress: 0,
-              });
+            if (generation) {
+              if (generation.ready_clips && generation.ready_clips.length > 0) {
+                setGeneratedClips(generation.ready_clips);
+                setGeneratedProjectId(current.projectId);
+              }
+              if (generation.status === "completed") {
+                setTranscriptionProgress({
+                  kind: "complete",
+                  step: "Clip generation complete",
+                  progress: 100,
+                  projectId: current.projectId,
+                });
+                void refreshProjectsList();
+              } else if (generation.status === "failed" || generation.status === "cancelled") {
+                setTranscriptionProgress({
+                  kind: "failed",
+                  step: generation.error ?? generation.step,
+                  progress: generation.progress,
+                  projectId: current.projectId,
+                });
+              } else {
+                setTranscriptionProgress({
+                  kind: "generation",
+                  step: generation.step,
+                  progress: generation.progress,
+                  projectId: current.projectId,
+                });
+              }
             } else {
-              setTranscriptionProgress({
-                ...current,
-                step: transcription.step,
-                progress: 25 + Math.round(transcription.progress * 0.75),
-              });
+              // Transcription finished and no generation job started yet: auto-trigger generation!
+              void triggerClipGeneration(current.projectId);
             }
-          } else if (current?.projectId && current.kind === "generation") {
-            const generation = await getLatestClipGenerationJob(current.projectId);
-            if (!isCurrent || !generation) return;
-            if (generation.ready_clips && generation.ready_clips.length > 0) {
-              setGeneratedClips(generation.ready_clips);
-              setGeneratedProjectId(current.projectId);
-            }
-            if (generation.status === "completed") {
-              setTranscriptionProgress({
-                kind: "complete",
-                step: "Clip generation complete",
-                progress: 100,
-                projectId: current.projectId,
-              });
-              void refreshProjectsList();
-            } else if (generation.status === "failed" || generation.status === "cancelled") {
-              setTranscriptionProgress({
-                kind: "failed",
-                step: generation.error ?? generation.step,
-                progress: generation.progress,
-                projectId: current.projectId,
-              });
-            } else {
-              setTranscriptionProgress({
-                kind: "generation",
-                step: generation.step,
-                progress: generation.progress,
-                projectId: current.projectId,
-              });
-            }
+          } else if (transcription) {
+            setTranscriptionProgress({
+              ...current,
+              step: transcription.step,
+              progress: 25 + Math.round(transcription.progress * 0.75),
+            });
           }
+        } else if (current?.projectId && current.kind === "generation") {
+          const generation = await getLatestClipGenerationJob(current.projectId).catch(() => null);
+          if (!isCurrent) return;
+          if (!generation) {
+            // No generation job exists yet on backend: auto-trigger generation!
+            void triggerClipGeneration(current.projectId);
+            return;
+          }
+          if (generation.ready_clips && generation.ready_clips.length > 0) {
+            setGeneratedClips(generation.ready_clips);
+            setGeneratedProjectId(current.projectId);
+          }
+          if (generation.status === "completed") {
+            setTranscriptionProgress({
+              kind: "complete",
+              step: "Clip generation complete",
+              progress: 100,
+              projectId: current.projectId,
+            });
+            void refreshProjectsList();
+          } else if (generation.status === "failed" || generation.status === "cancelled") {
+            setTranscriptionProgress({
+              kind: "failed",
+              step: generation.error ?? generation.step,
+              progress: generation.progress,
+              projectId: current.projectId,
+            });
+          } else {
+            setTranscriptionProgress({
+              kind: "generation",
+              step: generation.step,
+              progress: generation.progress,
+              projectId: current.projectId,
+            });
+          }
+        }
       } catch (error) {
         console.error("Could not restore active video progress", error);
       } finally {
@@ -270,9 +398,9 @@ export default function Home() {
         window.clearTimeout(timeoutId);
       }
     };
-  }, []);
+  }, [triggerClipGeneration]);
 
-  // Shared pipeline to transcribe and generate clips for a project
+  // Shared pipeline to transcribe and generate clips for a downloaded project
   const runGenerationPipeline = async (projectId: string, videoLabel: string) => {
     setTranscriptionProgress({
       kind: "transcription",
@@ -306,49 +434,8 @@ export default function Home() {
         throw new Error(currentJob.error || "Audio transcription failed");
       }
 
-      setTranscriptionProgress({
-        kind: "generation",
-        step: "Clip generation started",
-        progress: 0,
-        projectId,
-      });
-      setDownloadStatus(`Transcribed ${videoLabel}. Generating ${clipDurationSeconds}s clips...`);
-
-      const generation = await generateClips(
-        projectId,
-        showCaptions,
-        (stepJob) => {
-          setTranscriptionProgress({
-            kind: "generation",
-            step: stepJob.step,
-            progress: stepJob.progress,
-            projectId,
-          });
-          if (stepJob.ready_clips && stepJob.ready_clips.length > 0) {
-            setGeneratedClips(stepJob.ready_clips);
-            setGeneratedProjectId(projectId);
-          }
-        },
-        clipDurationSeconds,
-        showWatermark,
-        framingMode,
-        captionStyle,
-      );
-
-      if (generation.cancelled) {
-        throw new Error("Clip generation was cancelled");
-      }
-
-      setGeneratedClips(generation.clips);
-      setGeneratedProjectId(projectId);
-      setTranscriptionProgress({
-        kind: "complete",
-        step: "Clip generation complete",
-        progress: 100,
-        projectId,
-      });
-      setDownloadStatus("Clips are ready.");
-      void refreshProjectsList();
+      setDownloadStatus(`Transcribed ${videoLabel}. Generating clips...`);
+      await triggerClipGeneration(projectId);
     } catch (error) {
       setDownloadStatus(
         error instanceof Error ? error.message : "Video processing failed",
@@ -401,7 +488,14 @@ export default function Home() {
   };
 
   const handleStartGenerating = async () => {
-    if (!activeVideo || isProcessingVideo) return;
+    if (isProcessingVideo) return;
+    if (!activeVideo) {
+      if (transcriptionProgress?.projectId) {
+        await triggerClipGeneration(transcriptionProgress.projectId);
+      }
+      return;
+    }
+
     setTranscriptionProgress(null);
     setDownloadStatus("");
 
@@ -450,49 +544,7 @@ export default function Home() {
         throw new Error(currentJob.error || "Audio transcription failed");
       }
 
-      setTranscriptionProgress({
-        kind: "generation",
-        step: "Clip generation started",
-        progress: 0,
-        projectId: result.project_id,
-      });
-      setDownloadStatus("Generating vertical clips with local AI...");
-
-      const generation = await generateClips(
-        result.project_id,
-        showCaptions,
-        (stepJob) => {
-          setTranscriptionProgress({
-            kind: "generation",
-            step: stepJob.step,
-            progress: stepJob.progress,
-            projectId: result.project_id,
-          });
-          if (stepJob.ready_clips && stepJob.ready_clips.length > 0) {
-            setGeneratedClips(stepJob.ready_clips);
-            setGeneratedProjectId(result.project_id);
-          }
-        },
-        clipDurationSeconds,
-        showWatermark,
-        framingMode,
-        captionStyle,
-      );
-
-      if (generation.cancelled) {
-        throw new Error("Clip generation was cancelled");
-      }
-
-      setGeneratedClips(generation.clips);
-      setGeneratedProjectId(result.project_id);
-      setTranscriptionProgress({
-        kind: "complete",
-        step: "Clip generation complete",
-        progress: 100,
-        projectId: result.project_id,
-      });
-      setDownloadStatus("Clips are ready.");
-      void refreshProjectsList();
+      await triggerClipGeneration(result.project_id);
     } catch (error) {
       setDownloadStatus(
         error instanceof Error ? error.message : "Local video processing failed",
@@ -869,6 +921,7 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => {
+                          generatingProjectsRef.current.clear();
                           setTranscriptionProgress(null);
                           setDownloadStatus("");
                         }}
@@ -1162,7 +1215,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => void handleStartGenerating()}
-                  disabled={!activeVideo || isProcessingVideo}
+                  disabled={!canStartOrRetry}
                   className="w-full min-h-[44px] rounded-xl bg-[#10b981] px-5 py-3 text-[13px] font-bold text-zinc-950 transition-all duration-150 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#10b981] disabled:hover:shadow-none focus-ring flex items-center justify-center gap-2"
                 >
                   {activeVideoJob?.kind === "transcription" ? (
@@ -1181,6 +1234,13 @@ export default function Home() {
                       </svg>
                       Rendering clips ({transcriptionProgress?.progress ?? 0}%)...
                     </span>
+                  ) : transcriptionProgress?.kind === "failed" && transcriptionProgress?.projectId ? (
+                    <>
+                      <svg className="size-4 fill-current" viewBox="0 0 24 24">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                      <span>Retry Clip Generation</span>
+                    </>
                   ) : (
                     <>
                       <svg className="size-4 fill-current" viewBox="0 0 24 24">
@@ -1191,7 +1251,7 @@ export default function Home() {
                   )}
                 </button>
 
-                {!activeVideo && (
+                {!activeVideo && !transcriptionProgress?.projectId && (
                   <p className="mt-2 text-center text-xs text-zinc-500">
                     Select a local file or YouTube link to start.
                   </p>
