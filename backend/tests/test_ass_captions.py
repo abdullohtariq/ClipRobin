@@ -135,9 +135,22 @@ def test_top_line_integration_in_ass():
         top_line="THIS IS THE TOP HOOK LINE",
     )
     assert "Style: TopLine,Montserrat,32" in ass_text
+    assert ",0,0,1,3,2,8,20,20,20,1" in ass_text  # BorderStyle=1 (outline with shadow, no box background)
     assert "TopLine" in ass_text
     assert "THIS IS THE TOP HOOK LINE" in ass_text
     assert r"\an8\pos(360," in ass_text
+
+    # Top line with true_9_16 framing mode
+    ass_true_916 = generate_ass_subtitles(
+        segments,
+        clip_start=0.0,
+        clip_end=2.0,
+        top_line="TRUE 9:16 HOOK",
+        framing_mode="true_9_16",
+        has_watermark=True,
+    )
+    assert r"\an8\pos(360,190)" in ass_true_916  # Single line placed at base_y(175) + 15 = 190
+    assert ",0,0,1,3,2,8,20,20,20,1" in ass_true_916
 
     # Top line even with no subtitle words
     ass_top_only = generate_ass_subtitles(

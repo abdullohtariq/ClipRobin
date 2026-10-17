@@ -288,6 +288,9 @@ def generate_ass_subtitles(
         if framing_mode == "square_rounded":
             base_top_y = 205 if has_watermark else 190
             line_spacing = 42
+        elif framing_mode == "true_9_16":
+            base_top_y = 175 if has_watermark else 150
+            line_spacing = 42
         else:
             base_top_y = 260 if has_watermark else 240
             line_spacing = 46
@@ -298,8 +301,8 @@ def generate_ass_subtitles(
             y_positions = [base_top_y, base_top_y + line_spacing]
 
         top_line_style_def = (
-            f"Style: TopLine,Montserrat,32,&H00FFFFFF,&H00000000,&H00000000,&H5A000000,"
-            f"-1,0,0,0,100,100,0,0,3,8,0,8,20,20,20,1\n"
+            f"Style: TopLine,Montserrat,32,&H00FFFFFF,&H00000000,&H00000000,&H80000000,"
+            f"-1,0,0,0,100,100,0,0,1,3,2,8,20,20,20,1\n"
         )
         clip_duration = max(0.1, clip_end - clip_start)
         duration_str = format_ass_time(clip_duration)

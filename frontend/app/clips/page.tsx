@@ -26,7 +26,6 @@ import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
 import { Badge } from "@/src/components/ui/badge";
 import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
-import { Tooltip } from "@/src/components/ui/tooltip";
 
 interface AppliedProjectSettings {
   framingMode: FramingMode;
@@ -78,7 +77,6 @@ const ProClipCard = memo(function ProClipCard({
   const [hasVideoError, setHasVideoError] = useState(false);
   const hasStartedRef = useRef(false);
 
-  const isTrue916 = clip.framing_mode === "true_9_16";
   const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
 
   // Lazy load video stream using IntersectionObserver
@@ -179,6 +177,8 @@ const ProClipCard = memo(function ProClipCard({
       const response = await setClipTopLine(projectId, clip.id, trimmed, {
         show_watermark: showWatermark,
         show_subtitles: showSubtitles,
+        framing_mode: clip.framing_mode,
+        caption_style: clip.caption_style,
       });
       setIsEditingTopLine(false);
       onClipUpdated?.(response.clip);
@@ -206,6 +206,8 @@ const ProClipCard = memo(function ProClipCard({
       const response = await removeClipTopLine(projectId, clip.id, {
         show_watermark: showWatermark,
         show_subtitles: showSubtitles,
+        framing_mode: clip.framing_mode,
+        caption_style: clip.caption_style,
       });
       setIsEditingTopLine(false);
       setTopLineInput("");
@@ -414,12 +416,17 @@ const ProClipCard = memo(function ProClipCard({
           </p>
         )}
 
-        {/* Timecode badge */}
-        <div className="text-[11px] font-mono text-zinc-500 pt-1">
-          {formatTime(clip.start)} — {formatTime(clip.end)}
+        {/* Timecode badge & Hook indicator */}
+        <div className="flex items-center justify-between gap-2 pt-1 text-[11px] font-mono text-zinc-500">
+          <span>{formatTime(clip.start)} — {formatTime(clip.end)}</span>
+          {clip.top_line && (
+            <span className="text-[10px] font-sans font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={clip.top_line}>
+              Hook active
+            </span>
+          )}
         </div>
 
-        {/* Two actions only: Download & Add Top Line */}
+        {/* Two actions: Download & Add/Edit Top Line */}
         <div className="mt-2.5 pt-2.5 border-t border-zinc-800/80 flex items-center justify-between gap-2">
           <button
             type="button"
@@ -433,25 +440,13 @@ const ProClipCard = memo(function ProClipCard({
             <span>{downloadMsg || (isDownloading ? "Saving..." : "Download")}</span>
           </button>
 
-          {isTrue916 ? (
-            <Tooltip content="Top line is disabled for True 9:16 clips to preserve AI speaker framing">
-              <button
-                type="button"
-                disabled
-                className="py-1.5 px-2.5 rounded-lg border border-zinc-800/60 bg-zinc-900/50 text-xs font-medium text-zinc-500 cursor-not-allowed"
-              >
-                Top line
-              </button>
-            </Tooltip>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setIsEditingTopLine((prev) => !prev)}
-              className="py-1.5 px-2.5 rounded-lg border border-zinc-700 bg-transparent hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring"
-            >
-              {clip.top_line ? "Edit top line" : "Add top line"}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setIsEditingTopLine((prev) => !prev)}
+            className="py-1.5 px-2.5 rounded-lg border border-zinc-700 bg-transparent hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring"
+          >
+            {clip.top_line ? "Edit top line" : "Add top line"}
+          </button>
         </div>
       </div>
     </article>

@@ -371,6 +371,8 @@ def render_single_clip(
 
     if framing_mode is not None:
         use_framing_mode = framing_mode
+    elif target_clip.get("framing_mode"):
+        use_framing_mode = str(target_clip["framing_mode"])
     elif "framing_mode" in saved_options:
         use_framing_mode = str(saved_options["framing_mode"])
     else:
@@ -378,6 +380,8 @@ def render_single_clip(
 
     if caption_style is not None:
         use_caption_style = caption_style
+    elif target_clip.get("caption_style"):
+        use_caption_style = str(target_clip["caption_style"])
     elif "caption_style" in saved_options:
         use_caption_style = str(saved_options["caption_style"])
     else:

@@ -419,6 +419,9 @@ def _build_top_line_filters(
     if framing_mode == "square_rounded":
         base_y = 205 if has_watermark else 190
         line_spacing = 42
+    elif framing_mode == "true_9_16":
+        base_y = 175 if has_watermark else 150
+        line_spacing = 42
     else:
         base_y = 260 if has_watermark else 240
         line_spacing = 46
@@ -435,7 +438,7 @@ def _build_top_line_filters(
         filters.append(
             "drawtext=textfile='{}':{}expansion=none:fontsize=32:fontcolor=white:"
             "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
-            "box=1:boxcolor=black@0.65:boxborderw=8:y_align=baseline:fix_bounds=true:"
+            "y_align=baseline:fix_bounds=true:"
             "x=(w-text_w)/2:y={}".format(
                 line_file.name,
                 font_fragment,

@@ -516,6 +516,17 @@ projects/
 1. **Text below 12px (violates the Phase A type-scale rule)**: 53 `text-[9–11px]` usages remain: `projects/page.tsx` (12), `page.tsx` (11), `caption-style-picker.tsx` (8), `clips/page.tsx` (7: card timecode, `#NN`/duration chips, error text), `live-moving-captions.tsx` (5), `job-progress.tsx` (5), plus 1 each in `segmented-control.tsx`, `badge.tsx`, `skeletons.tsx`, `clip-settings.tsx` and `layout.tsx`. The ones in `live-moving-captions.tsx` and the layout-card mockups are scaled depictions of the output and can stay small. The rest should move to `text-xs` (12px).
 2. **Dashboard shows another project's job**: When any generation is running (even for a different project), the dashboard CTA shows "Rendering clips (NN%)…" and is locked. The helper text underneath still says "Select a local file or YouTube link to start." Fix: name the project in the button or status ("Rendering project_020 · 56%") with a link to its Clips page, and hide the contradictory helper text while a job runs.
 
+#### 30. Top Line Headline Hook Enabled for True 9:16 Clips with Transparent Background (v0.1.20) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `frontend/app/clips/page.tsx`, `backend/app/services/video_editor.py`, `backend/app/services/ass_captions.py`, `backend/app/services/clip_generator.py`, `backend/tests/test_ass_captions.py`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Features Implemented**:
+  - **Enabled on True 9:16 Clips**: Removed the `isTrue916` disabled constraint and tooltip restriction in `frontend/app/clips/page.tsx`, enabling the "Add top line" / "Edit top line" action across all clips regardless of framing mode.
+  - **No Background Box on Top Line**: Removed the bounding box background (`box=1:boxcolor=black@0.65` in FFmpeg drawtext and `BorderStyle=3` with opaque box color in ASS subtitles). Switched ASS style to `BorderStyle=1` with 3px outline and 2px drop shadow, creating a crisp, modern typography hook that sits transparently over footage without blocking video content.
+  - **True 9:16 Safe Placement**: Configured safe top hook positioning for `true_9_16` framing mode ($Y=175$ with watermark, $Y=150$ without watermark) to avoid colliding with top-right watermarks or platform status bars.
+  - **Metadata Retention on Re-render**: `render_single_clip` now prioritizes `target_clip.get("framing_mode")` and `target_clip.get("caption_style")`, ensuring single-clip top-line updates preserve their exact framing and caption styling.
+  - **Card Hook Indicator**: Added a prominent `Hook active` emerald chip to clip cards in Clips Studio when a top line is set.
+- **Tests**: All 103 backend pytest suites passed in `3.21s`, `npm run lint` passed with 0 errors, Next.js build compiled cleanly, and visual frame output verified via Playwright and FFmpeg extraction.
+
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
