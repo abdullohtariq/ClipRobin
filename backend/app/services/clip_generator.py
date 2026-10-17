@@ -100,6 +100,64 @@ def generate_clips(
             else:
                 analysis = None
     if not analysis:
+        # Check if transcript exists or needs to be generated / reused from identical source
+        transcript_candidates = [
+            project_directory / "transcription" / "transcript.json",
+            project_directory / "transcript.json",
+        ]
+        has_transcript = any(t.is_file() for t in transcript_candidates)
+        if not has_transcript:
+            source_candidates = [
+                project_directory / f"source{ext}"
+                for ext in [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"]
+            ]
+            source_video = next((p for p in source_candidates if p.is_file()), None)
+            if source_video:
+                reused_transcript = False
+                source_size = source_video.stat().st_size
+                projects_parent = project_directory.parent
+                if projects_parent.is_dir():
+                    for other_proj in projects_parent.glob("project_*"):
+                        if other_proj == project_directory:
+                            continue
+                        other_t = other_proj / "transcription" / "transcript.json"
+                        if not other_t.is_file():
+                            other_t = other_proj / "transcript.json"
+                        if other_t.is_file():
+                            other_src = next(
+                                (
+                                    other_proj / f"source{ext}"
+                                    for ext in [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"]
+                                    if (other_proj / f"source{ext}").is_file()
+                                ),
+                                None,
+                            )
+                            if other_src and other_src.stat().st_size == source_size:
+                                import hashlib
+                                with source_video.open("rb") as f1, other_src.open("rb") as f2:
+                                    if hashlib.md5(f1.read(1024 * 1024)).hexdigest() == hashlib.md5(f2.read(1024 * 1024)).hexdigest():
+                                        target_t_dir = project_directory / "transcription"
+                                        target_t_dir.mkdir(parents=True, exist_ok=True)
+                                        shutil.copy2(str(other_t), str(target_t_dir / "transcript.json"))
+                                        other_txt = other_t.parent / "transcript.txt"
+                                        if other_txt.is_file():
+                                            shutil.copy2(str(other_txt), str(target_t_dir / "transcript.txt"))
+                                        reused_transcript = True
+                                        break
+                if not reused_transcript:
+                    from app.services.transcriber import transcribe_video
+                    if progress_callback:
+                        progress_callback("Transcribing video audio...", 0, 0)
+                    def report_transcription(step_name: str, pct: float) -> None:
+                        if progress_callback:
+                            progress_callback(f"Transcribing audio ({round(pct)}%)", 0, 0)
+                    transcribe_video(
+                        source_video,
+                        project_directory / "transcription",
+                        progress_callback=report_transcription,
+                        cancel_event=cancel_event,
+                    )
+
         if progress_callback:
             progress_callback("Analyzing transcript", 0, 0)
         analysis = create_mock_analysis(project_directory, max_clip_seconds=max_clip_seconds)

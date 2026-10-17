@@ -637,6 +637,10 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
           job?.status === "queued" || job?.status === "processing" || job?.status === "cancelling";
         setGenerating(Boolean(isRunning));
 
+        if (job?.status === "failed" && job.error) {
+          setStatus(job.error);
+        }
+
         if (isRunning && interval === undefined) {
           interval = window.setInterval(() => void loadClipsAndStatus(), 1000);
         } else if (!isRunning && interval !== undefined) {
@@ -797,6 +801,28 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
             </select>
           </div>
         </header>
+
+        {/* Status / Error Alert Banner */}
+        {status && (
+          <div className="rounded-xl border border-red-500/30 bg-red-950/20 px-4 py-3 text-xs text-red-300 flex items-center justify-between gap-3 animate-in fade-in-0 duration-150">
+            <div className="flex items-center gap-2">
+              <svg className="size-4 shrink-0 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{status}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setStatus("")}
+              className="text-red-400 hover:text-white p-1 rounded-md"
+              aria-label="Dismiss alert"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Sticky Toolbar */}
         <section className="sticky top-4 z-30 rounded-2xl border border-zinc-800 bg-[#121215]/95 backdrop-blur-md p-3.5 shadow-xl space-y-3">

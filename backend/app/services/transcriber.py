@@ -24,6 +24,7 @@ def transcribe_video(
     video_path: Path,
     output_directory: Path,
     progress_callback: Callable[[str, float], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     output_directory.mkdir(parents=True, exist_ok=True)
     if progress_callback:
@@ -41,6 +42,8 @@ def transcribe_video(
         progress_callback("Transcribing audio", 0)
 
     for segment in segments:
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Transcription cancelled")
         transcript_segment: dict[str, Any] = {
             "start": round(segment.start, 3),
             "end": round(segment.end, 3),

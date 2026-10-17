@@ -223,7 +223,15 @@ def run_clip_generation(
         if cancel_event.is_set():
             return
         if step == "Preparing clip analysis":
-            progress = 5
+            progress = 3
+        elif step.startswith("Transcribing"):
+            pct_val = 0
+            if "(" in step and "%" in step:
+                try:
+                    pct_val = int(step.split("(")[-1].split("%")[0].strip())
+                except Exception:
+                    pct_val = 0
+            progress = 3 + round((pct_val / 100.0) * 5)
         elif step == "Analyzing transcript":
             progress = 10
         elif step.startswith("Analyzing speaker tracking") or step.startswith("Analyzing face tracking"):
