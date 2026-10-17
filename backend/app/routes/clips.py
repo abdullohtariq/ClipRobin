@@ -226,6 +226,15 @@ def run_clip_generation(
             progress = 5
         elif step == "Analyzing transcript":
             progress = 10
+        elif step.startswith("Analyzing speaker tracking") or step.startswith("Analyzing face tracking"):
+            pct_val = 0
+            if ":" in step and "%" in step:
+                try:
+                    pct_val = int(step.split(":")[-1].replace("%", "").strip())
+                except Exception:
+                    pct_val = 0
+            # Scale from 10% to 15% smoothly during tracking analysis
+            progress = 10 + round((pct_val / 100.0) * 5)
         elif step == "Rendering clips":
             progress = 15 + round(completed_clips / max(total_clips, 1) * 80)
         else:

@@ -934,6 +934,42 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
           )}
         </section>
 
+        {/* Active Generation Progress Card */}
+        {generating && generationProgress && (
+          <section aria-live="polite" className="rounded-2xl border border-zinc-800 bg-[#121215] p-4 shadow-md space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-[#10b981] animate-pulse" />
+                <p className="text-xs font-semibold text-white">{generationProgress.step || "Generating clips..."}</p>
+              </div>
+              <p className="text-xs font-mono font-bold text-emerald-400">{generationProgress.progress}%</p>
+            </div>
+            <div
+              role="progressbar"
+              aria-label={`Clip generation progress for ${projectId}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={generationProgress.progress}
+              className="h-2 overflow-hidden rounded-full bg-zinc-900 border border-zinc-800"
+            >
+              <div
+                className="h-full rounded-full bg-[#10b981] transition-[width] duration-300"
+                style={{ width: `${generationProgress.progress}%` }}
+              />
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-400">
+              <span>Smart framing &amp; speaker analysis</span>
+              <span>
+                Rendering clips
+                {generationProgress.total_clips > 0
+                  ? ` (${generationProgress.completed_clips}/${generationProgress.total_clips})`
+                  : ""}
+              </span>
+              <span>Finalizing vertical clips</span>
+            </div>
+          </section>
+        )}
+
         {/* Filter, Search & Sorting Bar */}
         {clips.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
@@ -991,7 +1027,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
               <ClipSkeletonCard key={`skel-${i}`} index={i + 1} total={6} />
             ))}
           </div>
-        ) : filteredClips.length === 0 ? (
+        ) : filteredClips.length === 0 && !generating ? (
           <div className="rounded-2xl border border-zinc-800 bg-[#121215] p-12 text-center space-y-3">
             <div className="size-12 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-500 mx-auto flex items-center justify-center">
               <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -1036,6 +1072,28 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 }}
               />
             ))}
+            {generating &&
+              Array.from({
+                length: Math.max(
+                  1,
+                  (generationProgress?.total_clips || 6) - filteredClips.length
+                ),
+              }).map((_, i) => {
+                const itemIndex = filteredClips.length + i + 1;
+                const totalItems = Math.max(generationProgress?.total_clips || 6, filteredClips.length + 1);
+                return (
+                  <ClipSkeletonCard
+                    key={`gen-skel-${i}`}
+                    index={itemIndex}
+                    total={totalItems}
+                    message={
+                      generationProgress?.step
+                        ? `${generationProgress.step.slice(0, 24)}...`
+                        : `Generating clip ${itemIndex} of ${totalItems}`
+                    }
+                  />
+                );
+              })}
           </div>
         )}
 
@@ -1054,13 +1112,18 @@ export default function ClipsPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-[#09090b] p-6 lg:p-10 flex items-center justify-center">
-          <div className="flex items-center gap-2.5 text-xs text-zinc-400">
-            <svg className="size-4 animate-spin text-[#10b981]" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".2" />
-              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-            </svg>
-            <span>Loading clips studio...</span>
+        <div className="min-h-screen bg-[#09090b] text-[#f4f4f5] px-6 lg:px-10 py-6 lg:py-8">
+          <div className="mx-auto max-w-[1560px] space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-5">
+              <div className="h-8 w-44 rounded-lg bg-zinc-800/80 skeleton-shimmer" />
+              <div className="h-8 w-36 rounded-xl bg-zinc-800/60 skeleton-shimmer" />
+            </div>
+            <div className="h-16 rounded-2xl border border-zinc-800 bg-[#121215] p-3.5 skeleton-shimmer" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <ClipSkeletonCard key={`skel-suspense-${i}`} index={i + 1} total={6} />
+              ))}
+            </div>
           </div>
         </div>
       }

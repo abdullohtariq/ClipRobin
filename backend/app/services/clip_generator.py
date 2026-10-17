@@ -142,6 +142,24 @@ def generate_clips(
     analysis_clips = analysis.get("clips", [])
     if not analysis_clips:
         raise ValueError("Analysis contains no clips")
+    # If True 9:16 is requested, run speaker tracking analysis with live progress BEFORE rendering
+    if use_framing_mode == "true_9_16":
+        from app.services.smart_framing import analyze_speaker_tracking
+        from app.services.video_editor import find_ffmpeg
+        if progress_callback:
+            progress_callback("Analyzing speaker tracking (True 9:16): 0%", 0, len(analysis_clips))
+
+        def track_progress(step_str: str, cur_f: int, tot_f: int) -> None:
+            if progress_callback:
+                progress_callback(step_str, 0, len(analysis_clips))
+
+        analyze_speaker_tracking(
+            project_directory=project_directory,
+            ffmpeg_path=find_ffmpeg(),
+            cancel_event=cancel_event,
+            progress_callback=track_progress,
+        )
+
     if progress_callback:
         progress_callback("Rendering clips", 0, len(analysis_clips))
 

@@ -311,6 +311,8 @@ class _FaceTrack:
         self.mouth_motion_history: list[tuple[float, float]] = []  # (t, motion)
         self.speech_score_history: list[tuple[float, float]] = []  # (t, score)
         self.positions: list[tuple[float, float]] = [(t, center_x_orig)]  # (t, orig_center_x)
+        self.timestamps: list[float] = [t]
+        self.centers: list[float] = [center_x_orig]
 
     def update(
         self,
@@ -326,8 +328,12 @@ class _FaceTrack:
         self.last_t = t
         self.frame_count += 1
         self.positions.append((t, center_x_orig))
+        self.timestamps.append(t)
+        self.centers.append(center_x_orig)
         if len(self.positions) > 3000:
             self.positions.pop(0)
+            self.timestamps.pop(0)
+            self.centers.pop(0)
 
         motion = 0.0
         if mouth_patch is not None and self.last_mouth_patch is not None:
@@ -360,18 +366,26 @@ class _FaceTrack:
         scores = [score for t, score in self.speech_score_history if (start_t - 0.25) <= t <= (end_t + 0.25)]
         return float(np.mean(scores)) if scores else 0.0
 
-    def center_x_at_time(self, target_t: float) -> float:
-        """Return the closest known center X position for this track."""
-        if not self.positions:
+    def center_x_at_time(self, target_t: float, max_gap: float = 3.0) -> float | None:
+        """Return the closest known center X position for this track if within max_gap seconds, else None."""
+        if not self.timestamps:
             return float(self.last_bbox[0] + self.last_bbox[2] / 2.0)
-        closest = min(self.positions, key=lambda pt: abs(pt[0] - target_t))
-        return closest[1]
+        import bisect
+        n = len(self.timestamps)
+        idx = bisect.bisect_left(self.timestamps, target_t)
+        best_idx = min(idx, n - 1)
+        if idx > 0 and abs(self.timestamps[idx - 1] - target_t) < abs(self.timestamps[best_idx] - target_t):
+            best_idx = idx - 1
+        if abs(self.timestamps[best_idx] - target_t) > max_gap:
+            return None
+        return self.centers[best_idx]
 
 
 def analyze_speaker_tracking(
     project_directory: Path,
     ffmpeg_path: str,
     cancel_event: threading.Event | None = None,
+    progress_callback: Any | None = None,
 ) -> dict[str, Any]:
     """
     Run YuNet face detection and mouth-movement speech correlation across the video.
@@ -434,13 +448,24 @@ def analyze_speaker_tracking(
         top_k=5000,
     )
 
-    # Pipe downsampled frames from FFmpeg at 5 fps
-    fps = 5.0
+    # Fast sampling at 4.0 fps with multithreaded FFmpeg decoding
+    fps = 4.0
     frame_interval = 1.0 / fps
     frame_bytes = sample_w * sample_h * 3
 
+    # Estimate video duration for live progress reporting
+    video_duration = 100.0
+    try:
+        from app.services.video_editor import get_media_duration
+        d = get_media_duration(source_path, ffmpeg_path)
+        if d and d > 0:
+            video_duration = float(d)
+    except Exception:
+        pass
+
     ffmpeg_cmd = [
         ffmpeg_path,
+        "-threads", "0",
         "-i", str(source_path),
         "-vf", f"fps={fps:.1f},scale={sample_w}:{sample_h}",
         "-f", "rawvideo",
@@ -464,6 +489,7 @@ def analyze_speaker_tracking(
     last_active_speaker_track_id: int | None = None
     last_speaker_time = -10.0
     last_known_center_x: float | None = None
+    last_face_seen_time = -10.0
 
     try:
         while True:
@@ -478,6 +504,11 @@ def analyze_speaker_tracking(
             t = frame_idx * frame_interval
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((sample_h, sample_w, 3))
             is_speech = _is_speech_active(t, speech_windows)
+
+            # Report live progress to job callback every 20 frames (~5s of video)
+            if progress_callback and frame_idx % 20 == 0:
+                pct = min(99, int(round((t / max(1.0, video_duration)) * 100)))
+                progress_callback(f"Analyzing speaker tracking (True 9:16): {pct}%", int(t), int(video_duration))
 
             # Detect faces
             _, faces = detector.detect(frame)
@@ -556,10 +587,18 @@ def analyze_speaker_tracking(
             # Filter tracks active in this frame
             recent_tracks = [tr for tr in active_tracks.values() if abs(tr.last_t - t) <= 0.25 and tr.frame_count >= 2]
 
+            if recent_tracks:
+                last_face_seen_time = t
+
             if not recent_tracks:
-                # Layer 1 fix: Do NOT jump to dead center (orig_w / 2.0) when detections drop!
-                # Hold the last known face position. Only fall back to center if no face has EVER been detected.
-                chosen_center_x = last_known_center_x if last_known_center_x is not None else frame_center_x
+                # If a face was seen recently (<= 2.5s ago): hold position during brief turns or pauses
+                if last_known_center_x is not None and (t - last_face_seen_time) <= 2.5:
+                    chosen_center_x = last_known_center_x
+                else:
+                    # No face in the video for > 2.5s (e.g. B-roll, slides, screen share, wide shot, no person):
+                    # Center the crop naturally!
+                    chosen_center_x = frame_center_x
+                    last_active_speaker_track_id = None
             elif len(recent_tracks) >= 2:
                 # Check Fallback 4: Both people fit in the crop
                 boxes_orig = [
@@ -578,7 +617,7 @@ def analyze_speaker_tracking(
                     speaker_track = max(recent_tracks, key=lambda tr: tr.recent_speech_score())
                     if speaker_track.recent_speech_score() > 0.04 and is_speech:
                         # Fallback 1: Active speaker
-                        chosen_center_x = speaker_track.center_x_at_time(t)
+                        chosen_center_x = speaker_track.center_x_at_time(t) or ((speaker_track.last_bbox[0] + speaker_track.last_bbox[2] / 2.0) * scale_to_orig)
                         last_active_speaker_track_id = speaker_track.track_id
                         last_speaker_time = t
                         last_known_center_x = chosen_center_x
@@ -586,7 +625,7 @@ def analyze_speaker_tracking(
                         # Fallback 2: Hold last confirmed speaker during speech or short pause
                         hold_tr = active_tracks.get(last_active_speaker_track_id)
                         if hold_tr and abs(hold_tr.last_t - t) <= 0.3:
-                            chosen_center_x = hold_tr.center_x_at_time(t)
+                            chosen_center_x = hold_tr.center_x_at_time(t) or ((hold_tr.last_bbox[0] + hold_tr.last_bbox[2] / 2.0) * scale_to_orig)
                         elif last_known_center_x is not None:
                             chosen_center_x = last_known_center_x
                         else:
@@ -602,7 +641,7 @@ def analyze_speaker_tracking(
             else:
                 # Single face track
                 tr = recent_tracks[0]
-                chosen_center_x = tr.center_x_at_time(t)
+                chosen_center_x = tr.center_x_at_time(t) or ((tr.last_bbox[0] + tr.last_bbox[2] / 2.0) * scale_to_orig)
                 last_known_center_x = chosen_center_x
                 if tr.recent_speech_score() > 0.03:
                     last_active_speaker_track_id = tr.track_id
@@ -643,10 +682,10 @@ def analyze_speaker_tracking(
             u_start = u["start"]
             u_end = u["end"]
 
-            # Candidate tracks active near or during this utterance
+            # Candidate tracks active near or during this utterance (O(1) lifetime check)
             candidate_tracks = [
                 tr for tr in all_tracks.values()
-                if any((u_start - 0.6) <= pt[0] <= (u_end + 0.6) for pt in tr.positions)
+                if not (tr.last_t < u_start - 0.6 or tr.first_t > u_end + 0.6)
             ]
             if not candidate_tracks:
                 continue
@@ -662,7 +701,9 @@ def analyze_speaker_tracking(
                     if match_prev:
                         best_track = match_prev[0]
 
-            speaker_cx = best_track.center_x_at_time(u_start)
+            speaker_cx = best_track.center_x_at_time(u_start, max_gap=2.5)
+            if speaker_cx is None:
+                continue
             confirmed_utterances.append({
                 "start": u_start,
                 "end": u_end,
@@ -706,12 +747,15 @@ def analyze_speaker_tracking(
                     current_track = all_tracks.get(switch_cuts[cut_idx][2])
 
                 if t < switch_cuts[0][0]:
-                    chosen = switch_cuts[0][1]
+                    chosen = orig_cx
                 else:
-                    if current_track:
-                        chosen = current_track.center_x_at_time(t)
+                    track_cx = current_track.center_x_at_time(t, max_gap=2.5) if current_track else None
+                    if track_cx is not None:
+                        chosen = track_cx
                     else:
-                        chosen = current_target
+                        # Speaker is not on screen (no face for > 2.5s, e.g. B-roll):
+                        # Preserve frame's own target (orig_cx) which centers naturally!
+                        chosen = orig_cx
                 refined_frame_targets.append((t, chosen))
             per_frame_target_x = refined_frame_targets
 

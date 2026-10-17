@@ -630,12 +630,14 @@ export default function Projects() {
                       </div>
 
                       {/* Live preview of ready clips and remaining skeletons */}
-                      {((projectProgress.ready_clips && projectProgress.ready_clips.length > 0) || (isGenerating && projectProgress.total_clips > 0)) && (
+                      {(isGenerating || (projectProgress.ready_clips && projectProgress.ready_clips.length > 0)) && (
                         <div className="mt-4 pt-3 border-t border-[#232326]">
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
                               <span className="size-2 rounded-full bg-[#10b981] animate-pulse" />
-                              Ready clips ({projectProgress.ready_clips?.length ?? 0} of {projectProgress.total_clips || "?"})
+                              {projectProgress.ready_clips && projectProgress.ready_clips.length > 0
+                                ? `Ready clips (${projectProgress.ready_clips.length} of ${projectProgress.total_clips || "?"})`
+                                : "Rendering & framing clips..."}
                             </p>
                             <Link
                               href={`/clips?project=${encodeURIComponent(project.project_id)}`}
@@ -661,7 +663,7 @@ export default function Projects() {
                             ))}
                             {isGenerating && Array.from({
                               length: Math.min(
-                                2,
+                                4,
                                 Math.max(1, (projectProgress.total_clips || 4) - (projectProgress.ready_clips?.length ?? 0))
                               ),
                             }).map((_, i) => (
