@@ -1,6 +1,6 @@
 # Clip Robin — AI Context, Codebase Audit & Engineering Handbook
 
-> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.17**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
+> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.18**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
 >
 > **Do NOT delete or overwrite this file.** Maintain and update this context as the project evolves.
 
@@ -394,21 +394,30 @@ projects/
   - **Top Line Safety**: "Add top line" button is disabled for True 9:16 clips with a tooltip: *"Top line generally doesn't go with 9:16. Try 1:1 or 16:9 for that"*.
 - **Tests**: `backend/tests/test_smart_framing.py` (6 tests) and `backend/tests/test_clip_generator.py::test_generate_clips_with_true_9_16_framing`, `test_render_single_clip_true_9_16_framing`, and `backend/tests/test_routes_clips.py::test_generate_clips_route_true_9_16`.
 
----
+#### 23. 16:9 Rounded Corners Framing (v0.1.18) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/services/video_editor.py`, `backend/tests/test_clip_generator.py`, `frontend/app/page.tsx`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Feature**: Centered 16:9 video card (672×378) with smooth rounded corners (`radius=28`, 4× antialiased alpha mask) composited onto vertical 720×1280 canvas. Preserves 24px side margins for social media clearance, maintains audio mapping with `-map 0:a?`, and provides comfortable breathing room for captions (`y=940`) and top line titles (`y=240-306`).
+- **Tests**: `backend/tests/test_clip_generator.py::test_generate_rounded_corner_mask_16_9`, `test_create_clip_standard_16_9_rounded_framing`, and `test_create_clip_standard_16_9_rounded_framing_with_watermark`.
+
+#### 24. App Branding Icons, NSIS Installer Assets & PyInstaller Windowed Icon (v0.1.18) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `frontend/src-tauri/icons/`, `frontend/src-tauri/installer/`, `frontend/src-tauri/tauri.conf.json`, `frontend/public/logo-mark.svg`, `frontend/app/layout.tsx`, `backend/icon.ico`, `.github/workflows/release-tauri.yml`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Feature**: Full multi-platform icon generation via `tauri icon` from master 1024×1024 icon. NSIS installer configured with custom `installerIcon`, `headerImage` (150×57), and `sidebarImage` (164×314). Transparent bird logo-mark SVG embedded in sidebar navigation header. PyInstaller packaged with `--windowed --icon backend/icon.ico` to prevent terminal flashing and show brand icon in Windows Task Manager.
 
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **69 tests** across 12 test suites in `backend/tests/` (All 69 passing via `pytest`).
+- **Active Backend Automated Tests**: **73 tests** across 12 test suites in `backend/tests/` (All 73 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (69 Implemented & Passing)
+### Backend Test Inventory (73 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
