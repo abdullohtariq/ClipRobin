@@ -6,7 +6,6 @@ import {
   CaptionStylePicker,
   CAPTION_STYLE_OPTIONS,
   CaptionVisualSample,
-  getPreviewUrls,
 } from "./caption-style-picker";
 import { SegmentedControl } from "./ui/segmented-control";
 import { ToggleRow } from "./ui/toggle-row";
@@ -55,7 +54,6 @@ export function ClipSettings({
 
   const activeStyleOption =
     CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle) || CAPTION_STYLE_OPTIONS[0];
-  const previewUrls = getPreviewUrls(captionStyle);
 
   const durationOptions = CLIP_DURATIONS.map((sec) => ({
     value: sec,

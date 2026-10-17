@@ -19,7 +19,8 @@ export function Checkbox({
   disabled = false,
   className = "",
 }: CheckboxProps) {
-  const generatedId = id || React.useId();
+  const fallbackId = React.useId();
+  const generatedId = id || fallbackId;
 
   return (
     <label

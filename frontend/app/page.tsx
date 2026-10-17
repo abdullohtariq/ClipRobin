@@ -5,7 +5,7 @@ import Link from "next/link";
 import {
   downloadVideo,
   generateClips,
-  getDownloadJob,
+  getActiveJobs,
   getLatestClipGenerationJob,
   getLocalTranscriptionJob,
   getProjects,
@@ -19,14 +19,12 @@ import {
 import { RecentProjectSkeletonItem } from "@/src/components/skeletons";
 import {
   CAPTION_STYLE_OPTIONS,
-  getPreviewUrls,
 } from "@/src/components/caption-style-picker";
 import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
 import { LiveMovingCaptions } from "@/src/components/live-moving-captions";
 import { Badge } from "@/src/components/ui/badge";
 import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
-import { Tooltip } from "@/src/components/ui/tooltip";
 
 type VideoProcessingProgress = {
   kind: "transcription" | "generation" | "complete" | "failed";
@@ -187,34 +185,22 @@ export default function Home() {
     const restoreProgress = async () => {
       try {
         const current = transcriptionProgressRef.current;
-        const res = await fetch("/api/jobs/active");
+        const activeJobs = await getActiveJobs().catch(() => []);
         if (!isCurrent) return;
-        if (res.ok) {
-          const data = (await res.json()) as {
-            jobs: Array<{
-              id: string;
-              project_id: string;
-              kind: "transcription" | "generation";
-              status: string;
-              step: string;
-              progress: number;
-              ready_clips?: Clip[];
-            }>;
-          };
-          const job = data.jobs[0];
-          if (job) {
-            setTranscriptionProgress({
-              kind: job.kind,
-              step: job.step,
-              progress:
-                job.kind === "transcription" ? 25 + Math.round(job.progress * 0.75) : job.progress,
-              projectId: job.project_id,
-            });
-            if (job.kind === "generation" && job.ready_clips && job.ready_clips.length > 0) {
-              setGeneratedClips(job.ready_clips);
-              setGeneratedProjectId(job.project_id);
-            }
-          } else if (current?.projectId && current.kind === "transcription") {
+        const job = activeJobs[0];
+        if (job) {
+          setTranscriptionProgress({
+            kind: job.kind as "transcription" | "generation",
+            step: job.step,
+            progress:
+              job.kind === "transcription" ? 25 + Math.round(job.progress * 0.75) : job.progress,
+            projectId: job.project_id,
+          });
+          if (job.kind === "generation" && job.ready_clips && job.ready_clips.length > 0) {
+            setGeneratedClips(job.ready_clips);
+            setGeneratedProjectId(job.project_id);
+          }
+        } else if (current?.projectId && current.kind === "transcription") {
             const transcription = await getLocalTranscriptionJob(current.projectId);
             if (!isCurrent) return;
             if (transcription.status === "failed") {
@@ -268,7 +254,6 @@ export default function Home() {
               });
             }
           }
-        }
       } catch (error) {
         console.error("Could not restore active video progress", error);
       } finally {
@@ -417,6 +402,8 @@ export default function Home() {
 
   const handleStartGenerating = async () => {
     if (!activeVideo || isProcessingVideo) return;
+    setTranscriptionProgress(null);
+    setDownloadStatus("");
 
     if (activeVideo.kind === "downloaded") {
       await runGenerationPipeline(activeVideo.projectId, activeVideo.name);
@@ -854,15 +841,21 @@ export default function Home() {
               />
             </section>
 
-            {/* Active Processing Card (Progress) */}
+            {/* Active Processing Card (Progress / Failed) */}
             {transcriptionProgress && (
               <section
                 aria-live="polite"
-                className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4 transition-all duration-150"
+                className={`rounded-2xl border p-6 shadow-sm space-y-4 transition-all duration-150 ${
+                  transcriptionProgress.kind === "failed"
+                    ? "border-red-500/30 bg-red-950/15"
+                    : "border-zinc-800 bg-[#121215]"
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-white">
+                    <h3 className={`text-sm font-semibold ${
+                      transcriptionProgress.kind === "failed" ? "text-red-300" : "text-white"
+                    }`}>
                       {transcriptionProgress.step}
                     </h3>
                     {transcriptionProgress.projectId && (
@@ -871,77 +864,115 @@ export default function Home() {
                       </p>
                     )}
                   </div>
-                  <span className="text-sm font-mono font-medium text-emerald-400">
-                    {transcriptionProgress.progress}%
-                  </span>
-                </div>
-
-                {/* Progress Bar */}
-                <div
-                  role="progressbar"
-                  aria-label="Video processing progress"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={transcriptionProgress.progress}
-                  className="h-2 w-full overflow-hidden rounded-full bg-zinc-800"
-                >
-                  <div
-                    className="h-full rounded-full bg-[#10b981] transition-[width] duration-300 ease-out"
-                    style={{ width: `${transcriptionProgress.progress}%` }}
-                  />
-                </div>
-
-                {/* Steps Checklist */}
-                <ol className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-zinc-800">
-                  {(transcriptionProgress.kind === "transcription"
-                    ? ["Uploading video", "Loading speech model", "Transcribing audio", "Saving transcript", "Complete"]
-                    : ["Transcription complete", "Clip generation started", "Clips ready"]
-                  ).map((step, index) => {
-                    const activeStep = step === transcriptionProgress.step
-                      || (step === "Generating clips" && transcriptionProgress.kind === "generation");
-                    const done = transcriptionProgress.kind !== "transcription"
-                      ? transcriptionProgress.kind === "complete" || index < 1
-                      : step === "Uploading video"
-                      ? transcriptionProgress.progress >= 25
-                      : step === "Loading speech model"
-                        ? ["Transcribing audio", "Saving transcript", "Complete"].includes(transcriptionProgress.step)
-                        : step === "Transcribing audio"
-                          ? ["Saving transcript", "Complete"].includes(transcriptionProgress.step)
-                          : step === "Saving transcript"
-                            ? transcriptionProgress.step === "Complete"
-                            : transcriptionProgress.step === "Complete";
-
-                    return (
-                      <li
-                        key={step}
-                        className={`flex items-center gap-2 text-xs transition-colors duration-150 ${
-                          activeStep
-                            ? "text-emerald-400 font-medium"
-                            : done
-                            ? "text-zinc-300"
-                            : "text-zinc-500"
-                        }`}
+                  <div className="flex items-center gap-3">
+                    {transcriptionProgress.kind === "failed" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTranscriptionProgress(null);
+                          setDownloadStatus("");
+                        }}
+                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-200 hover:bg-red-500/20 transition-colors"
                       >
-                        <span className={`flex size-4 items-center justify-center rounded-full text-[10px] ${
-                          done ? "bg-[#10b981]/15 text-[#10b981]" : activeStep ? "bg-emerald-400/20 text-emerald-300 font-bold" : "text-zinc-600"
-                        }`}>
-                          {done ? "✓" : activeStep ? "●" : "○"}
-                        </span>
-                        <span>{step}</span>
-                      </li>
-                    );
-                  })}
-                </ol>
-
-                {["generation", "complete"].includes(transcriptionProgress.kind) && transcriptionProgress.projectId && (
-                  <div className="pt-2">
-                    <Link
-                      href={`/clips?project=${encodeURIComponent(transcriptionProgress.projectId)}`}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
-                    >
-                      View clips in Project {transcriptionProgress.projectId} &rarr;
-                    </Link>
+                        Dismiss &amp; Reset
+                      </button>
+                    ) : (
+                      <span className="text-sm font-mono font-medium text-emerald-400">
+                        {transcriptionProgress.progress}%
+                      </span>
+                    )}
                   </div>
+                </div>
+
+                {transcriptionProgress.kind === "failed" ? (
+                  <div className="space-y-3 pt-1">
+                    {downloadStatus && downloadStatus !== transcriptionProgress.step && (
+                      <p className="text-xs text-red-300/80 bg-black/40 rounded-lg p-2.5 font-mono break-words border border-red-500/20">
+                        {downloadStatus}
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between pt-1 text-xs text-zinc-400">
+                      <span>Click &quot;Dismiss &amp; Reset&quot; or press &quot;Generate Clips&quot; to retry.</span>
+                      {transcriptionProgress.projectId && (
+                        <Link
+                          href={`/clips?project=${encodeURIComponent(transcriptionProgress.projectId)}`}
+                          className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
+                        >
+                          Open in Clips Studio &rarr;
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Progress Bar */}
+                    <div
+                      role="progressbar"
+                      aria-label="Video processing progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={transcriptionProgress.progress}
+                      className="h-2 w-full overflow-hidden rounded-full bg-zinc-800"
+                    >
+                      <div
+                        className="h-full rounded-full bg-[#10b981] transition-[width] duration-300 ease-out"
+                        style={{ width: `${transcriptionProgress.progress}%` }}
+                      />
+                    </div>
+
+                    {/* Steps Checklist */}
+                    <ol className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-zinc-800">
+                      {(transcriptionProgress.kind === "transcription"
+                        ? ["Uploading video", "Loading speech model", "Transcribing audio", "Saving transcript", "Complete"]
+                        : ["Transcription complete", "Clip generation started", "Clips ready"]
+                      ).map((step, index) => {
+                        const activeStep = step === transcriptionProgress.step
+                          || (step === "Generating clips" && transcriptionProgress.kind === "generation");
+                        const done = transcriptionProgress.kind !== "transcription"
+                          ? transcriptionProgress.kind === "complete" || index < 1
+                          : step === "Uploading video"
+                          ? transcriptionProgress.progress >= 25
+                          : step === "Loading speech model"
+                            ? ["Transcribing audio", "Saving transcript", "Complete"].includes(transcriptionProgress.step)
+                            : step === "Transcribing audio"
+                              ? ["Saving transcript", "Complete"].includes(transcriptionProgress.step)
+                              : step === "Saving transcript"
+                                ? transcriptionProgress.step === "Complete"
+                                : transcriptionProgress.step === "Complete";
+
+                        return (
+                          <li
+                            key={step}
+                            className={`flex items-center gap-2 text-xs transition-colors duration-150 ${
+                              activeStep
+                                ? "text-emerald-400 font-medium"
+                                : done
+                                ? "text-zinc-300"
+                                : "text-zinc-500"
+                            }`}
+                          >
+                            <span className={`flex size-4 items-center justify-center rounded-full text-[10px] ${
+                              done ? "bg-[#10b981]/15 text-[#10b981]" : activeStep ? "bg-emerald-400/20 text-emerald-300 font-bold" : "text-zinc-600"
+                            }`}>
+                              {done ? "✓" : activeStep ? "●" : "○"}
+                            </span>
+                            <span>{step}</span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+
+                    {["generation", "complete"].includes(transcriptionProgress.kind) && transcriptionProgress.projectId && (
+                      <div className="pt-2">
+                        <Link
+                          href={`/clips?project=${encodeURIComponent(transcriptionProgress.projectId)}`}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
+                        >
+                          View clips in Project {transcriptionProgress.projectId} &rarr;
+                        </Link>
+                      </div>
+                    )}
+                  </>
                 )}
               </section>
             )}

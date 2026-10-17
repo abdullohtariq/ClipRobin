@@ -432,7 +432,7 @@ def analyze_speaker_tracking(
     import cv2
 
     model_path = get_yunet_model_path()
-    sample_w = 640
+    sample_w = 480
     sample_h = int(round(sample_w * orig_h / orig_w))
     if sample_h % 2 != 0:
         sample_h += 1
@@ -448,8 +448,8 @@ def analyze_speaker_tracking(
         top_k=5000,
     )
 
-    # Fast sampling at 4.0 fps with multithreaded FFmpeg decoding
-    fps = 4.0
+    # Fast sampling at 2.0 fps (500ms cadence) with multithreaded FFmpeg decoding
+    fps = 2.0
     frame_interval = 1.0 / fps
     frame_bytes = sample_w * sample_h * 3
 
@@ -505,8 +505,8 @@ def analyze_speaker_tracking(
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((sample_h, sample_w, 3))
             is_speech = _is_speech_active(t, speech_windows)
 
-            # Report live progress to job callback every 20 frames (~5s of video)
-            if progress_callback and frame_idx % 20 == 0:
+            # Report live progress to job callback every 10 frames (~5s of video at 2.0 fps)
+            if progress_callback and frame_idx % 10 == 0:
                 pct = min(99, int(round((t / max(1.0, video_duration)) * 100)))
                 progress_callback(f"Analyzing speaker tracking (True 9:16): {pct}%", int(t), int(video_duration))
 
@@ -518,7 +518,7 @@ def analyze_speaker_tracking(
                 for f in faces:
                     x, y, w, h = float(f[0]), float(f[1]), float(f[2]), float(f[3])
                     # Filter out tiny noise / background faces
-                    if w < 22 or h < 22:
+                    if w < 16 or h < 16:
                         continue
                     landmarks = f[4:14].reshape((5, 2))  # right_eye, left_eye, nose, right_mouth, left_mouth
                     rm = landmarks[3]
@@ -527,8 +527,8 @@ def analyze_speaker_tracking(
                     # Extract mouth patch
                     mx = float((rm[0] + lm[0]) / 2.0)
                     my = float((rm[1] + lm[1]) / 2.0)
-                    mw = max(16, int(abs(lm[0] - rm[0]) * 1.5))
-                    mh = max(12, int(mw * 0.7))
+                    mw = max(12, int(abs(lm[0] - rm[0]) * 1.5))
+                    mh = max(10, int(mw * 0.7))
 
                     x1 = max(0, int(mx - mw // 2))
                     y1 = max(0, int(my - mh // 2))
@@ -548,8 +548,8 @@ def analyze_speaker_tracking(
             matched_tracks = set()
 
             for track_id, track in list(active_tracks.items()):
-                # Drop stale tracks not seen for > 1.0s
-                if t - track.last_t > 1.0:
+                # Drop stale tracks not seen for > 1.5s
+                if t - track.last_t > 1.5:
                     active_tracks.pop(track_id, None)
                     continue
 
@@ -584,8 +584,8 @@ def analyze_speaker_tracking(
             frame_center_x = orig_w / 2.0
             chosen_center_x = frame_center_x
 
-            # Filter tracks active in this frame
-            recent_tracks = [tr for tr in active_tracks.values() if abs(tr.last_t - t) <= 0.25 and tr.frame_count >= 2]
+            # Filter tracks active in this frame (cadence: 2.0 fps -> 0.5s interval)
+            recent_tracks = [tr for tr in active_tracks.values() if abs(tr.last_t - t) <= 0.6 and tr.frame_count >= 1]
 
             if recent_tracks:
                 last_face_seen_time = t
@@ -624,7 +624,7 @@ def analyze_speaker_tracking(
                     elif last_active_speaker_track_id:
                         # Fallback 2: Hold last confirmed speaker during speech or short pause
                         hold_tr = active_tracks.get(last_active_speaker_track_id)
-                        if hold_tr and abs(hold_tr.last_t - t) <= 0.3:
+                        if hold_tr and abs(hold_tr.last_t - t) <= 0.8:
                             chosen_center_x = hold_tr.center_x_at_time(t) or ((hold_tr.last_bbox[0] + hold_tr.last_bbox[2] / 2.0) * scale_to_orig)
                         elif last_known_center_x is not None:
                             chosen_center_x = last_known_center_x

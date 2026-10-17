@@ -21,8 +21,6 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
   const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
-    let timeoutId: NodeJS.Timeout;
-
     const tick = () => {
       setCurrentStep((prev) => {
         const next = (prev + 1) % (TOTAL_WORDS + 1); // +1 step is pause before restart
@@ -31,7 +29,7 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
     };
 
     const delay = currentStep >= TOTAL_WORDS ? PAUSE_MS : STEP_MS;
-    timeoutId = setTimeout(tick, delay);
+    const timeoutId = setTimeout(tick, delay);
 
     return () => clearTimeout(timeoutId);
   }, [currentStep]);

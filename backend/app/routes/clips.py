@@ -241,10 +241,10 @@ def run_clip_generation(
                     pct_val = int(step.split(":")[-1].replace("%", "").strip())
                 except Exception:
                     pct_val = 0
-            # Scale from 10% to 15% smoothly during tracking analysis
-            progress = 10 + round((pct_val / 100.0) * 5)
+            # Scale from 10% to 25% smoothly during tracking analysis
+            progress = 10 + round((pct_val / 100.0) * 15)
         elif step == "Rendering clips":
-            progress = 15 + round(completed_clips / max(total_clips, 1) * 80)
+            progress = 25 + round(completed_clips / max(total_clips, 1) * 70)
         else:
             progress = 98
         with JOBS_LOCK:

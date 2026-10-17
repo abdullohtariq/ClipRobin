@@ -40,7 +40,6 @@ export default function UpdateNotice() {
   const [pendingUpdateVersion, setPendingUpdateVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     if (!isTauri() || process.env.NODE_ENV !== "production") {
@@ -110,7 +109,7 @@ export default function UpdateNotice() {
       isActive = false;
       window.clearInterval(interval);
     };
-  }, [retryCount]);
+  }, []);
 
   const installUpdate = async () => {
     setIsInstalling(true);
