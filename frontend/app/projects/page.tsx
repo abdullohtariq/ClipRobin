@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  CaptionStyle,
+  FramingMode,
   ActiveJob,
   ClipGenerationJob,
   cancelClipGeneration,
@@ -14,6 +16,11 @@ import {
   Project,
 } from "@/src/lib/api";
 import { ProjectSkeletonCard } from "@/src/components/skeletons";
+import {
+  CaptionStylePicker,
+  CAPTION_STYLE_OPTIONS,
+  getPreviewUrls,
+} from "@/src/components/caption-style-picker";
 
 export default function Projects() {
   const router = useRouter();
@@ -26,6 +33,30 @@ export default function Projects() {
   const [activeJobs, setActiveJobs] = useState<ActiveJob[]>([]);
   const [subtitleOptions, setSubtitleOptions] = useState<Record<string, boolean>>({});
   const [watermarkOptions, setWatermarkOptions] = useState<Record<string, boolean>>({});
+  const [framingOptions, setFramingOptions] = useState<Record<string, FramingMode>>({});
+  const [captionStyleOptions, setCaptionStyleOptions] = useState<Record<string, CaptionStyle>>({});
+  const [activeModalProjectId, setActiveModalProjectId] = useState<string | null>(null);
+  const [defaultFraming, setDefaultFraming] = useState<FramingMode>("standard");
+  const [defaultCaptionStyle, setDefaultCaptionStyle] = useState<CaptionStyle>("classic");
+
+  useEffect(() => {
+    try {
+      const savedFraming = localStorage.getItem("cliprobin_framing_mode");
+      if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
+        setDefaultFraming(savedFraming as FramingMode);
+      }
+      const savedStyle = localStorage.getItem("cliprobin_caption_style");
+      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
+        setDefaultCaptionStyle(savedStyle as CaptionStyle);
+      } else {
+        const stored = localStorage.getItem("cliprobin.settings");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.defaultCaptionStyle) setDefaultCaptionStyle(parsed.defaultCaptionStyle);
+        }
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     getProjects()
@@ -125,6 +156,8 @@ export default function Projects() {
         },
         60,
         watermarkOptions[projectId] ?? true,
+        framingOptions[projectId] ?? defaultFraming,
+        captionStyleOptions[projectId] ?? defaultCaptionStyle,
       );
       setProjects((current) => current.map((project) => project.project_id === projectId
         ? { ...project, clips: result.clips.length }
@@ -259,51 +292,161 @@ export default function Projects() {
                     </div>
                   </div>
 
-                  <div className="mt-5 flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3.5">
-                    <span className="text-xs text-zinc-300">Burn animated captions into generated clips</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={subtitleOptions[project.project_id] ?? true}
-                      disabled={generatingProject !== null || activeGeneration !== undefined || isTranscribing}
-                      onClick={() => setSubtitleOptions((current) => ({
-                        ...current,
-                        [project.project_id]: !(subtitleOptions[project.project_id] ?? true),
-                      }))}
-                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
-                        (subtitleOptions[project.project_id] ?? true) ? "bg-[#10b981]" : "bg-zinc-800"
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                          (subtitleOptions[project.project_id] ?? true) ? "translate-x-4" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
-                  </div>
+                  {(() => {
+                    const currentFraming = framingOptions[project.project_id] ?? defaultFraming;
+                    const currentCaptionStyle = captionStyleOptions[project.project_id] ?? defaultCaptionStyle;
+                    const activeStyleOption =
+                      CAPTION_STYLE_OPTIONS.find((s) => s.id === currentCaptionStyle) || CAPTION_STYLE_OPTIONS[0];
+                    const previewUrls = getPreviewUrls(currentCaptionStyle);
+                    const showSubs = subtitleOptions[project.project_id] ?? true;
+                    const showWm = watermarkOptions[project.project_id] ?? true;
 
-                  <div className="mt-3 flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3.5">
-                    <span className="text-xs text-zinc-300">Add a watermark: Made with Clip Robin</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={watermarkOptions[project.project_id] ?? true}
-                      disabled={generatingProject !== null || activeGeneration !== undefined || isTranscribing}
-                      onClick={() => setWatermarkOptions((current) => ({
-                        ...current,
-                        [project.project_id]: !(watermarkOptions[project.project_id] ?? true),
-                      }))}
-                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
-                        (watermarkOptions[project.project_id] ?? true) ? "bg-[#10b981]" : "bg-zinc-800"
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                          (watermarkOptions[project.project_id] ?? true) ? "translate-x-4" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
-                  </div>
+                    return (
+                      <>
+                        {/* Controls Grid: Aspect Ratio (16:9, 1:1, 9:16) + Captions Style */}
+                        <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* Ratio Selector: 16:9, 1:1, 9:16 */}
+                          <div className="space-y-1.5">
+                            <label className="block text-xs font-medium text-zinc-400">
+                              Aspect ratio &amp; framing
+                            </label>
+                            <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Aspect ratio">
+                              <button
+                                type="button"
+                                role="radio"
+                                aria-checked={currentFraming === "standard"}
+                                disabled={isGenerating || isTranscribing}
+                                onClick={() => setFramingOptions((prev) => ({ ...prev, [project.project_id]: "standard" }))}
+                                className={`flex flex-col items-center justify-center rounded-[10px] border p-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                                  currentFraming === "standard"
+                                    ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
+                                    : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                                }`}
+                              >
+                                <span className="text-xs font-semibold">16:9</span>
+                                <span className="text-[10px] text-zinc-500 mt-0.5">Rounded</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                role="radio"
+                                aria-checked={currentFraming === "square_rounded"}
+                                disabled={isGenerating || isTranscribing}
+                                onClick={() => setFramingOptions((prev) => ({ ...prev, [project.project_id]: "square_rounded" }))}
+                                className={`flex flex-col items-center justify-center rounded-[10px] border p-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                                  currentFraming === "square_rounded"
+                                    ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
+                                    : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                                }`}
+                              >
+                                <span className="text-xs font-semibold">1:1</span>
+                                <span className="text-[10px] text-emerald-400 mt-0.5">Reels / TikTok</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                role="radio"
+                                aria-checked={currentFraming === "true_9_16"}
+                                disabled={isGenerating || isTranscribing}
+                                onClick={() => setFramingOptions((prev) => ({ ...prev, [project.project_id]: "true_9_16" }))}
+                                className={`flex flex-col items-center justify-center rounded-[10px] border p-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                                  currentFraming === "true_9_16"
+                                    ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
+                                    : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                                }`}
+                              >
+                                <span className="text-xs font-semibold">9:16</span>
+                                <span className="text-[10px] text-purple-400 mt-0.5">AI Speaker</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Captions Style Selector */}
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <label className="block text-xs font-medium text-zinc-400">
+                                Captions
+                              </label>
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={showSubs}
+                                disabled={isGenerating || isTranscribing}
+                                onClick={() => setSubtitleOptions((prev) => ({ ...prev, [project.project_id]: !showSubs }))}
+                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
+                                  showSubs ? "bg-[#10b981]" : "bg-zinc-800"
+                                }`}
+                              >
+                                <span
+                                  className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                                    showSubs ? "translate-x-4" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+
+                            {showSubs ? (
+                              <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-2 transition-all duration-150 hover:border-zinc-700">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div className="relative aspect-[9/16] w-6 h-10 shrink-0 overflow-hidden rounded border border-[#232326] bg-black">
+                                    <img
+                                      src={previewUrls.posterUrl}
+                                      alt={`${activeStyleOption.name} caption preview`}
+                                      className="size-full object-cover"
+                                    />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-white truncate">
+                                      Style: {activeStyleOption.name}
+                                    </p>
+                                    <p className="text-[11px] text-zinc-400 line-clamp-1">
+                                      {activeStyleOption.description}
+                                    </p>
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  disabled={isGenerating || isTranscribing}
+                                  onClick={() => setActiveModalProjectId(project.project_id)}
+                                  className="shrink-0 px-2.5 py-1 rounded-lg border border-[#232326] bg-[#111113] text-xs font-medium text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-colors duration-150 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                                >
+                                  Change
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center rounded-[10px] border border-dashed border-[#232326] bg-[#0a0a0a] p-2.5 text-xs text-zinc-500">
+                                Captions disabled
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Watermark Toggle Row */}
+                        <div className="mt-3 flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3">
+                          <span className="text-xs text-zinc-300">Add a watermark: Made with Clip Robin</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={showWm}
+                            disabled={isGenerating || isTranscribing}
+                            onClick={() => setWatermarkOptions((prev) => ({
+                              ...prev,
+                              [project.project_id]: !showWm,
+                            }))}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
+                              showWm ? "bg-[#10b981]" : "bg-zinc-800"
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                                showWm ? "translate-x-4" : "translate-x-0"
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   <div className="mt-5 flex flex-wrap items-center gap-3">
                     <button
@@ -458,6 +601,27 @@ export default function Projects() {
             })}
           </div>
         )}
+
+        <CaptionStylePicker
+          isOpen={activeModalProjectId !== null}
+          onClose={() => setActiveModalProjectId(null)}
+          selectedStyle={
+            activeModalProjectId
+              ? (captionStyleOptions[activeModalProjectId] ?? defaultCaptionStyle)
+              : defaultCaptionStyle
+          }
+          onSelect={(style) => {
+            if (activeModalProjectId) {
+              setCaptionStyleOptions((prev) => ({
+                ...prev,
+                [activeModalProjectId]: style,
+              }));
+              try {
+                localStorage.setItem("cliprobin_caption_style", style);
+              } catch {}
+            }
+          }}
+        />
       </div>
     </main>
   );

@@ -102,6 +102,48 @@ server.listen(3456, async () => {
     console.log(`Saved modal 960x640 screenshot to ${modal960}`);
     await page1.close();
 
+    // Clips page with project_001 (mock/direct)
+    const pageClips = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await pageClips.goto('http://localhost:3456/clips.html?project=project_001');
+    await pageClips.waitForTimeout(1500);
+    const clipsShot = path.join(outputDir, 'clips_page_controls.png');
+    await pageClips.screenshot({ path: clipsShot });
+    console.log(`Saved clips page screenshot to ${clipsShot}`);
+    await pageClips.close();
+
+    // Projects page
+    const pageProjects = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await pageProjects.route('**/api/projects', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          projects: [
+            {
+              project_id: 'project_001',
+              created_at: new Date().toISOString(),
+              source_type: 'Local MP4',
+              clips: 3,
+              status: 'Ready',
+            },
+          ],
+        }),
+      });
+    });
+    await pageProjects.route('**/api/jobs/active', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ jobs: [] }),
+      });
+    });
+    await pageProjects.goto('http://localhost:3456/projects.html');
+    await pageProjects.waitForTimeout(1000);
+    const projectsShot = path.join(outputDir, 'projects_page.png');
+    await pageProjects.screenshot({ path: projectsShot });
+    console.log(`Saved projects page screenshot to ${projectsShot}`);
+    await pageProjects.close();
+
     await browser.close();
   } catch (err) {
     console.error('Error:', err);

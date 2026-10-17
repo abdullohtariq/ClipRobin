@@ -4,12 +4,14 @@ import Link from "next/link";
 import { FormEvent, memo, Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  CaptionStyle,
   Clip,
   ClipGenerationJob,
   cancelClipGeneration,
   clipDownloadUrl,
   clipUrl,
   clipsArchiveDownloadUrl,
+  FramingMode,
   generateClips,
   getClips,
   getLatestClipGenerationJob,
@@ -19,6 +21,11 @@ import {
   setClipTopLine,
 } from "@/src/lib/api";
 import { ClipSkeletonCard } from "@/src/components/skeletons";
+import {
+  CaptionStylePicker,
+  CAPTION_STYLE_OPTIONS,
+  getPreviewUrls,
+} from "@/src/components/caption-style-picker";
 
 const ClipCard = memo(function ClipCard({
   clip,
@@ -475,9 +482,49 @@ function ProjectClips({ projectId }: { projectId: string }) {
   );
   const [showSubtitles, setShowSubtitles] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
+  const [framingMode, setFramingMode] = useState<FramingMode>("standard");
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
+  const [isCaptionPickerOpen, setIsCaptionPickerOpen] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
   const [generating, setGenerating] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedFraming = localStorage.getItem("cliprobin_framing_mode");
+      if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
+        setFramingMode(savedFraming as FramingMode);
+      }
+      const savedStyle = localStorage.getItem("cliprobin_caption_style");
+      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
+        setCaptionStyle(savedStyle as CaptionStyle);
+      } else {
+        const stored = localStorage.getItem("cliprobin.settings");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.defaultCaptionStyle) setCaptionStyle(parsed.defaultCaptionStyle);
+        }
+      }
+    } catch {}
+  }, []);
+
+  const handleFramingModeChange = (mode: FramingMode) => {
+    setFramingMode(mode);
+    try {
+      localStorage.setItem("cliprobin_framing_mode", mode);
+    } catch {}
+  };
+
+  const handleCaptionStyleChange = (styleId: CaptionStyle) => {
+    setCaptionStyle(styleId);
+    try {
+      localStorage.setItem("cliprobin_caption_style", styleId);
+    } catch {}
+  };
+
+  const activeStyleOption =
+    CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle) || CAPTION_STYLE_OPTIONS[0];
+  const previewUrls = getPreviewUrls(captionStyle);
 
   useEffect(() => {
     if (!projectId) {
@@ -568,6 +615,8 @@ function ProjectClips({ projectId }: { projectId: string }) {
         },
         60,
         showWatermark,
+        framingMode,
+        captionStyle,
       );
       setClips(result.clips);
       setStatus(result.cancelled
@@ -638,45 +687,176 @@ function ProjectClips({ projectId }: { projectId: string }) {
         )}
 
         {projectId && (
-          <form onSubmit={handleGenerate} className="mb-8 flex flex-wrap items-center gap-4">
-            <button
-              type="submit"
-              disabled={generating}
-              className="rounded-[10px] bg-[#10b981] px-4 py-2 text-xs font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-            >
-              {generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}
-            </button>
-            {clips.length > 0 && (
-              <button
-                type="button"
-                onClick={() => void handleDownloadAll()}
-                disabled={generating || downloadingAll}
-                className="rounded-[10px] border border-[#232326] bg-transparent px-4 py-2 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-              >
-                {downloadingAll ? "Preparing download..." : "Download all clips (ZIP)"}
-              </button>
-            )}
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
-              <input
-                type="checkbox"
-                checked={showSubtitles}
-                onChange={(event) => setShowSubtitles(event.target.checked)}
-                disabled={generating}
-                className="size-4 rounded border-[#232326] bg-zinc-900 accent-[#10b981]"
-              />
-              Burn animated captions into clips
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
-              <input
-                type="checkbox"
-                checked={showWatermark}
-                onChange={(event) => setShowWatermark(event.target.checked)}
-                disabled={generating}
-                className="size-4 rounded border-[#232326] bg-zinc-900 accent-[#10b981]"
-              />
-              Add a watermark: Made with Clip Robin
-            </label>
-          </form>
+          <section className="mb-8 rounded-[12px] border border-[#232326] bg-[#111113] p-5 shadow-sm space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232326] pb-4">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={(e) => void handleGenerate(e as unknown as FormEvent)}
+                  disabled={generating}
+                  className="rounded-[10px] bg-[#10b981] px-5 py-2.5 text-xs font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                >
+                  {generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}
+                </button>
+                {clips.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadAll()}
+                    disabled={generating || downloadingAll}
+                    className="rounded-[10px] border border-[#232326] bg-transparent px-4 py-2.5 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                  >
+                    {downloadingAll ? "Preparing download..." : "Download all clips (ZIP)"}
+                  </button>
+                )}
+              </div>
+
+              {/* Watermark Toggle */}
+              <div className="flex items-center gap-2.5">
+                <span className="text-xs text-zinc-400 font-medium">Watermark</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showWatermark}
+                  disabled={generating}
+                  onClick={() => setShowWatermark((prev) => !prev)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
+                    showWatermark ? "bg-[#10b981]" : "bg-zinc-800"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                      showWatermark ? "translate-x-4" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Controls Grid: Aspect Ratio (16:9, 1:1, 9:16) + Caption Style */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+              {/* Ratio Selector: 16:9, 1:1, 9:16 */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-400">
+                  Aspect ratio & framing
+                </label>
+                <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Aspect ratio">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={framingMode === "standard"}
+                    disabled={generating}
+                    onClick={() => handleFramingModeChange("standard")}
+                    className={`flex flex-col items-center justify-center rounded-[10px] border p-2.5 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                      framingMode === "standard"
+                        ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
+                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                    }`}
+                  >
+                    <span className="text-xs font-semibold">16:9</span>
+                    <span className="text-[10px] text-zinc-500 mt-0.5">Rounded</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={framingMode === "square_rounded"}
+                    disabled={generating}
+                    onClick={() => handleFramingModeChange("square_rounded")}
+                    className={`flex flex-col items-center justify-center rounded-[10px] border p-2.5 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                      framingMode === "square_rounded"
+                        ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
+                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                    }`}
+                  >
+                    <span className="text-xs font-semibold">1:1</span>
+                    <span className="text-[10px] text-emerald-400 mt-0.5">Reels / TikTok</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={framingMode === "true_9_16"}
+                    disabled={generating}
+                    onClick={() => handleFramingModeChange("true_9_16")}
+                    className={`flex flex-col items-center justify-center rounded-[10px] border p-2.5 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                      framingMode === "true_9_16"
+                        ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
+                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                    }`}
+                  >
+                    <span className="text-xs font-semibold">9:16</span>
+                    <span className="text-[10px] text-purple-400 mt-0.5">AI Speaker</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Caption Style Selector */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-medium text-zinc-400">
+                    Captions
+                  </label>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={showSubtitles}
+                    disabled={generating}
+                    onClick={() => setShowSubtitles((prev) => !prev)}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
+                      showSubtitles ? "bg-[#10b981]" : "bg-zinc-800"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                        showSubtitles ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {showSubtitles ? (
+                  <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-2.5 transition-all duration-150 hover:border-zinc-700">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="relative aspect-[9/16] w-7 h-12 shrink-0 overflow-hidden rounded border border-[#232326] bg-black">
+                        <img
+                          src={previewUrls.posterUrl}
+                          alt={`${activeStyleOption.name} caption preview`}
+                          className="size-full object-cover"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-white truncate">
+                          Style: {activeStyleOption.name}
+                        </p>
+                        <p className="text-[11px] text-zinc-400 line-clamp-1">
+                          {activeStyleOption.description}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={generating}
+                      onClick={() => setIsCaptionPickerOpen(true)}
+                      className="shrink-0 px-3 py-1 rounded-lg border border-[#232326] bg-[#111113] text-xs font-medium text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-colors duration-150 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                    >
+                      Change
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center rounded-[10px] border border-dashed border-[#232326] bg-[#0a0a0a] p-3 text-xs text-zinc-500">
+                    Captions disabled
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <CaptionStylePicker
+              isOpen={isCaptionPickerOpen}
+              onClose={() => setIsCaptionPickerOpen(false)}
+              selectedStyle={captionStyle}
+              onSelect={(style) => handleCaptionStyleChange(style)}
+            />
+          </section>
         )}
 
         {generationProgress && ["queued", "processing", "cancelling"].includes(generationProgress.status) && (
