@@ -1042,9 +1042,9 @@ export default function Home() {
                       </div>
                     )
                   ) : framingMode === "square_rounded" ? (
-                    // 1:1 Rounded Square Card
-                    <div className="size-full bg-black flex items-center justify-center p-3">
-                      <div className="size-28 rounded-xl overflow-hidden border border-emerald-500/30 bg-zinc-900 shadow-md relative flex items-center justify-center">
+                    // 1:1 Rounded Square Card (660/720 ≈ 91.7% width, centered vertically matching FFmpeg output)
+                    <div className="size-full bg-black flex items-center justify-center p-2.5">
+                      <div className="w-full aspect-square rounded-2xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
                         {videoPreviewUrl ? (
                           <video
                             src={videoPreviewUrl}
@@ -1056,7 +1056,7 @@ export default function Home() {
                           />
                         ) : (
                           <div className="flex flex-col items-center text-center p-2">
-                            <span className="text-xs font-bold text-emerald-400">1:1 Square</span>
+                            <span className="text-xs font-semibold text-zinc-200">1:1 Square</span>
                             <span className="text-[9px] text-zinc-400">TikTok &amp; Reels</span>
                           </div>
                         )}

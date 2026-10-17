@@ -139,14 +139,14 @@ export function ClipSettings({
           {/* Option 2: 1:1 Rounded */}
           <OptionCard
             title="1:1 Rounded"
-            subtitle="TikTok & Reels square"
+            subtitle="TikTok & Reels"
             badge={<Badge variant="emerald" size="sm">Popular</Badge>}
             selected={framingMode === "square_rounded"}
             disabled={disabled}
             onClick={() => onFramingModeChange("square_rounded")}
             previewGraphic={
               <div className="relative aspect-[9/16] w-12 rounded-[5px] border border-zinc-700/60 bg-[#0c0c0e] flex items-center justify-center overflow-hidden p-1 shadow-inner">
-                <div className="size-8 rounded-[4px] bg-zinc-700/80 border border-zinc-600/70 flex items-center justify-center">
+                <div className="w-full aspect-square rounded-[3px] bg-zinc-700/80 border border-zinc-600/70 flex items-center justify-center">
                   <span className="text-[7px] font-semibold text-emerald-300">1:1</span>
                 </div>
               </div>
@@ -255,3 +255,4 @@ export function ClipSettings({
     </div>
   );
 }
+
