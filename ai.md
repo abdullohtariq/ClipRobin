@@ -364,9 +364,9 @@ projects/
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Added user-configurable watermark burning into vertical clips:
   - **Asset Resolution**: Checks `CLIPROBIN_WATERMARK_PATH`, `watermark.png`, `clip_robin_watermark.png`, and `frontend/public/watermark.png`.
-  - **Positioning & Scaling**: Scales watermark proportionally to 240px wide (`scale=240:-2` ensuring even integer height) and overlays it horizontally centered with 20% vertical top clearance (`x=(W-w)/2:y=round(H*0.20)`).
+  - **Positioning & Scaling**: Scales watermark proportionally to 220px wide (`scale=220:-2` ensuring even integer height) and overlays it at the top-right corner with platform safe-space margins to prevent edge clipping (`x=W-w-44:y=round(H*0.06)`).
   - **Filtergraph Integration**: Uses FFmpeg `-filter_complex` with script files and stream mapping `-map [v] -map 0:a?`, supporting both silent and audio videos and remaining 100% compatible with word-by-word animated caption highlights.
-  - **UI Toggles**: Accessible toggle switch on Dashboard ("Add a watermark: Made with Clip Robin"), Projects, and Clips pages.
+  - **UI Toggles**: Accessible toggle switch on Dashboard ("Add a watermark: Made with Clip Robin"), Projects, and Clips pages, reflecting live in the 9:16 preview.
 - **Tests**: `backend/tests/test_clip_generator.py::test_generate_clips_passes_show_watermark` and `backend/tests/test_routes_clips.py::test_generate_clips_accepts_show_watermark_param`.
 
 #### 18. Generation Mode Selector: Random vs AI (v0.1.16) `[RESOLVED / IMPLEMENTED]`

@@ -247,7 +247,7 @@ export function ClipSettings({
       {/* 4. Watermark Toggle */}
       <ToggleRow
         label="Add a watermark: Made with Clip Robin"
-        description="Overlays Clip Robin watermark at top-center of vertical video"
+        description="Overlays Clip Robin watermark at top-right corner with platform safe-space margins"
         checked={showWatermark}
         onChange={onShowWatermarkChange}
         disabled={disabled}

@@ -597,18 +597,19 @@ def create_clip(
                     "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
                 )
                 if watermark_path and watermark_path.is_file():
-                    wm_y = "round(H*0.07)"
+                    wm_x = "W-w-44"
+                    wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
                         base_filter_complex = (
                             f"{bg_and_square},{ass_filter}[base];"
-                            f"[1:v]scale=240:-2[wm];"
-                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     else:
                         base_filter_complex = (
                             f"{bg_and_square}[base];"
-                            f"[1:v]scale=240:-2[wm];"
-                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     if (not use_ass) and all_text_filters:
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
@@ -712,18 +713,19 @@ def create_clip(
                     base_filter = f"crop=w={crop_w}:h={crop_h}:x='{x_expr}':y=0,scale=720:1280,format=yuv420p"
 
                 if watermark_path and watermark_path.is_file():
-                    wm_y = "round(H*0.07)"
+                    wm_x = "W-w-44"
+                    wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
                         base_filter_complex = (
                             f"[0:v]{base_filter},{ass_filter}[base];"
-                            f"[1:v]scale=240:-2[wm];"
-                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     else:
                         base_filter_complex = (
                             f"[0:v]{base_filter}[base];"
-                            f"[1:v]scale=240:-2[wm];"
-                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     if (not use_ass) and all_text_filters:
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
@@ -841,18 +843,19 @@ def create_clip(
                     "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
                 )
                 if watermark_path and watermark_path.is_file():
-                    wm_y = "round(H*0.07)" if (top_line and top_line.strip()) else "round(H*0.20)"
+                    wm_x = "W-w-44"
+                    wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
                         base_filter_complex = (
                             f"{bg_and_video},{ass_filter}[base];"
-                            f"[1:v]scale=240:-2[wm];"
-                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     else:
                         base_filter_complex = (
                             f"{bg_and_video}[base];"
-                            f"[1:v]scale=240:-2[wm];"
-                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                            f"[1:v]scale=220:-2[wm];"
+                            f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     if (not use_ass) and all_text_filters:
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"

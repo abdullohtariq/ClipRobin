@@ -1086,9 +1086,9 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Watermark Overlay Preview */}
+                  {/* Watermark Overlay Preview (Top-right corner with platform safe-space margins) */}
                   {showWatermark && (
-                    <div className="absolute top-7 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-xs">
+                    <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-xs shadow-sm">
                       <span className="size-2 rounded-full bg-emerald-400" />
                       <span className="text-[8px] font-semibold text-white tracking-tight">Clip Robin</span>
                     </div>

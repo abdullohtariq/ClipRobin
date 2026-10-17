@@ -574,7 +574,8 @@ def test_create_clip_standard_16_9_rounded_framing_with_watermark(tmp_path: Path
     assert "0:a?" in captured_command
     assert len(captured_filter_content) == 1
     assert "rounded-mask-16-9.png" in captured_filter_content[0]
-    assert "scale=240:-2[wm]" in captured_filter_content[0]
+    assert "scale=220:-2[wm]" in captured_filter_content[0]
+    assert "overlay=W-w-44:" in captured_filter_content[0]
 
 
 def test_build_subtitle_filters_caption_styles(tmp_path: Path):
