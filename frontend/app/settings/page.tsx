@@ -22,8 +22,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   outputFormat: "MP4",
   aspectRatio: "9:16 (Vertical)",
   quality: "High",
-  defaultCaptionStyle: "robin",
-  defaultCaptionAnimation: "grow",
+  defaultCaptionStyle: "classic",
+  defaultCaptionAnimation: "pop",
 };
 
 export default function SettingsPage() {
@@ -187,6 +187,7 @@ export default function SettingsPage() {
                   onChange={(e) => updateSetting("defaultCaptionStyle", e.target.value)}
                   className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
                 >
+                  <option value="classic">Classic (Original Clip Robin word-by-word)</option>
                   <option value="robin">Robin (Signature viral all-caps)</option>
                   <option value="punch">Punch (High-impact Anton all-caps)</option>
                   <option value="clean">Clean (Minimalist Montserrat Bold)</option>

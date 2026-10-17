@@ -106,11 +106,15 @@ ClipRobin/
 │   │   ├── __init__.py
 │   │   └── main.py               # FastAPI app definition, CORS, router mounting
 │   ├── assets/
+│   │   ├── caption_preview/      # Fixed word-timing fixture for preview renders
 │   │   └── fonts/                # Bundled OFL fonts (Montserrat, Anton, Poppins, Noto Sans)
-│   ├── tests/                    # Automated pytest suite (95 unit & integration tests)
+│   ├── scripts/
+│   │   └── build_caption_previews.py # Build-time 360x640 moving preview & poster generator
+│   ├── tests/                    # Automated pytest suite (97 unit & integration tests)
 │   │   ├── __init__.py
 │   │   ├── test_ai_analyzer.py
 │   │   ├── test_ass_captions.py
+│   │   ├── test_caption_previews.py
 │   │   ├── test_caption_styles.py
 │   │   ├── test_clip_generator.py
 │   │   ├── test_mock_analyzer.py
@@ -142,13 +146,18 @@ ClipRobin/
 │   │   ├── sidebar-nav.tsx       # Sidebar navigation links
 │   │   └── update-notice.tsx     # Tauri in-app auto-update banner
 │   ├── public/                   # Static icons and assets
+│   │   ├── caption-previews/     # Pre-rendered 360x640 MP4 moving previews, posters, manifest.json
 │   │   └── watermark.png         # Public fallback watermark asset
 │   ├── scripts/
 │   │   ├── __tests__/
 │   │   │   └── version-scripts.test.mjs # Manifest synchronization tests
 │   │   ├── check-version.mjs     # Asserts version synchronization across manifests
-│   │   └── set-version.mjs       # Sets version across package.json, Cargo.toml, tauri.conf
+│   │   ├── set-version.mjs       # Sets version across package.json, Cargo.toml, tauri.conf
+│   │   └── take_screenshots.mjs  # Playwright visual snapshot capture utility
 │   ├── src/
+│   │   ├── components/
+│   │   │   ├── caption-style-picker.tsx # Spacious responsive modal dialog for caption styles
+│   │   │   └── skeletons.tsx     # Loading skeletons for UI
 │   │   └── lib/
 │   │       └── api.ts            # Typed HTTP client & Tauri IPC bridge
 │   ├── src-tauri/
@@ -414,19 +423,30 @@ projects/
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Full multi-platform icon generation via `tauri icon` from master 1024×1024 icon. NSIS installer configured with custom `installerIcon`, `headerImage` (150×57), and `sidebarImage` (164×314). Transparent bird logo-mark SVG embedded in sidebar navigation header. PyInstaller packaged with `--windowed --icon backend/icon.ico` to prevent terminal flashing and show brand icon in Windows Task Manager.
 
+#### 25. Restored Classic Caption Pipeline & Moving Previews Modal Picker (v0.1.18+) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/services/caption_styles.py`, `backend/app/services/video_editor.py`, `backend/scripts/build_caption_previews.py`, `backend/assets/caption_preview/demo_words.json`, `backend/tests/test_caption_previews.py`, `frontend/public/caption-previews/`, `frontend/src/components/caption-style-picker.tsx`, `frontend/app/page.tsx`, `frontend/app/settings/page.tsx`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Feature**:
+  - **Restored "Classic" Look**: Reinstated original word-by-word highlighted captions with yellow active word and semi-transparent black background box (`box=1:boxcolor=black@0.55:boxborderw=10`, `fontcolor=yellow`, `fontsize=34`). Built on the legacy `drawtext` pipeline with identical output (bypasses ASS filter). Animation chips are disabled for Classic with tooltip: *"Classic uses its own highlight"*. Default caption style across app and settings defaults to `"classic"`.
+  - **Pre-rendered Moving Previews**: Developer/build-time generator (`backend/scripts/build_caption_previews.py`) renders 26 style x animation combinations at 720x1280 using production video editor, downscales to 360x640 MP4 (CRF 28, faststart, no audio) + JPG posters (quality 80) + `manifest.json`. Total size for all 26 previews is only 0.42 MB (well within 10 MB limit). Stored statically in `frontend/public/caption-previews/` and bundled into desktop distribution without runtime rendering overhead on app launch.
+  - **Manifest Freshness Test**: `test_caption_previews_manifest_matches_registry` in `backend/tests/test_caption_previews.py` validates SHA256 hashes of all style definitions and allowed animations, enforcing build-time generation.
+  - **Compact Summary Dashboard Row**: Replaced cramped cards with a compact summary row featuring a small 9:16 poster thumbnail, "Caption style: <Name> · <Animation>", and a "Change" button.
+  - **Spacious Caption Style Picker Modal**: Accessible modal (`CaptionStylePicker`) with responsive 3-column (>=1100px) and 2-column (<1100px) grid, looping `<video>` previews with poster fallback, IntersectionObserver pause on scroll-out, `prefers-reduced-motion` play/pause toggle, interactive Safe Zones overlay toggle (7-24% top reserved, 20% bottom platform UI), keyboard navigation (`ArrowLeft`/`ArrowRight`/`Escape`), brand palette only, and zero "AI" wording.
+- **Tests**: `backend/tests/test_caption_previews.py`, `backend/tests/test_caption_styles.py`, `backend/tests/test_clip_generator.py::test_create_clip_classic_drawtext_regression`, and Playwright screenshots captured at 1280x800 and 960x640.
+
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **73 tests** across 12 test suites in `backend/tests/` (All 73 passing via `pytest`).
+- **Active Backend Automated Tests**: **97 tests** across 15 test suites in `backend/tests/` (All 97 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (73 Implemented & Passing)
+### Backend Test Inventory (97 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
@@ -442,6 +462,9 @@ projects/
 | **`app.routes.clips`** | `tests/test_routes_clips.py` | ✅ Passed | • Validates `clip_duration_seconds` in `{15, 30, 60, 90}`.<br>• Rejects duplicate concurrent clip generation for same project (409).<br>• Returns 404 for nonexistent projects and missing downloads.<br>• Accepts `show_watermark` query parameter for clip generation.<br>• `POST` and `DELETE /api/projects/{id}/clips/{clip_id}/top-line` endpoints burn and clear top lines.<br>• Evicts completed generation jobs when capacity exceeds limit.<br>• Returns 404 when saving nonexistent clip with dialog.<br>• Returns cancelled status when user cancels native save dialog.<br>• Exports clip to chosen location on save dialog confirmation.<br>• Exports all clips ZIP to chosen location on save dialog confirmation. |
 | **`app.routes.projects`** | `tests/test_routes_projects.py` | ✅ Passed | • Lists all projects with source format metadata.<br>• Deletes project directories and cleans up locks.<br>• Aborts active background jobs before directory deletion. |
 | **`app.routes.analysis`** | `tests/test_routes_analysis.py` | ✅ Passed | • Validates analysis payload.<br>• Integrates mock and AI analyzers with transcript storage. |
+| **`app.services.caption_styles`** | `tests/test_caption_styles.py` | ✅ Passed | • Style registry contains 6 styles (classic, robin, clean, punch, pill, karaoke).<br>• Animation constraints, defaults, and fallback handling.<br>• Default style resolves to `classic`. |
+| **`app.services.ass_captions`** | `tests/test_ass_captions.py` | ✅ Passed | • Compiles ASS script with PlayResX/Y 720x1280.<br>• Word chunking and safe positioning.<br>• Karaoke centisecond timing tags and animation override tags. |
+| **`scripts.build_caption_previews`** | `tests/test_caption_previews.py` | ✅ Passed | • Validates manifest items match all styles & allowed animations.<br>• Asserts 26 MP4s and 26 JPG posters exist and are non-empty.<br>• Enforces SHA256 freshness against style definitions.<br>• Enforces total assets <= 10 MB ceiling (currently 0.42 MB). |
 
 ---
 

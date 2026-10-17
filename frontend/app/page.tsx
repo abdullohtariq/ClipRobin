@@ -20,58 +20,12 @@ import {
   transcribeVideo,
 } from "@/src/lib/api";
 import { RecentProjectSkeletonItem } from "@/src/components/skeletons";
-
-const CAPTION_STYLES_CONFIG = [
-  {
-    id: "clean" as CaptionStyle,
-    name: "Clean",
-    font: "Montserrat Bold",
-    description: "Minimalist typography with soft shadow",
-    defaultAnimation: "fade" as CaptionAnimation,
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"] as CaptionAnimation[],
-  },
-  {
-    id: "punch" as CaptionStyle,
-    name: "Punch",
-    font: "Anton",
-    description: "Bold impact all-caps with golden accent pop",
-    defaultAnimation: "pop" as CaptionAnimation,
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"] as CaptionAnimation[],
-  },
-  {
-    id: "robin" as CaptionStyle,
-    name: "Robin",
-    font: "Montserrat Black",
-    description: "Signature viral all-caps with emerald highlight",
-    badge: "DEFAULT",
-    defaultAnimation: "grow" as CaptionAnimation,
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"] as CaptionAnimation[],
-  },
-  {
-    id: "pill" as CaptionStyle,
-    name: "Pill",
-    font: "Poppins Bold",
-    description: "Translucent dark box with active pop",
-    defaultAnimation: "pop" as CaptionAnimation,
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"] as CaptionAnimation[],
-  },
-  {
-    id: "karaoke" as CaptionStyle,
-    name: "Karaoke",
-    font: "Montserrat Bold",
-    description: "Phrase sweep fill across words",
-    defaultAnimation: "sweep" as CaptionAnimation,
-    allowedAnimations: ["pop", "grow", "sweep", "fade", "glide"] as CaptionAnimation[],
-  },
-];
-
-const ANIMATION_CHIPS: { id: CaptionAnimation; name: string; description: string }[] = [
-  { id: "pop", name: "Pop", description: "Bouncy active word entry" },
-  { id: "grow", name: "Grow", description: "Smooth scale and accent highlight" },
-  { id: "sweep", name: "Sweep", description: "Karaoke sweep across the phrase" },
-  { id: "fade", name: "Fade", description: "Subtle clean fade in" },
-  { id: "glide", name: "Glide", description: "Smooth upward rise and fade" },
-];
+import {
+  CaptionStylePicker,
+  CAPTION_STYLE_OPTIONS,
+  ANIMATION_OPTIONS,
+  getPreviewUrls,
+} from "@/src/components/caption-style-picker";
 
 type VideoProcessingProgress = {
   kind: "transcription" | "generation" | "complete" | "failed";
@@ -94,8 +48,9 @@ export default function Home() {
   const [clipDurationSeconds, setClipDurationSeconds] = useState<15 | 30 | 60 | 90>(30);
   const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("robin");
-  const [captionAnimation, setCaptionAnimation] = useState<CaptionAnimation>("grow");
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
+  const [captionAnimation, setCaptionAnimation] = useState<CaptionAnimation>("pop");
+  const [isCaptionPickerOpen, setIsCaptionPickerOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -104,7 +59,7 @@ export default function Home() {
         setFramingMode(savedFraming as FramingMode);
       }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
-      if (savedStyle && ["clean", "punch", "robin", "pill", "karaoke", "classic", "bold_emerald", "clean_gold"].includes(savedStyle)) {
+      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
         setCaptionStyle(savedStyle as CaptionStyle);
       } else {
         const stored = localStorage.getItem("cliprobin.settings");
@@ -128,18 +83,21 @@ export default function Home() {
     } catch {}
   };
 
-  const handleCaptionStyleChange = (styleId: CaptionStyle) => {
+  const handleCaptionStyleChange = (styleId: CaptionStyle, animId?: CaptionAnimation) => {
     setCaptionStyle(styleId);
     try {
       localStorage.setItem("cliprobin_caption_style", styleId);
     } catch {}
-    const found = CAPTION_STYLES_CONFIG.find((s) => s.id === styleId);
-    if (found && !found.allowedAnimations.includes(captionAnimation)) {
-      setCaptionAnimation(found.defaultAnimation);
-      try {
-        localStorage.setItem("cliprobin_caption_animation", found.defaultAnimation);
-      } catch {}
-    }
+    const chosenAnim = animId || (styleId === "classic" ? "pop" : captionAnimation);
+    const found = CAPTION_STYLE_OPTIONS.find((s) => s.id === styleId);
+    const finalAnim =
+      found && !found.allowedAnimations.includes(chosenAnim)
+        ? found.defaultAnimation
+        : chosenAnim;
+    setCaptionAnimation(finalAnim);
+    try {
+      localStorage.setItem("cliprobin_caption_animation", finalAnim);
+    } catch {}
   };
 
   const handleCaptionAnimationChange = (animId: CaptionAnimation) => {
@@ -148,6 +106,12 @@ export default function Home() {
       localStorage.setItem("cliprobin_caption_animation", animId);
     } catch {}
   };
+
+  const activeStyleOption =
+    CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle) || CAPTION_STYLE_OPTIONS[0];
+  const activeAnimOption =
+    ANIMATION_OPTIONS.find((a) => a.id === captionAnimation) || ANIMATION_OPTIONS[0];
+  const previewUrls = getPreviewUrls(captionStyle, captionAnimation);
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
   const [transcriptionProgress, setTranscriptionProgress] = useState<VideoProcessingProgress | null>(null);
@@ -1124,245 +1088,49 @@ export default function Home() {
 
               {/* Caption Style Visual Selector */}
               {showCaptions && (
-                <div className="space-y-4 pt-1 transition-all duration-200">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-medium text-zinc-400">
-                      Caption style
-                    </label>
-                    <span className="text-[11px] text-zinc-500 font-normal">
-                      Visual preview
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3" role="radiogroup" aria-label="Caption style">
-                    {/* Style 1: Clean */}
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={captionStyle === "clean" || captionStyle === "clean_gold"}
-                      disabled={isProcessingVideo}
-                      onClick={() => handleCaptionStyleChange("clean")}
-                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                        captionStyle === "clean" || captionStyle === "clean_gold"
-                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                      }`}
-                    >
-                      <div className="relative mb-2.5 flex h-20 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
-                        <div className="relative z-10 flex items-baseline gap-1.5 font-bold text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]">
-                          <span className="text-[11px] tracking-normal">Stay</span>
-                          <span className="text-[12px] tracking-normal text-white">focused</span>
-                          <span className="text-[11px] tracking-normal">daily</span>
-                        </div>
+                <div className="space-y-2 pt-1 transition-all duration-200">
+                  <label className="block text-xs font-medium text-zinc-400">
+                    Caption style
+                  </label>
+                  <div className="flex items-center justify-between rounded-[12px] border border-[#232326] bg-[#0a0a0a] p-3 transition-all duration-150 hover:border-zinc-700">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="relative aspect-[9/16] w-9 h-16 shrink-0 overflow-hidden rounded-md border border-[#232326] bg-black">
+                        <img
+                          src={previewUrls.posterUrl}
+                          alt={`${activeStyleOption.name} caption preview`}
+                          className="size-full object-cover"
+                        />
                       </div>
-                      <div className="w-full text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <span className={`text-xs font-semibold ${(captionStyle === "clean" || captionStyle === "clean_gold") ? "text-white" : "text-zinc-300"}`}>
-                            Clean
-                          </span>
-                          {(captionStyle === "clean" || captionStyle === "clean_gold") && (
-                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                              ✓
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 text-[10px] text-zinc-400">
-                          Minimalist typography
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">
+                          Caption style: {activeStyleOption.name} · {captionStyle === "classic" ? "Pop" : activeAnimOption.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-zinc-400 line-clamp-1">
+                          {activeStyleOption.description}
                         </p>
                       </div>
-                    </button>
-
-                    {/* Style 2: Punch */}
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={captionStyle === "punch"}
-                      disabled={isProcessingVideo}
-                      onClick={() => handleCaptionStyleChange("punch")}
-                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                        captionStyle === "punch"
-                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                      }`}
-                    >
-                      <div className="relative mb-2.5 flex h-20 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
-                        <div className="relative z-10 flex items-baseline gap-1.5 font-black uppercase tracking-tight">
-                          <span className="text-[11px] text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">HIGH</span>
-                          <span className="text-[13px] text-[#F7C204] drop-shadow-[0_0_8px_rgba(247,194,4,0.6)] drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] scale-110 transform transition-transform">IMPACT</span>
-                          <span className="text-[11px] text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">REACH</span>
-                        </div>
-                      </div>
-                      <div className="w-full text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <span className={`text-xs font-semibold ${captionStyle === "punch" ? "text-white" : "text-zinc-300"}`}>
-                            Punch
-                          </span>
-                          {captionStyle === "punch" && (
-                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                              ✓
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 text-[10px] text-amber-400 font-medium">
-                          Bold all-caps &amp; gold
-                        </p>
-                      </div>
-                    </button>
-
-                    {/* Style 3: Robin (Default) */}
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={captionStyle === "robin" || captionStyle === "classic" || captionStyle === "bold_emerald"}
-                      disabled={isProcessingVideo}
-                      onClick={() => handleCaptionStyleChange("robin")}
-                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                        captionStyle === "robin" || captionStyle === "classic" || captionStyle === "bold_emerald"
-                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                      }`}
-                    >
-                      <div className="absolute -top-2 right-2 z-10 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 px-1.5 py-0.5 text-[9px] font-bold text-zinc-950 shadow-md">
-                        DEFAULT
-                      </div>
-                      <div className="relative mb-2.5 flex h-20 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
-                        <div className="absolute inset-0 bg-radial from-emerald-950/20 to-transparent pointer-events-none" />
-                        <div className="relative z-10 flex items-baseline gap-1.5 font-black uppercase tracking-tight">
-                          <span className="text-[11px] text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">CLIP</span>
-                          <span className="text-[13px] text-[#34D399] drop-shadow-[0_0_10px_rgba(52,211,153,0.7)] drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] scale-110 transform transition-transform">VIRAL</span>
-                          <span className="text-[11px] text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">MOMENTS</span>
-                        </div>
-                      </div>
-                      <div className="w-full text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <span className={`text-xs font-semibold ${(captionStyle === "robin" || captionStyle === "classic" || captionStyle === "bold_emerald") ? "text-white" : "text-zinc-300"}`}>
-                            Robin
-                          </span>
-                          {(captionStyle === "robin" || captionStyle === "classic" || captionStyle === "bold_emerald") && (
-                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                              ✓
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 text-[10px] text-emerald-400 font-medium">
-                          Signature viral emerald
-                        </p>
-                      </div>
-                    </button>
-
-                    {/* Style 4: Pill */}
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={captionStyle === "pill"}
-                      disabled={isProcessingVideo}
-                      onClick={() => handleCaptionStyleChange("pill")}
-                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                        captionStyle === "pill"
-                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                      }`}
-                    >
-                      <div className="relative mb-2.5 flex h-20 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
-                        <div className="relative z-10 flex items-baseline gap-1.5 rounded-[7px] bg-black/75 px-2.5 py-1 border border-white/10 shadow-md backdrop-blur-xs">
-                          <span className="text-[11px] font-bold text-white tracking-wide">Catch</span>
-                          <span className="text-[12px] font-extrabold text-[#34D399] tracking-wide drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)] scale-110 transform transition-transform">every</span>
-                          <span className="text-[11px] font-bold text-white tracking-wide">moment</span>
-                        </div>
-                      </div>
-                      <div className="w-full text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <span className={`text-xs font-semibold ${captionStyle === "pill" ? "text-white" : "text-zinc-300"}`}>
-                            Pill
-                          </span>
-                          {captionStyle === "pill" && (
-                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                              ✓
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 text-[10px] text-zinc-400">
-                          Translucent dark box
-                        </p>
-                      </div>
-                    </button>
-
-                    {/* Style 5: Karaoke */}
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={captionStyle === "karaoke"}
-                      disabled={isProcessingVideo}
-                      onClick={() => handleCaptionStyleChange("karaoke")}
-                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                        captionStyle === "karaoke"
-                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                      }`}
-                    >
-                      <div className="relative mb-2.5 flex h-20 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
-                        <div className="relative z-10 flex items-baseline gap-1.5 font-bold tracking-normal drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
-                          <span className="text-[11px] text-[#34D399]">Sing</span>
-                          <span className="text-[12px] text-[#34D399] font-extrabold">along</span>
-                          <span className="text-[11px] text-white/90">smooth</span>
-                        </div>
-                      </div>
-                      <div className="w-full text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <span className={`text-xs font-semibold ${captionStyle === "karaoke" ? "text-white" : "text-zinc-300"}`}>
-                            Karaoke
-                          </span>
-                          {captionStyle === "karaoke" && (
-                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                              ✓
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 text-[10px] text-zinc-400">
-                          Phrase sweep fill
-                        </p>
-                      </div>
-                    </button>
-                  </div>
-
-                  {/* Animation Effect Selector Chips */}
-                  <div className="rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3.5 space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-medium text-zinc-400">
-                        Animation effect
-                      </label>
-                      <span className="text-[11px] text-zinc-500 font-normal">
-                        Word highlight motion
-                      </span>
                     </div>
-                    <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Caption animation effect">
-                      {ANIMATION_CHIPS.map((anim) => {
-                        const isSelected = captionAnimation === anim.id;
-                        return (
-                          <button
-                            key={anim.id}
-                            type="button"
-                            role="radio"
-                            aria-checked={isSelected}
-                            disabled={isProcessingVideo}
-                            onClick={() => handleCaptionAnimationChange(anim.id)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all duration-150 border focus:outline-none focus:ring-1 focus:ring-[#10b981] ${
-                              isSelected
-                                ? "border-[#10b981] bg-[#10b981]/15 text-emerald-400 font-semibold ring-1 ring-[#10b981]/40"
-                                : "border-[#232326] bg-[#111113] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
-                            }`}
-                          >
-                            <span>{anim.name}</span>
-                            {isSelected && (
-                              <span className="size-1.5 rounded-full bg-emerald-400" />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <button
+                      type="button"
+                      disabled={isProcessingVideo}
+                      onClick={() => setIsCaptionPickerOpen(true)}
+                      className="shrink-0 px-3.5 py-1.5 rounded-lg border border-[#232326] bg-[#111113] text-xs font-medium text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-colors duration-150 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                    >
+                      Change
+                    </button>
                   </div>
                 </div>
               )}
+
+              <CaptionStylePicker
+                isOpen={isCaptionPickerOpen}
+                onClose={() => setIsCaptionPickerOpen(false)}
+                selectedStyle={captionStyle}
+                selectedAnimation={captionAnimation}
+                onSelect={(style, anim) => {
+                  handleCaptionStyleChange(style, anim);
+                }}
+              />
 
               {/* Watermark Toggle Switch */}
               <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-4 transition-all duration-150">
