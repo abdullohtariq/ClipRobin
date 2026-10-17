@@ -75,6 +75,8 @@ const ProClipCard = memo(function ProClipCard({
   const [topLineInput, setTopLineInput] = useState(clip.top_line || "");
   const [isSavingTopLine, setIsSavingTopLine] = useState(false);
   const [topLineError, setTopLineError] = useState("");
+  const [hasVideoError, setHasVideoError] = useState(false);
+  const hasStartedRef = useRef(false);
 
   const isTrue916 = clip.framing_mode === "true_9_16";
   const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
@@ -138,6 +140,10 @@ const ProClipCard = memo(function ProClipCard({
       setIsPlaying(false);
     } else {
       onPlay(clip.id);
+      if (!hasStartedRef.current) {
+        video.currentTime = 0;
+        hasStartedRef.current = true;
+      }
       video.play().then(() => setIsPlaying(true)).catch(() => {});
     }
   };
@@ -288,7 +294,16 @@ const ProClipCard = memo(function ProClipCard({
         onClick={() => onOpenModal(clip)}
         className="relative aspect-[9/16] w-full rounded-xl overflow-hidden bg-black border border-zinc-800/80 cursor-pointer group/player shadow-inner"
       >
-        {mediaUrls && isInView ? (
+        {hasVideoError ? (
+          <div className="size-full flex flex-col items-center justify-center bg-zinc-950 text-zinc-500 p-4 text-center">
+            <svg className="size-6 text-zinc-600 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span className="text-[11px] text-zinc-400 font-medium">Clip unavailable</span>
+          </div>
+        ) : mediaUrls && isInView ? (
           <video
             ref={videoRef}
             src={mediaUrls.clip}
@@ -298,9 +313,20 @@ const ProClipCard = memo(function ProClipCard({
               if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
             }}
             onLoadedMetadata={() => {
-              if (videoRef.current) setDuration(videoRef.current.duration);
+              if (videoRef.current) {
+                setDuration(videoRef.current.duration);
+                if (videoRef.current.currentTime === 0 && videoRef.current.duration > 0.3) {
+                  videoRef.current.currentTime = Math.min(1.0, videoRef.current.duration / 3);
+                }
+              }
             }}
-            onEnded={() => setIsPlaying(false)}
+            onError={() => {
+              setHasVideoError(true);
+            }}
+            onEnded={() => {
+              setIsPlaying(false);
+              hasStartedRef.current = false;
+            }}
             className="size-full object-cover"
           />
         ) : (
@@ -626,7 +652,10 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         if (!isCurrentRequest) return;
         setIsLoading(false);
         const currentClips =
-          job?.ready_clips && job.ready_clips.length > result.clips.length
+          job?.status !== "cancelled" &&
+          job?.status !== "failed" &&
+          job?.ready_clips &&
+          job.ready_clips.length > result.clips.length
             ? job.ready_clips
             : result.clips;
         setClips(currentClips);
@@ -683,7 +712,12 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         showCaptions,
         (job) => {
           setGenerationProgress(job);
-          if (job.ready_clips && job.ready_clips.length > 0) {
+          if (
+            job.status !== "cancelled" &&
+            job.status !== "failed" &&
+            job.ready_clips &&
+            job.ready_clips.length > 0
+          ) {
             setClips(job.ready_clips);
           }
         },
@@ -713,6 +747,10 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       );
     } catch (err) {
       setStatus(err instanceof Error ? err.message : "Clip generation failed");
+      try {
+        const diskClips = await getClips(projectId);
+        setClips(diskClips.clips);
+      } catch {}
     } finally {
       setGenerating(false);
     }

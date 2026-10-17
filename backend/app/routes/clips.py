@@ -112,6 +112,8 @@ def finish_cancelled_job(job_id: str, project_id: str) -> None:
                 "status": "failed",
                 "step": "Cancellation cleanup failed",
                 "error": str(error) or error.__class__.__name__,
+                "ready_clips": [],
+                "completed_clips": 0,
             })
             CANCEL_EVENTS.pop(job_id, None)
         return
@@ -119,6 +121,8 @@ def finish_cancelled_job(job_id: str, project_id: str) -> None:
         GENERATION_JOBS[job_id].update({
             "status": "cancelled",
             "step": "Cancelled; generated clips removed",
+            "ready_clips": [],
+            "completed_clips": 0,
         })
         CANCEL_EVENTS.pop(job_id, None)
         evict_old_generation_jobs()
@@ -287,6 +291,8 @@ def run_clip_generation(
                 "status": "failed",
                 "step": "Clip generation failed",
                 "error": str(error) or error.__class__.__name__,
+                "ready_clips": [],
+                "completed_clips": 0,
             })
             CANCEL_EVENTS.pop(job_id, None)
             evict_old_generation_jobs()
