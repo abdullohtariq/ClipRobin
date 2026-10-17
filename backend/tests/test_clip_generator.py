@@ -453,4 +453,129 @@ def test_create_clip_true_9_16_audio_mapping_with_watermark(tmp_path: Path, monk
     assert "libmp3lame" in captured_command
 
 
+def test_generate_rounded_corner_mask_16_9(tmp_path: Path):
+    from app.services.video_editor import _generate_rounded_corner_mask
+    from PIL import Image
+
+    mask_path = _generate_rounded_corner_mask(
+        tmp_path,
+        width=672,
+        height=378,
+        radius=28,
+        filename="rounded-mask-16-9.png",
+    )
+    assert mask_path.is_file()
+    assert mask_path.name == "rounded-mask-16-9.png"
+
+    with Image.open(mask_path) as img:
+        assert img.size == (672, 378)
+        # Center should be fully opaque (255)
+        assert img.getpixel((336, 189)) == 255
+        # Outer corner (0, 0) should be transparent/black (0)
+        assert img.getpixel((0, 0)) == 0
+
+
+def test_create_clip_standard_16_9_rounded_framing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import create_clip
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"dummy")
+    output = tmp_path / "output.mp4"
+
+    monkeypatch.setattr("app.services.video_editor.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: True)
+    monkeypatch.setattr("app.services.video_editor.find_watermark_file", lambda: None)
+
+    captured_command = []
+    captured_filter_content = []
+
+    class MockProcess:
+        returncode = 0
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def mock_popen(cmd, *args, **kwargs):
+        captured_command.extend(cmd)
+        cwd = kwargs.get("cwd")
+        if cwd and (Path(cwd) / "filter-complex.txt").is_file():
+            captured_filter_content.append((Path(cwd) / "filter-complex.txt").read_text(encoding="utf-8"))
+        output.write_bytes(b"rendered")
+        return MockProcess()
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+
+    create_clip(
+        source_path=source,
+        output_path=output,
+        start_time=0.0,
+        end_time=5.0,
+        framing_mode="standard",
+    )
+
+    # Standard mode now uses 16:9 rounded corners with filter_complex
+    assert "-/filter_complex" in captured_command
+    assert "-map" in captured_command
+    assert "[v]" in captured_command
+    assert "0:a?" in captured_command
+    assert "libmp3lame" in captured_command
+
+    # Check filter content includes 16:9 scale and rounded mask
+    assert len(captured_filter_content) == 1
+    filter_text = captured_filter_content[0]
+    assert "scale=672:378" in filter_text
+    assert "rounded-mask-16-9.png" in filter_text
+    assert "alphamerge" in filter_text
+    assert "overlay=x=(W-w)/2:y=(H-h)/2" in filter_text
+
+
+def test_create_clip_standard_16_9_rounded_framing_with_watermark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import create_clip
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"dummy")
+    output = tmp_path / "output.mp4"
+    watermark = tmp_path / "watermark.png"
+    watermark.write_bytes(b"dummy_wm")
+
+    monkeypatch.setattr("app.services.video_editor.find_ffmpeg", lambda: "ffmpeg")
+    monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: True)
+    monkeypatch.setattr("app.services.video_editor.find_watermark_file", lambda: watermark)
+
+    captured_command = []
+    captured_filter_content = []
+
+    class MockProcess:
+        returncode = 0
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def mock_popen(cmd, *args, **kwargs):
+        captured_command.extend(cmd)
+        cwd = kwargs.get("cwd")
+        if cwd and (Path(cwd) / "filter-complex.txt").is_file():
+            captured_filter_content.append((Path(cwd) / "filter-complex.txt").read_text(encoding="utf-8"))
+        output.write_bytes(b"rendered")
+        return MockProcess()
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+
+    create_clip(
+        source_path=source,
+        output_path=output,
+        start_time=0.0,
+        end_time=5.0,
+        show_watermark=True,
+        framing_mode="standard",
+    )
+
+    assert "-/filter_complex" in captured_command
+    assert "-map" in captured_command
+    assert "[v]" in captured_command
+    assert "0:a?" in captured_command
+    assert len(captured_filter_content) == 1
+    assert "rounded-mask-16-9.png" in captured_filter_content[0]
+    assert "scale=240:-2[wm]" in captured_filter_content[0]
+
+
+
 

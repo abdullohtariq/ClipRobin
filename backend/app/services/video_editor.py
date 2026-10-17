@@ -10,17 +10,24 @@ from PIL import Image, ImageDraw, ImageFont
 
 def _generate_rounded_corner_mask(
     destination_directory: Path,
-    size: int = 660,
+    size: int | None = None,
+    width: int = 660,
+    height: int = 660,
     radius: int = 36,
+    filename: str = "rounded-mask.png",
 ) -> Path:
-    mask_file = destination_directory / "rounded-mask.png"
+    if size is not None:
+        width = size
+        height = size
+    mask_file = destination_directory / filename
     scale = 4
-    high_size = size * scale
+    high_w = width * scale
+    high_h = height * scale
     high_radius = radius * scale
-    img = Image.new("L", (high_size, high_size), 0)
+    img = Image.new("L", (high_w, high_h), 0)
     draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((0, 0, high_size, high_size), radius=high_radius, fill=255)
-    img = img.resize((size, size), Image.Resampling.LANCZOS)
+    draw.rounded_rectangle((0, 0, high_w, high_h), radius=high_radius, fill=255)
+    img = img.resize((width, height), Image.Resampling.LANCZOS)
     img.save(mask_file)
     return mask_file
 
@@ -368,6 +375,21 @@ def _build_filter_graph(
         base_filter = (
             "crop=w=min(iw\\,ih*9/16):h=ih:x=(iw-ow)/2:y=0,scale=720:1280,format=yuv420p"
         )
+    elif subtitle_directory is not None:
+        _generate_rounded_corner_mask(
+            subtitle_directory,
+            width=672,
+            height=378,
+            radius=28,
+            filename="rounded-mask-16-9.png",
+        )
+        base_filter = (
+            "color=c=black:s=720x1280:r=30[bg];"
+            "[0:v]scale=672:378:force_original_aspect_ratio=increase,crop=672:378,format=yuva420p[card];"
+            "movie=rounded-mask-16-9.png:loop=0,setpts=N/FRAME_RATE/TB[mask];"
+            "[card][mask]alphamerge[rounded];"
+            "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
+        )
     else:
         base_filter = (
             "scale=720:1280:force_original_aspect_ratio=decrease,"
@@ -638,96 +660,91 @@ def create_clip(
                     "+faststart",
                     str(output_path),
                 ])
-            elif watermark_path and watermark_path.is_file():
-                # Watermark enabled: if top_line is present, position watermark higher up at 7% from top (Y=90)
-                # to leave ample breathing room above the top_line and prevent any overlap.
-                # If no top_line, position at standard 20% from top (Y=256).
-                wm_y = "round(H*0.07)" if (top_line and top_line.strip()) else "round(H*0.20)"
-                base_filter_complex = (
-                    "[0:v]scale=720:1280:force_original_aspect_ratio=decrease,"
-                    "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p[base];"
-                    "[1:v]scale=240:-2[wm];"
-                    f"[base][wm]overlay=(W-w)/2:{wm_y}"
+            else:
+                _generate_rounded_corner_mask(
+                    subtitle_directory,
+                    width=672,
+                    height=378,
+                    radius=28,
+                    filename="rounded-mask-16-9.png",
                 )
-                if all_text_filters:
-                    filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
+                bg_and_video = (
+                    "color=c=black:s=720x1280:r=30[bg];"
+                    "[0:v]scale=672:378:force_original_aspect_ratio=increase,crop=672:378,format=yuva420p[card];"
+                    "movie=rounded-mask-16-9.png:loop=0,setpts=N/FRAME_RATE/TB[mask];"
+                    "[card][mask]alphamerge[rounded];"
+                    "[bg][rounded]overlay=x=(W-w)/2:y=(H-h)/2:shortest=1,format=yuv420p"
+                )
+                if watermark_path and watermark_path.is_file():
+                    wm_y = "round(H*0.07)" if (top_line and top_line.strip()) else "round(H*0.20)"
+                    base_filter_complex = (
+                        f"{bg_and_video}[base];"
+                        f"[1:v]scale=240:-2[wm];"
+                        f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                    )
+                    if all_text_filters:
+                        filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
+                    else:
+                        filter_graph = base_filter_complex + "[v]"
+
+                    filter_script = subtitle_directory / "filter-complex.txt"
+                    filter_script.write_text(filter_graph, encoding="utf-8")
+
+                    command = [
+                        ffmpeg_path,
+                        "-y",
+                        "-ss",
+                        str(start_time),
+                        "-i",
+                        str(source_path),
+                        "-i",
+                        str(watermark_path),
+                        "-t",
+                        str(end_time - start_time),
+                        "-/filter_complex",
+                        filter_script.name,
+                        "-map",
+                        "[v]",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "medium",
+                        "-crf",
+                        "23",
+                    ]
                 else:
-                    filter_graph = base_filter_complex + "[v]"
+                    if all_text_filters:
+                        filter_graph = bg_and_video + "," + ",".join(all_text_filters) + "[v]"
+                    else:
+                        filter_graph = bg_and_video + "[v]"
 
-                filter_script = subtitle_directory / "filter-complex.txt"
-                filter_script.write_text(filter_graph, encoding="utf-8")
+                    filter_script = subtitle_directory / "filter-complex.txt"
+                    filter_script.write_text(filter_graph, encoding="utf-8")
 
-                command = [
-                    ffmpeg_path,
-                    "-y",
-                    "-ss",
-                    str(start_time),
-                    "-i",
-                    str(source_path),
-                    "-i",
-                    str(watermark_path),
-                    "-t",
-                    str(end_time - start_time),
-                    "-/filter_complex",
-                    filter_script.name,
-                    "-map",
-                    "[v]",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "medium",
-                    "-crf",
-                    "23",
-                ]
+                    command = [
+                        ffmpeg_path,
+                        "-y",
+                        "-ss",
+                        str(start_time),
+                        "-i",
+                        str(source_path),
+                        "-t",
+                        str(end_time - start_time),
+                        "-/filter_complex",
+                        filter_script.name,
+                        "-map",
+                        "[v]",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "medium",
+                        "-crf",
+                        "23",
+                    ]
                 if has_audio:
                     command.extend([
                         "-map",
                         "0:a?",
-                        "-c:a",
-                        "libmp3lame",
-                        "-b:a",
-                        "192k",
-                    ])
-                else:
-                    command.extend(["-an"])
-                command.extend([
-                    "-movflags",
-                    "+faststart",
-                    str(output_path),
-                ])
-            else:
-                base_filter = (
-                    "scale=720:1280:force_original_aspect_ratio=decrease,"
-                    "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
-                )
-                filter_graph = (
-                    base_filter + "," + ",".join(all_text_filters)
-                    if all_text_filters
-                    else base_filter
-                )
-                filter_script = subtitle_directory / "video-filters.txt"
-                filter_script.write_text(filter_graph, encoding="utf-8")
-
-                command = [
-                    ffmpeg_path,
-                    "-y",
-                    "-ss",
-                    str(start_time),
-                    "-i",
-                    str(source_path),
-                    "-t",
-                    str(end_time - start_time),
-                    "-/filter:v",
-                    filter_script.name,
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "medium",
-                    "-crf",
-                    "23",
-                ]
-                if has_audio:
-                    command.extend([
                         "-c:a",
                         "libmp3lame",
                         "-b:a",

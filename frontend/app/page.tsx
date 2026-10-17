@@ -809,7 +809,7 @@ export default function Home() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="radiogroup" aria-label="Video framing mode">
-                  {/* Option 1: Standard Vertical (Letterbox) */}
+                  {/* Option 1: 16:9 Rounded */}
                   <button
                     type="button"
                     role="radio"
@@ -827,8 +827,8 @@ export default function Home() {
                       {/* Subtle notch */}
                       <div className="absolute top-1 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-zinc-700" />
                       
-                      {/* 16:9 Letterbox video rectangle in center */}
-                      <div className="w-full h-8 rounded-[2px] bg-gradient-to-br from-zinc-700 via-zinc-600 to-zinc-700 flex items-center justify-center border border-zinc-600/50 shadow-sm">
+                      {/* 16:9 Rounded video rectangle in center */}
+                      <div className="w-full h-8 rounded-[6px] bg-gradient-to-br from-zinc-700 via-zinc-600 to-zinc-700 flex items-center justify-center border border-zinc-500/50 shadow-sm overflow-hidden">
                         <svg className="size-3 text-zinc-300" viewBox="0 0 24 24" fill="currentColor">
                           <path d="M8 5v14l11-7z" />
                         </svg>
@@ -844,7 +844,7 @@ export default function Home() {
                     <div className="w-full text-center">
                       <div className="flex items-center justify-center gap-1.5">
                         <span className={`text-xs font-semibold ${framingMode === "standard" ? "text-white" : "text-zinc-300"}`}>
-                          Standard
+                          16:9 Rounded
                         </span>
                         {framingMode === "standard" && (
                           <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
@@ -853,7 +853,7 @@ export default function Home() {
                         )}
                       </div>
                       <p className="mt-0.5 text-[10px] text-zinc-400">
-                        Classic 9:16 letterbox
+                        Classic 16:9 rounded
                       </p>
                     </div>
                   </button>
