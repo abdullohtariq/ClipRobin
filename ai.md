@@ -468,19 +468,67 @@ projects/
   - **Phase D — Caption Style Modal**: 2-pane modal dialog (`w-[min(1100px,94vw)] max-h-[min(88vh,900px)]`). Left pane with search input, category filter chips (`All`, `Bold`, `Minimal`, `Boxed`), and 16–18px typography sample cards on subtle checkered dark canvas. Right pane with sticky 9:16 looping video preview, subtle dashed platform safe zones (10% top, 20% bottom, 6% side guides without occluding text), safe zones remembered toggle via emerald `<Checkbox>`, and keyboard navigation (Arrow keys move selection, Enter confirms, Escape closes).
 - **Verification**: Next.js production build passing with 0 errors, all 97 backend pytest suites passing, Playwright visual captures verified at 2560×1080, 1280×800, and 960×640.
 
+#### 29. Full End-to-End Verification Report — Zero to Finish (2026-10-17) `[VERIFIED / 2 OPEN ITEMS]`
+- **Branch / commit**: `best-ui` = `ui-polish` @ `d076475`.
+- **Method**: A real 2-minute 4K (3840×2160) podcast sample, cut from `project_012/source.mp4`, was pushed through the live API exactly as the UI does: import → transcribe → generate in all 3 layouts → verify every output file → ZIP → cancel. The UI was then swept with headless Edge (Playwright) on every page at 4 window sizes. The test project (`project_020`) was deleted afterwards; no user projects were modified.
+
+**A. Static gates**
+
+| Check | Result |
+| :--- | :--- |
+| `pytest backend/tests` | ✅ 103 / 103 passed (3.6s) |
+| `npm run lint` | ✅ 0 errors, 2 warnings (`<img>` in `projects/page.tsx`, `caption-style-picker.tsx`; intentional for local thumbnails) |
+| `npm run build` (incl. TypeScript) | ✅ Compiled, 5 static routes |
+| `npm test` (node --test) | ✅ 2 / 2 passed |
+
+**B. Pipeline (live API, 120s 4K source, 15s clips, captions + watermark on)**
+
+| Stage | Result | Time | Longest progress stall |
+| :--- | :--- | :--- | :--- |
+| Import (`POST /api/local-video/from-path`) | ✅ project created | <1s | – |
+| Transcription | ✅ 5% → 100%, smooth | 18s | 4s |
+| Generate · 16:9 Rounded · Classic | ✅ 9 / 9 clips | 106s | 20s |
+| Generate · 1:1 Rounded · Robin | ✅ 9 / 9 clips | 69s | 10s |
+| Generate · True 9:16 · Punch | ✅ 9 / 9 clips; tracking 10% → 25% in 2% steps, then rendering 25% → 100% | 91s | 8s |
+| Download all (ZIP) | ✅ 18.7 MB, 9 entries | <15s | – |
+
+- **Output files (all 27)**: 720×1280, H.264 + audio, 10.2–14.6s, all ≤ the 15s limit. Every clip is served as `200 video/mp4` from `GET /api/projects/{id}/clips/{file}`.
+- **Black-screen check**: Average brightness (FFmpeg `signalstats` YAVG, 0–255) was sampled on every clip at t=0, t=1s, the midpoint and the end. Range: **79–156**, no frame below 79, so no black clips. This confirms the "black screen" in item 28's follow-up was the frontend (ghost cards plus the frame-0 poster), not the renderer.
+- **Visual spot check**: The 1:1 card is centred with rounded corners and the caption sits below it. True 9:16 is face-framed on the active speaker. The watermark ("I made this / check bio") sits top-right inside the platform-safe inset in every layout.
+- **The 15% stall is fixed**: True 9:16 tracking reported progress every ~2s with no gap over 8s (previously frozen at 15% on long sources).
+
+**C. Cancel path (ghost-card fix)**
+- Started a generation, waited for 2 rendered clips, then cancelled. Result: `status=cancelled`, files removed from disk, `GET /clips` returned 0, and the job now reports `ready_clips=0` / `completed_clips=0`.
+- ⚠️ **Gotcha found during the run**: the dev backend (`uvicorn` without `--reload`) was still running pre-fix code and returned `ready_clips=2` until it was restarted. **After pulling backend changes, always restart the backend.** The frontend guard in `clips/page.tsx` hides those cards even against an old backend.
+
+**D. UI sweep (Edge, 960×640 [Tauri minimum], 1280×720, 1920×1080, 2560×1080 × Dashboard / Clips / Clips-empty / Projects / Settings = 20 page loads)**
+
+| Check | Result |
+| :--- | :--- |
+| Horizontal scroll | ✅ None at any size |
+| Console errors / uncaught exceptions / HTTP ≥ 400 | ✅ None |
+| `<video>` elements in error state | ✅ 0 (3–12 lazy-loaded per viewport on the 57-clip project, never all 57) |
+| Clip thumbnails | ✅ Real frames (seek to `min(1s, duration/3)`), no black voids |
+| Cancelled / empty project (`project_017`) | ✅ Shows the "No clips generated yet" empty state, no ghost cards |
+| Regenerate CTA on Clips | ✅ Visible above the fold at all sizes |
+
+**E. Open items (not fixed in this pass)**
+1. **Text below 12px (violates the Phase A type-scale rule)**: 53 `text-[9–11px]` usages remain: `projects/page.tsx` (12), `page.tsx` (11), `caption-style-picker.tsx` (8), `clips/page.tsx` (7: card timecode, `#NN`/duration chips, error text), `live-moving-captions.tsx` (5), `job-progress.tsx` (5), plus 1 each in `segmented-control.tsx`, `badge.tsx`, `skeletons.tsx`, `clip-settings.tsx` and `layout.tsx`. The ones in `live-moving-captions.tsx` and the layout-card mockups are scaled depictions of the output and can stay small. The rest should move to `text-xs` (12px).
+2. **Dashboard shows another project's job**: When any generation is running (even for a different project), the dashboard CTA shows "Rendering clips (NN%)…" and is locked. The helper text underneath still says "Select a local file or YouTube link to start." Fix: name the project in the button or status ("Rendering project_020 · 56%") with a link to its Clips page, and hide the contradictory helper text while a job runs.
+
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **97 tests** across 15 test suites in `backend/tests/` (All 97 passing via `pytest`).
+- **Active Backend Automated Tests**: **103 tests** across 15 test suites in `backend/tests/` (All 103 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (97 Implemented & Passing)
+### Backend Test Inventory (103 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
@@ -500,7 +548,7 @@ projects/
 | **`app.services.ass_captions`** | `tests/test_ass_captions.py` | ✅ Passed | • Compiles ASS script with PlayResX/Y 720x1280.<br>• Word chunking and safe positioning.<br>• Karaoke centisecond timing tags and animation override tags. |
 | **`scripts.build_caption_previews`** | `tests/test_caption_previews.py` | ✅ Passed | • Validates manifest items match all styles & allowed animations.<br>• Asserts 26 MP4s and 26 JPG posters exist and are non-empty.<br>• Enforces SHA256 freshness against style definitions.<br>• Enforces total assets <= 10 MB ceiling (currently 0.42 MB). |
 
----
+--- 
 
 ### Frontend Test Inventory (38 Missing Tests)
 
