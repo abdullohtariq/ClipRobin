@@ -119,3 +119,4 @@ def test_list_caption_styles():
         assert "allowed_animations" in s
         assert "allowed_animations_detail" in s
         assert len(s["allowed_animations_detail"]) == len(s["allowed_animations"])
+

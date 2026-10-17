@@ -13,3 +13,4 @@ router = APIRouter(prefix="/api/caption-styles", tags=["caption-styles"])
 def get_caption_styles_endpoint() -> list[dict[str, Any]]:
     """Return the list of available caption styles and their allowed animations."""
     return list_caption_styles()
+

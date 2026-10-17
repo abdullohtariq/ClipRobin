@@ -114,18 +114,35 @@ def find_watermark_file() -> Path | None:
     if env_path and Path(env_path).is_file():
         return Path(env_path).resolve()
 
+    # Support PyInstaller frozen bundle
+    import sys
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        meipass = Path(sys._MEIPASS)
+        meipass_candidates = [
+            meipass / "assets" / "clip_robin_watermark.png",
+            meipass / "clip_robin_watermark.png",
+            meipass / "assets" / "watermark.png",
+            meipass / "watermark.png",
+        ]
+        for candidate in meipass_candidates:
+            if candidate.is_file():
+                return candidate.resolve()
+
     root = Path(__file__).resolve().parents[3]
+    backend_assets = Path(__file__).resolve().parents[2] / "assets"
     candidates = [
-        root / "watermark.png",
         root / "clip_robin_watermark.png",
+        backend_assets / "clip_robin_watermark.png",
+        root / "watermark.png",
         root / "frontend" / "public" / "watermark.png",
-        Path("watermark.png").resolve(),
         Path("clip_robin_watermark.png").resolve(),
+        Path("watermark.png").resolve(),
     ]
     for candidate in candidates:
         if candidate.is_file():
             return candidate.resolve()
     return None
+
 
 
 def _copy_font_file(destination_directory: Path) -> str | None:

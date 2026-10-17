@@ -156,3 +156,4 @@ def test_stage_caption_fonts(tmp_path: Path):
     assert (fonts_dir / "Montserrat-Bold.ttf").is_file()
     assert (fonts_dir / "Anton-Regular.ttf").is_file()
     assert (fonts_dir / "Poppins-Bold.ttf").is_file()
+

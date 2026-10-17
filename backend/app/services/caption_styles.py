@@ -254,3 +254,4 @@ def list_caption_styles() -> list[dict[str, Any]]:
         ]
         styles.append(data)
     return styles
+
