@@ -72,6 +72,7 @@ export type Clip = {
   file: string;
   top_line?: string;
   framing_mode?: FramingMode;
+  caption_style?: CaptionStyle;
   status: string;
 };
 
@@ -271,6 +272,7 @@ export async function getLocalTranscriptionJob(
 }
 
 export type FramingMode = "standard" | "square_rounded" | "true_9_16";
+export type CaptionStyle = "classic" | "bold_emerald" | "clean_gold";
 
 export async function generateClips(
   projectId: string,
@@ -279,11 +281,13 @@ export async function generateClips(
   clipDurationSeconds: 15 | 30 | 60 | 90 = 60,
   showWatermark: boolean = false,
   framingMode?: FramingMode,
+  captionStyle?: CaptionStyle,
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const framingQuery = framingMode ? `&framing_mode=${encodeURIComponent(framingMode)}` : "";
+  const captionQuery = captionStyle ? `&caption_style=${encodeURIComponent(captionStyle)}` : "";
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -401,7 +405,12 @@ export async function setClipTopLine(
   projectId: string,
   clipId: string,
   topLine: string,
-  options?: { show_watermark?: boolean; show_subtitles?: boolean; framing_mode?: FramingMode },
+  options?: {
+    show_watermark?: boolean;
+    show_subtitles?: boolean;
+    framing_mode?: FramingMode;
+    caption_style?: CaptionStyle;
+  },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
@@ -414,6 +423,7 @@ export async function setClipTopLine(
         show_watermark: options?.show_watermark,
         show_subtitles: options?.show_subtitles,
         framing_mode: options?.framing_mode,
+        caption_style: options?.caption_style,
       }),
     },
   );
@@ -427,7 +437,12 @@ export async function setClipTopLine(
 export async function removeClipTopLine(
   projectId: string,
   clipId: string,
-  options?: { show_watermark?: boolean; show_subtitles?: boolean; framing_mode?: FramingMode },
+  options?: {
+    show_watermark?: boolean;
+    show_subtitles?: boolean;
+    framing_mode?: FramingMode;
+    caption_style?: CaptionStyle;
+  },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
   const query = new URLSearchParams();
@@ -439,6 +454,9 @@ export async function removeClipTopLine(
   }
   if (options?.framing_mode !== undefined) {
     query.set("framing_mode", options.framing_mode);
+  }
+  if (options?.caption_style !== undefined) {
+    query.set("caption_style", options.caption_style);
   }
   const queryString = query.toString() ? `?${query.toString()}` : "";
   const response = await fetch(

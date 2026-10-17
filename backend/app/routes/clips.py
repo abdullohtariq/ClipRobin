@@ -28,6 +28,7 @@ class TopLineRequest(BaseModel):
     show_watermark: bool | None = None
     show_subtitles: bool | None = None
     framing_mode: str | None = None
+    caption_style: str | None = None
 
 
 router = APIRouter(prefix="/api/projects")
@@ -129,6 +130,7 @@ def generate_project_clips(
     show_watermark: bool = False,
     clip_duration_seconds: int = 60,
     framing_mode: str | None = None,
+    caption_style: str | None = None,
 ) -> dict[str, str]:
     if clip_duration_seconds not in {15, 30, 60, 90}:
         raise HTTPException(
@@ -139,6 +141,11 @@ def generate_project_clips(
         raise HTTPException(
             status_code=422,
             detail="Framing mode must be 'standard', 'square_rounded', or 'true_9_16'",
+        )
+    if caption_style is not None and caption_style not in {"classic", "bold_emerald", "clean_gold"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Caption style must be 'classic', 'bold_emerald', or 'clean_gold'",
         )
     project_directory = project_or_404(project_id)
     job_id = uuid.uuid4().hex
@@ -180,6 +187,7 @@ def generate_project_clips(
         clip_duration_seconds,
         show_watermark,
         framing_mode,
+        caption_style,
     )
     return {"job_id": job_id}
 
@@ -193,6 +201,7 @@ def run_clip_generation(
     clip_duration_seconds: int = 60,
     show_watermark: bool = False,
     framing_mode: str | None = None,
+    caption_style: str | None = None,
 ) -> None:
     def report_progress(
         step: str,
@@ -234,6 +243,7 @@ def run_clip_generation(
             cancel_event=cancel_event,
             max_clip_seconds=clip_duration_seconds,
             framing_mode=framing_mode,
+            caption_style=caption_style,
         )
     except ClipGenerationCancelled:
         finish_cancelled_job(job_id, project_id)
@@ -322,11 +332,14 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
     analysis_path = project_directory / "analysis.json"
     analysis_clips = {}
     framing_mode = "standard"
+    caption_style = "classic"
     if analysis_path.is_file():
         try:
             analysis_data = json.loads(analysis_path.read_text(encoding="utf-8"))
             analysis_clips = {clip["id"]: clip for clip in analysis_data.get("clips", [])}
-            framing_mode = analysis_data.get("generation_options", {}).get("framing_mode", "standard")
+            generation_options = analysis_data.get("generation_options", {})
+            framing_mode = generation_options.get("framing_mode", "standard")
+            caption_style = generation_options.get("caption_style", "classic")
         except json.JSONDecodeError:
             analysis_clips = {}
 
@@ -344,6 +357,7 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "file": path.name,
             "top_line": metadata.get("top_line", ""),
             "framing_mode": metadata.get("framing_mode", framing_mode),
+            "caption_style": metadata.get("caption_style", caption_style),
             "status": "ready",
         })
     return {"clips": clips}
@@ -365,6 +379,7 @@ def update_clip_top_line(
             show_watermark=payload.show_watermark,
             show_subtitles=payload.show_subtitles,
             framing_mode=payload.framing_mode,
+            caption_style=payload.caption_style,
         )
         return {"clip": updated_clip}
     except ValueError as error:
@@ -382,6 +397,7 @@ def delete_clip_top_line(
     show_watermark: bool | None = None,
     show_subtitles: bool | None = None,
     framing_mode: str | None = None,
+    caption_style: str | None = None,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
     raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
@@ -393,6 +409,7 @@ def delete_clip_top_line(
             show_watermark=show_watermark,
             show_subtitles=show_subtitles,
             framing_mode=framing_mode,
+            caption_style=caption_style,
         )
         return {"clip": updated_clip}
     except ValueError as error:

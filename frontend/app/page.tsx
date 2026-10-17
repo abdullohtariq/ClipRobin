@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import {
   ActiveJob,
+  CaptionStyle,
   Clip,
   downloadVideo,
   FramingMode,
@@ -40,6 +41,7 @@ export default function Home() {
   const [clipDurationSeconds, setClipDurationSeconds] = useState<15 | 30 | 60 | 90>(30);
   const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
   const [transcriptionProgress, setTranscriptionProgress] = useState<VideoProcessingProgress | null>(null);
@@ -250,6 +252,7 @@ export default function Home() {
         clipDurationSeconds,
         showWatermark,
         framingMode,
+        captionStyle,
       );
 
       if (generation.cancelled) {
@@ -399,6 +402,7 @@ export default function Home() {
         clipDurationSeconds,
         showWatermark,
         framingMode,
+        captionStyle,
       );
 
       if (generation.cancelled) {
@@ -1009,6 +1013,174 @@ export default function Home() {
                   />
                 </button>
               </div>
+
+              {/* Caption Style Visual Selector */}
+              {showCaptions && (
+                <div className="space-y-2 pt-1 transition-all duration-200">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-medium text-zinc-400">
+                      Caption style
+                    </label>
+                    <span className="text-[11px] text-zinc-500 font-normal">
+                      Visual preview
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="radiogroup" aria-label="Caption style">
+                    {/* Option 1: Classic (Default) */}
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={captionStyle === "classic"}
+                      disabled={isProcessingVideo}
+                      onClick={() => setCaptionStyle("classic")}
+                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                        captionStyle === "classic"
+                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
+                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
+                      }`}
+                    >
+                      {/* Visual Preview Box */}
+                      <div className="relative mb-3 flex h-24 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
+                        {/* Ambient background hint */}
+                        <div className="absolute inset-0 bg-radial from-zinc-800/20 to-transparent pointer-events-none" />
+
+                        {/* Classic Style Caption Pill Box with Yellow active word */}
+                        <div className="relative z-10 flex items-baseline gap-1.5 rounded-[6px] bg-black/65 px-2.5 py-1.5 border border-black/50 shadow-md backdrop-blur-xs">
+                          <span className="text-[11px] font-bold text-white tracking-wide">
+                            CLIP
+                          </span>
+                          <span className="text-[13px] font-black text-yellow-400 tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)] scale-110 transform transition-transform">
+                            VIRAL
+                          </span>
+                          <span className="text-[11px] font-bold text-white tracking-wide">
+                            MOMENTS
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="w-full text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span className={`text-xs font-semibold ${captionStyle === "classic" ? "text-white" : "text-zinc-300"}`}>
+                            Classic
+                          </span>
+                          {captionStyle === "classic" && (
+                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-zinc-400">
+                          Black pill &amp; yellow pop
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Option 2: Bold Emerald */}
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={captionStyle === "bold_emerald"}
+                      disabled={isProcessingVideo}
+                      onClick={() => setCaptionStyle("bold_emerald")}
+                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                        captionStyle === "bold_emerald"
+                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
+                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
+                      }`}
+                    >
+                      {/* Top Pill Badge */}
+                      <div className="absolute -top-2 right-2 z-10 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 px-1.5 py-0.5 text-[9px] font-bold text-zinc-950 shadow-md">
+                        VIRAL
+                      </div>
+
+                      {/* Visual Preview Box */}
+                      <div className="relative mb-3 flex h-24 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
+                        {/* Ambient glow hint */}
+                        <div className="absolute inset-0 bg-radial from-emerald-950/20 to-transparent pointer-events-none" />
+
+                        {/* Bold Emerald Style - No box, heavy stroke, vibrant neon green active word */}
+                        <div className="relative z-10 flex items-baseline gap-1.5">
+                          <span className="text-[12px] font-black uppercase text-white tracking-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
+                            GROW
+                          </span>
+                          <span className="text-[14px] font-black uppercase text-[#10b981] tracking-tight drop-shadow-[0_0_10px_rgba(16,185,129,0.7)] drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] scale-110 transform transition-transform">
+                            YOUR
+                          </span>
+                          <span className="text-[12px] font-black uppercase text-white tracking-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
+                            REACH
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="w-full text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span className={`text-xs font-semibold ${captionStyle === "bold_emerald" ? "text-white" : "text-zinc-300"}`}>
+                            Bold Emerald
+                          </span>
+                          {captionStyle === "bold_emerald" && (
+                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-emerald-400 font-medium">
+                          Punchy viral green pop
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Option 3: Clean Gold */}
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={captionStyle === "clean_gold"}
+                      disabled={isProcessingVideo}
+                      onClick={() => setCaptionStyle("clean_gold")}
+                      className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                        captionStyle === "clean_gold"
+                          ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
+                          : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
+                      }`}
+                    >
+                      {/* Visual Preview Box */}
+                      <div className="relative mb-3 flex h-24 w-full items-center justify-center rounded-lg border border-zinc-800 bg-gradient-to-b from-zinc-950 via-zinc-900 to-black p-2 shadow-inner overflow-hidden select-none">
+                        {/* Ambient glow hint */}
+                        <div className="absolute inset-0 bg-radial from-amber-950/20 to-transparent pointer-events-none" />
+
+                        {/* Clean Gold Style - Minimalist warm gold glow */}
+                        <div className="relative z-10 flex items-baseline gap-1.5">
+                          <span className="text-[11px] font-semibold text-white/95 tracking-normal drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                            Stay
+                          </span>
+                          <span className="text-[13px] font-bold uppercase text-amber-400 tracking-wide drop-shadow-[0_0_8px_rgba(251,191,36,0.5)] drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] scale-105 transform transition-transform">
+                            INSPIRED
+                          </span>
+                          <span className="text-[11px] font-semibold text-white/95 tracking-normal drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
+                            daily
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="w-full text-center">
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span className={`text-xs font-semibold ${captionStyle === "clean_gold" ? "text-white" : "text-zinc-300"}`}>
+                            Clean Gold
+                          </span>
+                          {captionStyle === "clean_gold" && (
+                            <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
+                              ✓
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-amber-300 font-medium">
+                          Minimalist warm glow
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Watermark Toggle Switch */}
               <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-4 transition-all duration-150">

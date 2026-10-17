@@ -237,3 +237,29 @@ def test_generate_clips_route_true_9_16(tmp_path: Path, monkeypatch: pytest.Monk
     assert "true_9_16" in captured_args.get("args", ())
 
 
+def test_generate_clips_route_caption_style(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_dir = tmp_path / "project_003"
+    project_dir.mkdir(parents=True)
+    (project_dir / "source.mp4").write_bytes(b"dummy video")
+
+    captured_args = {}
+
+    def mock_run_generation(*args, **kwargs):
+        captured_args["args"] = args
+        captured_args["kwargs"] = kwargs
+
+    monkeypatch.setattr("app.routes.clips.run_clip_generation", mock_run_generation)
+
+    # Valid style
+    response = client.post("/api/projects/project_003/generate-clips?caption_style=bold_emerald")
+    assert response.status_code == 200
+    assert "job_id" in response.json()
+    assert "bold_emerald" in captured_args.get("args", ())
+
+    # Invalid style
+    response_invalid = client.post("/api/projects/project_003/generate-clips?caption_style=neon_pink")
+    assert response_invalid.status_code == 422
+
+
+

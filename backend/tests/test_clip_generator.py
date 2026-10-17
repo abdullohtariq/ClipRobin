@@ -3,7 +3,7 @@ from pathlib import Path
 import threading
 import pytest
 
-from app.services.clip_generator import generate_clips
+from app.services.clip_generator import generate_clips, render_single_clip
 from app.services.video_editor import ClipGenerationCancelled, VideoEditorError
 
 
@@ -575,6 +575,94 @@ def test_create_clip_standard_16_9_rounded_framing_with_watermark(tmp_path: Path
     assert len(captured_filter_content) == 1
     assert "rounded-mask-16-9.png" in captured_filter_content[0]
     assert "scale=240:-2[wm]" in captured_filter_content[0]
+
+
+def test_build_subtitle_filters_caption_styles(tmp_path: Path):
+    from app.services.video_editor import _build_subtitle_filters
+
+    segments = [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "text": "Hello world test",
+            "words": [
+                {"start": 0.0, "end": 0.5, "text": "Hello"},
+                {"start": 0.5, "end": 1.0, "text": "world"},
+                {"start": 1.0, "end": 2.0, "text": "test"},
+            ],
+        }
+    ]
+
+    # 1. Classic style
+    classic_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=tmp_path, caption_style="classic"
+    )
+    assert any("box=1:boxcolor=black@0.55" in f for f in classic_filters)
+    assert any("fontcolor=yellow" in f for f in classic_filters)
+    assert any("fontsize=34" in f for f in classic_filters)
+
+    # 2. Bold Emerald style
+    emerald_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=tmp_path, caption_style="bold_emerald"
+    )
+    assert any("fontcolor=0x10b981" in f for f in emerald_filters)
+    assert any("borderw=4" in f for f in emerald_filters)
+    assert any("fontsize=36" in f for f in emerald_filters)
+    assert not any("box=1" in f for f in emerald_filters)
+
+    # 3. Clean Gold style
+    gold_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=tmp_path, caption_style="clean_gold"
+    )
+    assert any("fontcolor=0xfbbf24" in f for f in gold_filters)
+    assert any("borderw=2" in f for f in gold_filters)
+    assert any("fontsize=33" in f for f in gold_filters)
+    assert not any("box=1" in f for f in gold_filters)
+
+
+def test_generate_and_render_clip_caption_style(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "source.mp4").write_bytes(b"dummy")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 5.0, "reason": "Test"}
+            ],
+            "generation_options": {}
+        }),
+        encoding="utf-8",
+    )
+
+    captured_generate = {}
+    def mock_create_clip_gen(source_path, output_path, start_time, end_time, **kwargs):
+        captured_generate.update(kwargs)
+        output_path.write_bytes(b"generated clip")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip_gen)
+
+    clips = generate_clips(tmp_path, caption_style="bold_emerald")
+    assert len(clips) == 1
+    assert clips[0]["caption_style"] == "bold_emerald"
+    assert captured_generate.get("caption_style") == "bold_emerald"
+
+    saved = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved.get("generation_options", {}).get("caption_style") == "bold_emerald"
+
+    # Now render_single_clip with clean_gold
+    captured_render = {}
+    def mock_create_clip_render(source_path, output_path, start_time, end_time, **kwargs):
+        captured_render.update(kwargs)
+        output_path.write_bytes(b"re-rendered clip")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip_render)
+
+    updated = render_single_clip(tmp_path, "clip_001", caption_style="clean_gold")
+    assert updated["caption_style"] == "clean_gold"
+    assert captured_render.get("caption_style") == "clean_gold"
+
+    saved2 = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved2.get("generation_options", {}).get("caption_style") == "clean_gold"
+
 
 
 

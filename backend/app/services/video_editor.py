@@ -195,13 +195,44 @@ def _build_subtitle_filters(
     subtitle_directory: Path | None = None,
     font_file: str | None = None,
     framing_mode: str = "standard",
+    caption_style: str = "classic",
 ) -> list[str]:
     if not show_subtitles or not subtitle_segments or subtitle_directory is None:
         return []
 
     font_fragment = f"fontfile='{font_file}':" if font_file else ""
     subtitle_filters = []
-    font_size = 34
+
+    style = (caption_style or "classic").lower().strip()
+    if style == "bold_emerald":
+        font_size = 36
+        pop_font_delta = 8
+        base_style_fragment = (
+            "fontsize=36:fontcolor=white:"
+            "borderw=4:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=3:shadowy=3"
+        )
+        highlight_color = "0x10b981"
+        highlight_borderw = 4
+    elif style == "clean_gold":
+        font_size = 33
+        pop_font_delta = 5
+        base_style_fragment = (
+            "fontsize=33:fontcolor=white:"
+            "borderw=2:bordercolor=black@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2"
+        )
+        highlight_color = "0xfbbf24"
+        highlight_borderw = 2
+    else:  # "classic"
+        font_size = 34
+        pop_font_delta = 7
+        base_style_fragment = (
+            "fontsize=34:fontcolor=white:"
+            "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
+            "box=1:boxcolor=black@0.55:boxborderw=10"
+        )
+        highlight_color = "yellow"
+        highlight_borderw = 3
+
     font_path = subtitle_directory / font_file if font_file else None
     try:
         font = (
@@ -236,13 +267,11 @@ def _build_subtitle_filters(
             else:
                 y_position = f"h-340-{(len(lines) - line_index - 1) * line_height}"
             subtitle_filters.append(
-                "drawtext=textfile='{}':{}expansion=none:fontsize={}:fontcolor=white:"
-                "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
-                "box=1:boxcolor=black@0.55:boxborderw=10:y_align=baseline:"
+                "drawtext=textfile='{}':{}expansion=none:{}:y_align=baseline:"
                 "x=(w-text_w)/2:y={}:enable='between(t,{:.3f},{:.3f})'".format(
                     text_file.name,
                     font_fragment,
-                    font_size,
+                    base_style_fragment,
                     y_position,
                     segment_start,
                     max(segment_start + 0.05, segment_end),
@@ -253,21 +282,23 @@ def _build_subtitle_filters(
                 highlight_file.write_text(str(word["text"]), encoding="utf-8")
                 word_start = max(0.0, float(word["start"]) - start_time)
                 word_end = max(word_start + 0.03, float(word["end"]) - start_time)
-                pop_font_size = font_size + 7
+                pop_font_size = font_size + pop_font_delta
                 word_x = (
                     f"(w-{line_width:.3f})/2+{float(word['x']):.3f}"
                     f"-(text_w-{float(word['width']):.3f})/2"
                 )
                 subtitle_filters.append(
                     "drawtext=textfile='{}':{}expansion=none:"
-                    "fontsize='if(lt(t,{:.3f}),{}, {})':fontcolor=yellow:"
-                    "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
+                    "fontsize='if(lt(t,{:.3f}),{}, {})':fontcolor={}:"
+                    "borderw={}:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
                     "x={}:y={}:y_align=baseline:enable='between(t,{:.3f},{:.3f})'".format(
                         highlight_file.name,
                         font_fragment,
                         word_start + 0.12,
                         pop_font_size,
                         font_size,
+                        highlight_color,
+                        highlight_borderw,
                         word_x,
                         y_position,
                         word_start,
@@ -361,6 +392,7 @@ def _build_filter_graph(
     subtitle_directory: Path | None = None,
     font_file: str | None = None,
     framing_mode: str = "standard",
+    caption_style: str = "classic",
 ) -> str:
     if framing_mode == "square_rounded" and subtitle_directory is not None:
         _generate_rounded_corner_mask(subtitle_directory)
@@ -403,6 +435,7 @@ def _build_filter_graph(
         subtitle_directory=subtitle_directory,
         font_file=font_file,
         framing_mode=framing_mode,
+        caption_style=caption_style,
     )
     if not subtitle_filters:
         return base_filter
@@ -420,6 +453,7 @@ def create_clip(
     top_line: str | None = None,
     cancel_event: threading.Event | None = None,
     framing_mode: str = "standard",
+    caption_style: str = "classic",
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -451,6 +485,7 @@ def create_clip(
                 subtitle_directory=subtitle_directory,
                 font_file=font_file,
                 framing_mode=framing_mode,
+                caption_style=caption_style,
             )
             top_line_filters = _build_top_line_filters(
                 top_line,
