@@ -22,6 +22,7 @@ import {
   getPreviewUrls,
 } from "@/src/components/caption-style-picker";
 import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
+import { LiveMovingCaptions } from "@/src/components/live-moving-captions";
 import { Badge } from "@/src/components/ui/badge";
 import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
@@ -1093,40 +1094,10 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Captions Overlay Preview */}
+                  {/* Live Moving Captions Overlay */}
                   {showCaptions && (
-                    <div className="absolute bottom-6 left-2 right-2 z-20 text-center pointer-events-none">
-                      {captionStyle === "classic" ? (
-                        <div className="inline-block px-2 py-1 rounded bg-black/75 border border-black text-[10px] font-bold text-white shadow-md">
-                          <span>This is </span>
-                          <span className="text-yellow-400 underline underline-offset-2">captions</span>
-                        </div>
-                      ) : captionStyle === "punch" ? (
-                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-black uppercase tracking-tight text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
-                          <span>HOW YOUR </span>
-                          <span className="text-[#F7C204]">CAPTIONS</span>
-                        </div>
-                      ) : captionStyle === "robin" ? (
-                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-tight text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
-                          <span>MOVE WITH </span>
-                          <span className="text-[#34D399]">ROBIN</span>
-                        </div>
-                      ) : captionStyle === "pill" ? (
-                        <div className="inline-block px-2.5 py-1 rounded-full bg-black/85 text-[10px] font-semibold text-white shadow-md">
-                          <span>Clean </span>
-                          <span className="text-[#34D399] font-bold">Pill Box</span>
-                        </div>
-                      ) : captionStyle === "karaoke" ? (
-                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-bold text-white drop-shadow">
-                          <span>Karaoke </span>
-                          <span className="text-emerald-400 underline decoration-2">Sweep</span>
-                        </div>
-                      ) : (
-                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-bold text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
-                          <span>Clean </span>
-                          <span className="text-zinc-200">Typography</span>
-                        </div>
-                      )}
+                    <div className="absolute bottom-6 inset-x-2 z-20 text-center pointer-events-none">
+                      <LiveMovingCaptions captionStyle={captionStyle} />
                     </div>
                   )}
                 </div>

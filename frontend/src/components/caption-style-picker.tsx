@@ -81,7 +81,7 @@ export function getPreviewUrls(styleId: CaptionStyle) {
 }
 
 // 16-18px typography sample centered on subtle checkered dark canvas
-function CaptionVisualSample({ styleId }: { styleId: CaptionStyle }) {
+export function CaptionVisualSample({ styleId }: { styleId: CaptionStyle }) {
   switch (styleId) {
     case "classic":
       return (

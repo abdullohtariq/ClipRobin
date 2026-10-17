@@ -5,6 +5,7 @@ import { CaptionStyle, FramingMode } from "@/src/lib/api";
 import {
   CaptionStylePicker,
   CAPTION_STYLE_OPTIONS,
+  CaptionVisualSample,
   getPreviewUrls,
 } from "./caption-style-picker";
 import { SegmentedControl } from "./ui/segmented-control";
@@ -200,38 +201,45 @@ export function ClipSettings({
           </button>
         </div>
 
-        {/* Collapsible Style Row */}
+        {/* Active Style Visualization & Change Button */}
         {showCaptions && (
-          <div className="mt-3 pt-3 border-t border-zinc-800/80 flex items-center justify-between gap-3 animate-in fade-in-0 duration-150">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="relative aspect-[9/16] w-8 h-14 shrink-0 overflow-hidden rounded-md border border-zinc-700 bg-black shadow-sm">
-                <img
-                  src={previewUrls.posterUrl}
-                  alt={`${activeStyleOption.name} caption preview`}
-                  className="size-full object-cover"
-                />
+          <div className="mt-3 pt-3 border-t border-zinc-800/80 space-y-3 animate-in fade-in-0 duration-150">
+            {/* Typography Visual Canvas (matching the modal look) */}
+            <div className="relative w-full h-20 rounded-xl overflow-hidden flex items-center justify-center border border-zinc-800 bg-[#141418] bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:12px_12px] shadow-inner">
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />
+              <CaptionVisualSample styleId={captionStyle} />
+              <div className="absolute top-2 left-2.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/60 border border-white/10 backdrop-blur-xs">
+                <span className="text-[10px] font-mono text-zinc-400">Preview</span>
               </div>
+            </div>
+
+            {/* Style Details & Change Button */}
+            <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-semibold text-white">
+                  <span className="text-[13px] font-semibold text-white tracking-tight">
                     {activeStyleOption.name}
                   </span>
-                  <Badge variant="neutral" size="sm">Active style</Badge>
+                  <Badge variant="emerald" size="sm">Active style</Badge>
+                  <Badge variant="neutral" size="sm">{activeStyleOption.animationName}</Badge>
                 </div>
                 <p className="mt-0.5 text-xs text-zinc-400 line-clamp-1">
                   {activeStyleOption.description}
                 </p>
               </div>
-            </div>
 
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => setIsCaptionPickerOpen(true)}
-              className="shrink-0 px-3.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800/90 text-xs font-medium text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-colors duration-150 disabled:opacity-50 focus-ring"
-            >
-              Change
-            </button>
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setIsCaptionPickerOpen(true)}
+                className="shrink-0 px-4 py-2 rounded-xl border border-zinc-700 bg-zinc-800/90 text-xs font-semibold text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-all duration-150 disabled:opacity-50 focus-ring shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Change style</span>
+                <svg className="size-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                </svg>
+              </button>
+            </div>
           </div>
         )}
       </div>
