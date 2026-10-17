@@ -262,4 +262,87 @@ def test_generate_clips_route_caption_style(tmp_path: Path, monkeypatch: pytest.
     assert response_invalid.status_code == 422
 
 
+def test_generate_clips_route_caption_animation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_dir = tmp_path / "project_004"
+    project_dir.mkdir(parents=True)
+    (project_dir / "source.mp4").write_bytes(b"dummy video")
+
+    captured_args = {}
+
+    def mock_run_generation(*args, **kwargs):
+        captured_args["args"] = args
+        captured_args["kwargs"] = kwargs
+
+    monkeypatch.setattr("app.routes.clips.run_clip_generation", mock_run_generation)
+
+    # Valid animation
+    response = client.post("/api/projects/project_004/generate-clips?caption_animation=sweep")
+    assert response.status_code == 200
+    assert "job_id" in response.json()
+    assert "sweep" in captured_args.get("args", ())
+
+    # Invalid animation
+    response_invalid = client.post("/api/projects/project_004/generate-clips?caption_animation=invalid_anim")
+    assert response_invalid.status_code == 422
+
+
+def test_get_caption_styles_endpoint():
+    response = client.get("/api/caption-styles")
+    assert response.status_code == 200
+    styles = response.json()
+    assert isinstance(styles, list)
+    assert len(styles) == 5
+
+    style_ids = [s["id"] for s in styles]
+    assert set(style_ids) == {"clean", "punch", "robin", "pill", "karaoke"}
+
+    robin = next(s for s in styles if s["id"] == "robin")
+    assert robin["default_animation"] == "grow"
+    assert "grow" in robin["allowed_animations"]
+    assert "sweep" in robin["allowed_animations"]
+    assert len(robin["allowed_animations"]) == 5
+
+
+def test_update_clip_top_line_with_caption_style_and_animation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_id, project_dir = create_project()
+
+    captured_kwargs = {}
+
+    def mock_render(project_directory, clip_id, top_line=None, **kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "id": clip_id,
+            "title": "Test Clip",
+            "start": 0.0,
+            "end": 10.0,
+            "duration": 10.0,
+            "file": f"{clip_id}.mp4",
+            "top_line": top_line or "",
+            "caption_style": kwargs.get("caption_style", "robin"),
+            "caption_animation": kwargs.get("caption_animation", "grow"),
+            "status": "ready",
+        }
+
+    monkeypatch.setattr("app.routes.clips.render_single_clip", mock_render)
+
+    response = client.post(
+        f"/api/projects/{project_id}/clips/clip_001/top-line",
+        json={
+            "top_line": "Updated hook",
+            "caption_style": "punch",
+            "caption_animation": "pop",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()["clip"]
+    assert data["top_line"] == "Updated hook"
+    assert data["caption_style"] == "punch"
+    assert data["caption_animation"] == "pop"
+    assert captured_kwargs.get("caption_style") == "punch"
+    assert captured_kwargs.get("caption_animation") == "pop"
+
+
+
 

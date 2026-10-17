@@ -83,6 +83,7 @@ ClipRobin/
 │   │   ├── routes/
 │   │   │   ├── __init__.py
 │   │   │   ├── analysis.py       # POST /api/analyze (LLM transcript evaluation)
+│   │   │   ├── caption_styles.py # GET /api/caption-styles (Caption styles and animations registry)
 │   │   │   ├── clips.py          # Generate clips, poll job, cancel, serve clips, download ZIP
 │   │   │   ├── download.py       # POST /api/download (YouTube downloader via yt-dlp)
 │   │   │   ├── health.py         # GET /api/health
@@ -93,17 +94,24 @@ ClipRobin/
 │   │   ├── services/
 │   │   │   ├── __init__.py
 │   │   │   ├── ai_analyzer.py    # OpenAI, DeepSeek, and Gemini REST integrations
+│   │   │   ├── ass_captions.py   # High-performance ASS subtitle compiler & animations
+│   │   │   ├── caption_styles.py # 5 Styles x 5 Animations registry & font loader
 │   │   │   ├── clip_generator.py # Coordinates analysis & video slicing lifecycle
 │   │   │   ├── downloader.py     # yt-dlp wrapper
 │   │   │   ├── mock_analyzer.py  # Deterministic duration-based transcript chunker
 │   │   │   ├── project_manager.py# Disk layout, project IDs, clips directory resolution
+│   │   │   ├── smart_framing.py  # True 9:16 speaker-tracking framing
 │   │   │   ├── transcriber.py    # faster-whisper CTranslate2 transcription
-│   │   │   └── video_editor.py   # FFmpeg command builder, filtergraph, animated subtitles & watermark
+│   │   │   └── video_editor.py   # FFmpeg command builder, filtergraph, libass subtitles & watermark
 │   │   ├── __init__.py
 │   │   └── main.py               # FastAPI app definition, CORS, router mounting
-│   ├── tests/                    # Automated pytest suite (55 unit & integration tests)
+│   ├── assets/
+│   │   └── fonts/                # Bundled OFL fonts (Montserrat, Anton, Poppins, Noto Sans)
+│   ├── tests/                    # Automated pytest suite (95 unit & integration tests)
 │   │   ├── __init__.py
 │   │   ├── test_ai_analyzer.py
+│   │   ├── test_ass_captions.py
+│   │   ├── test_caption_styles.py
 │   │   ├── test_clip_generator.py
 │   │   ├── test_mock_analyzer.py
 │   │   ├── test_project_manager.py
@@ -113,7 +121,8 @@ ClipRobin/
 │   │   ├── test_routes_health.py
 │   │   ├── test_routes_jobs.py
 │   │   ├── test_routes_local_video.py
-│   │   └── test_routes_projects.py
+│   │   ├── test_routes_projects.py
+│   │   └── test_smart_framing.py
 │   ├── data/
 │   │   └── projects/             # Default development project storage root
 │   ├── .env.example              # Template for AI provider keys and models

@@ -73,6 +73,7 @@ export type Clip = {
   top_line?: string;
   framing_mode?: FramingMode;
   caption_style?: CaptionStyle;
+  caption_animation?: CaptionAnimation;
   status: string;
 };
 
@@ -272,7 +273,40 @@ export async function getLocalTranscriptionJob(
 }
 
 export type FramingMode = "standard" | "square_rounded" | "true_9_16";
-export type CaptionStyle = "classic" | "bold_emerald" | "clean_gold";
+export type CaptionStyle =
+  | "clean"
+  | "punch"
+  | "robin"
+  | "pill"
+  | "karaoke"
+  | "classic"
+  | "bold_emerald"
+  | "clean_gold";
+export type CaptionAnimation = "pop" | "grow" | "sweep" | "fade" | "glide";
+
+export type AnimationInfo = {
+  id: CaptionAnimation;
+  name: string;
+  description: string;
+};
+
+export type CaptionStyleInfo = {
+  id: CaptionStyle;
+  name: string;
+  description: string;
+  font_family: string;
+  font_file: string;
+  text_case: "normal" | "upper";
+  primary_color: string;
+  accent_color: string | null;
+  outline_width: number;
+  shadow_depth: number;
+  border_style: number;
+  box_opacity: number;
+  default_animation: CaptionAnimation;
+  allowed_animations: CaptionAnimation[];
+  allowed_animations_detail?: AnimationInfo[];
+};
 
 export async function generateClips(
   projectId: string,
@@ -282,12 +316,14 @@ export async function generateClips(
   showWatermark: boolean = false,
   framingMode?: FramingMode,
   captionStyle?: CaptionStyle,
+  captionAnimation?: CaptionAnimation,
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const framingQuery = framingMode ? `&framing_mode=${encodeURIComponent(framingMode)}` : "";
   const captionQuery = captionStyle ? `&caption_style=${encodeURIComponent(captionStyle)}` : "";
+  const animQuery = captionAnimation ? `&caption_animation=${encodeURIComponent(captionAnimation)}` : "";
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -410,6 +446,7 @@ export async function setClipTopLine(
     show_subtitles?: boolean;
     framing_mode?: FramingMode;
     caption_style?: CaptionStyle;
+    caption_animation?: CaptionAnimation;
   },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
@@ -424,6 +461,7 @@ export async function setClipTopLine(
         show_subtitles: options?.show_subtitles,
         framing_mode: options?.framing_mode,
         caption_style: options?.caption_style,
+        caption_animation: options?.caption_animation,
       }),
     },
   );
@@ -442,6 +480,7 @@ export async function removeClipTopLine(
     show_subtitles?: boolean;
     framing_mode?: FramingMode;
     caption_style?: CaptionStyle;
+    caption_animation?: CaptionAnimation;
   },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
@@ -458,6 +497,9 @@ export async function removeClipTopLine(
   if (options?.caption_style !== undefined) {
     query.set("caption_style", options.caption_style);
   }
+  if (options?.caption_animation !== undefined) {
+    query.set("caption_animation", options.caption_animation);
+  }
   const queryString = query.toString() ? `?${query.toString()}` : "";
   const response = await fetch(
     `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/${encodeURIComponent(clipId)}/top-line${queryString}`,
@@ -468,6 +510,16 @@ export async function removeClipTopLine(
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Could not remove clip top line"));
+  }
+  return response.json();
+}
+
+export async function getCaptionStyles(): Promise<CaptionStyleInfo[]> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/caption-styles`);
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not load caption styles"));
   }
   return response.json();
 }

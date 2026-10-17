@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
+from app.services.caption_styles import ANIMATIONS, CAPTION_STYLES, STYLE_ALIASES
 from app.services.clip_generator import generate_clips, render_single_clip
 from app.services.project_manager import get_clips_directory, get_project_directory
 from app.services.video_editor import (
@@ -29,6 +30,7 @@ class TopLineRequest(BaseModel):
     show_subtitles: bool | None = None
     framing_mode: str | None = None
     caption_style: str | None = None
+    caption_animation: str | None = None
 
 
 router = APIRouter(prefix="/api/projects")
@@ -131,6 +133,7 @@ def generate_project_clips(
     clip_duration_seconds: int = 60,
     framing_mode: str | None = None,
     caption_style: str | None = None,
+    caption_animation: str | None = None,
 ) -> dict[str, str]:
     if clip_duration_seconds not in {15, 30, 60, 90}:
         raise HTTPException(
@@ -142,10 +145,16 @@ def generate_project_clips(
             status_code=422,
             detail="Framing mode must be 'standard', 'square_rounded', or 'true_9_16'",
         )
-    if caption_style is not None and caption_style not in {"classic", "bold_emerald", "clean_gold"}:
+    allowed_styles = set(CAPTION_STYLES.keys()).union(STYLE_ALIASES.keys())
+    if caption_style is not None and caption_style not in allowed_styles:
         raise HTTPException(
             status_code=422,
-            detail="Caption style must be 'classic', 'bold_emerald', or 'clean_gold'",
+            detail=f"Caption style must be one of: {sorted(allowed_styles)}",
+        )
+    if caption_animation is not None and caption_animation not in ANIMATIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Caption animation must be one of: {sorted(ANIMATIONS.keys())}",
         )
     project_directory = project_or_404(project_id)
     job_id = uuid.uuid4().hex
@@ -188,6 +197,7 @@ def generate_project_clips(
         show_watermark,
         framing_mode,
         caption_style,
+        caption_animation,
     )
     return {"job_id": job_id}
 
@@ -202,6 +212,7 @@ def run_clip_generation(
     show_watermark: bool = False,
     framing_mode: str | None = None,
     caption_style: str | None = None,
+    caption_animation: str | None = None,
 ) -> None:
     def report_progress(
         step: str,
@@ -244,6 +255,7 @@ def run_clip_generation(
             max_clip_seconds=clip_duration_seconds,
             framing_mode=framing_mode,
             caption_style=caption_style,
+            caption_animation=caption_animation,
         )
     except ClipGenerationCancelled:
         finish_cancelled_job(job_id, project_id)
@@ -340,6 +352,7 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             generation_options = analysis_data.get("generation_options", {})
             framing_mode = generation_options.get("framing_mode", "standard")
             caption_style = generation_options.get("caption_style", "classic")
+            caption_animation = generation_options.get("caption_animation")
         except json.JSONDecodeError:
             analysis_clips = {}
 
@@ -358,6 +371,7 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "top_line": metadata.get("top_line", ""),
             "framing_mode": metadata.get("framing_mode", framing_mode),
             "caption_style": metadata.get("caption_style", caption_style),
+            "caption_animation": metadata.get("caption_animation", caption_animation),
             "status": "ready",
         })
     return {"clips": clips}
@@ -380,6 +394,7 @@ def update_clip_top_line(
             show_subtitles=payload.show_subtitles,
             framing_mode=payload.framing_mode,
             caption_style=payload.caption_style,
+            caption_animation=payload.caption_animation,
         )
         return {"clip": updated_clip}
     except ValueError as error:
@@ -398,6 +413,7 @@ def delete_clip_top_line(
     show_subtitles: bool | None = None,
     framing_mode: str | None = None,
     caption_style: str | None = None,
+    caption_animation: str | None = None,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
     raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
@@ -410,6 +426,7 @@ def delete_clip_top_line(
             show_subtitles=show_subtitles,
             framing_mode=framing_mode,
             caption_style=caption_style,
+            caption_animation=caption_animation,
         )
         return {"clip": updated_clip}
     except ValueError as error:

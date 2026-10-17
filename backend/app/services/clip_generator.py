@@ -71,6 +71,7 @@ def generate_clips(
     max_clip_seconds: float = 60.0,
     framing_mode: str | None = None,
     caption_style: str | None = None,
+    caption_animation: str | None = None,
 ) -> list[dict[str, Any]]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -118,11 +119,19 @@ def generate_clips(
     else:
         use_caption_style = "classic"
 
+    if caption_animation is not None:
+        use_caption_animation = caption_animation
+    elif "caption_animation" in saved_options and saved_options["caption_animation"] is not None:
+        use_caption_animation = str(saved_options["caption_animation"])
+    else:
+        use_caption_animation = None
+
     analysis["generation_options"] = {
         "show_subtitles": show_subtitles,
         "show_watermark": show_watermark,
         "framing_mode": use_framing_mode,
         "caption_style": use_caption_style,
+        "caption_animation": use_caption_animation,
     }
     analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
 
@@ -169,6 +178,7 @@ def generate_clips(
                     cancel_event=cancel_event,
                     framing_mode=use_framing_mode,
                     caption_style=use_caption_style,
+                    caption_animation=use_caption_animation,
                 )
                 if cancel_event is not None and cancel_event.is_set():
                     if temp_output.is_file():
@@ -187,6 +197,7 @@ def generate_clips(
                     "top_line": clip.get("top_line", ""),
                     "framing_mode": use_framing_mode,
                     "caption_style": use_caption_style,
+                    "caption_animation": use_caption_animation,
                     "status": "ready",
                 }
                 generated.append(clip_metadata)
@@ -238,6 +249,7 @@ def render_single_clip(
     show_watermark: bool | None = None,
     framing_mode: str | None = None,
     caption_style: str | None = None,
+    caption_animation: str | None = None,
 ) -> dict[str, Any]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -295,12 +307,20 @@ def render_single_clip(
     else:
         use_caption_style = "classic"
 
+    if caption_animation is not None:
+        use_caption_animation = caption_animation
+    elif "caption_animation" in saved_options and saved_options["caption_animation"] is not None:
+        use_caption_animation = str(saved_options["caption_animation"])
+    else:
+        use_caption_animation = None
+
     if "generation_options" not in analysis:
         analysis["generation_options"] = {}
     analysis["generation_options"]["show_watermark"] = use_watermark
     analysis["generation_options"]["show_subtitles"] = use_subtitles
     analysis["generation_options"]["framing_mode"] = use_framing_mode
     analysis["generation_options"]["caption_style"] = use_caption_style
+    analysis["generation_options"]["caption_animation"] = use_caption_animation
 
     transcript_segments = _load_transcript_segments(project_directory)
     subtitle_segments = [
@@ -326,6 +346,7 @@ def render_single_clip(
             top_line=cleaned_top_line,
             framing_mode=use_framing_mode,
             caption_style=use_caption_style,
+            caption_animation=use_caption_animation,
         )
         if temp_output.is_file():
             temp_output.replace(final_output)
@@ -344,5 +365,6 @@ def render_single_clip(
         "top_line": cleaned_top_line or "",
         "framing_mode": use_framing_mode,
         "caption_style": use_caption_style,
+        "caption_animation": use_caption_animation,
         "status": "ready",
     }

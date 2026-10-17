@@ -664,6 +664,110 @@ def test_generate_and_render_clip_caption_style(tmp_path: Path, monkeypatch: pyt
     assert saved2.get("generation_options", {}).get("caption_style") == "clean_gold"
 
 
+def test_generate_and_render_clip_caption_animation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "source.mp4").write_bytes(b"dummy")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 5.0, "reason": "Test"}
+            ],
+            "generation_options": {}
+        }),
+        encoding="utf-8",
+    )
+
+    captured_generate = {}
+
+    def mock_create_clip_gen(source_path, output_path, start_time, end_time, **kwargs):
+        captured_generate.update(kwargs)
+        output_path.write_bytes(b"generated clip")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip_gen)
+
+    clips = generate_clips(tmp_path, caption_style="punch", caption_animation="pop")
+    assert len(clips) == 1
+    assert clips[0]["caption_style"] == "punch"
+    assert clips[0]["caption_animation"] == "pop"
+    assert captured_generate.get("caption_style") == "punch"
+    assert captured_generate.get("caption_animation") == "pop"
+
+    saved = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved.get("generation_options", {}).get("caption_style") == "punch"
+    assert saved.get("generation_options", {}).get("caption_animation") == "pop"
+
+    # Now render_single_clip with sweep
+    captured_render = {}
+
+    def mock_create_clip_render(source_path, output_path, start_time, end_time, **kwargs):
+        captured_render.update(kwargs)
+        output_path.write_bytes(b"re-rendered clip")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip_render)
+
+    updated = render_single_clip(tmp_path, "clip_001", caption_style="karaoke", caption_animation="sweep")
+    assert updated["caption_style"] == "karaoke"
+    assert updated["caption_animation"] == "sweep"
+    assert captured_render.get("caption_style") == "karaoke"
+    assert captured_render.get("caption_animation") == "sweep"
+
+    saved2 = json.loads(analysis_file.read_text(encoding="utf-8"))
+    assert saved2.get("generation_options", {}).get("caption_style") == "karaoke"
+    assert saved2.get("generation_options", {}).get("caption_animation") == "sweep"
+
+
+def test_create_clip_integration_with_ass(tmp_path: Path):
+    import subprocess
+    from app.services.video_editor import create_clip, find_ffmpeg, has_ass_filter
+
+    ffmpeg_path = find_ffmpeg()
+    if not ffmpeg_path or not has_ass_filter(ffmpeg_path):
+        pytest.skip("FFmpeg with libass not available")
+
+    source_path = tmp_path / "source.mp4"
+    output_path = tmp_path / "output.mp4"
+
+    # Generate a tiny 0.5s source video
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-f", "lavfi", "-i", "testsrc=size=640x360:rate=10",
+        "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000",
+        "-t", "0.5",
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        str(source_path),
+    ]
+    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    subtitles = [
+        {
+            "start": 0.0,
+            "end": 0.5,
+            "words": [
+                {"start": 0.0, "end": 0.25, "text": "Clip"},
+                {"start": 0.25, "end": 0.5, "text": "Robin"},
+            ],
+        }
+    ]
+
+    create_clip(
+        source_path=source_path,
+        output_path=output_path,
+        start_time=0.0,
+        end_time=0.5,
+        subtitle_segments=subtitles,
+        show_subtitles=True,
+        caption_style="robin",
+        caption_animation="grow",
+        top_line="Testing ASS",
+    )
+
+    assert output_path.is_file()
+    assert output_path.stat().st_size > 1000
+
+
+
 
 
 

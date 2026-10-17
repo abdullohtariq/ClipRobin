@@ -1,3 +1,4 @@
+import logging
 import os
 import shutil
 import subprocess
@@ -6,6 +7,43 @@ import threading
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+from app.services.ass_captions import generate_ass_subtitles, stage_caption_fonts
+from app.services.caption_styles import get_caption_animation, get_caption_style
+
+logger = logging.getLogger(__name__)
+
+_ASS_FILTER_SUPPORT: dict[str, bool] = {}
+
+
+def has_ass_filter(ffmpeg_path: str | None = None) -> bool:
+    """Check if the provided FFmpeg binary supports the libass 'ass' filter."""
+    try:
+        path = ffmpeg_path or find_ffmpeg()
+        if not path:
+            return False
+        if path in _ASS_FILTER_SUPPORT:
+            return _ASS_FILTER_SUPPORT[path]
+
+        result = subprocess.run(
+            [path, "-filters"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,
+        )
+        supported = False
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == "ass":
+                supported = True
+                break
+        _ASS_FILTER_SUPPORT[path] = supported
+        return supported
+    except Exception as error:
+        logger.warning("Could not detect FFmpeg filters: %s", error)
+        return False
+
 
 
 def _generate_rounded_corner_mask(
@@ -393,6 +431,7 @@ def _build_filter_graph(
     font_file: str | None = None,
     framing_mode: str = "standard",
     caption_style: str = "classic",
+    caption_animation: str | None = None,
 ) -> str:
     if framing_mode == "square_rounded" and subtitle_directory is not None:
         _generate_rounded_corner_mask(subtitle_directory)
@@ -454,6 +493,7 @@ def create_clip(
     cancel_event: threading.Event | None = None,
     framing_mode: str = "standard",
     caption_style: str = "classic",
+    caption_animation: str | None = None,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -472,29 +512,54 @@ def create_clip(
             dir=output_path.parent,
         ) as temporary_directory:
             subtitle_directory = Path(temporary_directory)
-            font_file = (
-                _copy_font_file(subtitle_directory)
-                if ((show_subtitles and subtitle_segments) or (top_line and top_line.strip()))
-                else None
-            )
-            subtitle_filters = _build_subtitle_filters(
-                start_time,
-                end_time,
-                subtitle_segments=subtitle_segments,
-                show_subtitles=show_subtitles,
-                subtitle_directory=subtitle_directory,
-                font_file=font_file,
-                framing_mode=framing_mode,
-                caption_style=caption_style,
-            )
-            top_line_filters = _build_top_line_filters(
-                top_line,
-                subtitle_directory=subtitle_directory,
-                font_file=font_file,
-                has_watermark=bool(watermark_path and watermark_path.is_file()),
-                framing_mode=framing_mode,
-            )
-            all_text_filters = top_line_filters + subtitle_filters
+            use_ass = has_ass_filter(ffmpeg_path)
+            if not use_ass:
+                logger.warning("FFmpeg libass filter 'ass' not found. Falling back to drawtext filter.")
+
+            ass_filter: str | None = None
+            if use_ass and ((show_subtitles and subtitle_segments) or (top_line and top_line.strip())):
+                stage_caption_fonts(subtitle_directory)
+                ass_content = generate_ass_subtitles(
+                    subtitle_segments=subtitle_segments if show_subtitles else None,
+                    clip_start=start_time,
+                    clip_end=end_time,
+                    style=caption_style,
+                    animation=caption_animation,
+                    framing_mode=framing_mode,
+                    top_line=top_line,
+                    has_watermark=bool(watermark_path and watermark_path.is_file()),
+                )
+                ass_file = subtitle_directory / "captions.ass"
+                ass_file.write_text(ass_content, encoding="utf-8")
+                ass_filter = "ass=captions.ass:fontsdir=fonts"
+
+            if not use_ass:
+                font_file = (
+                    _copy_font_file(subtitle_directory)
+                    if ((show_subtitles and subtitle_segments) or (top_line and top_line.strip()))
+                    else None
+                )
+                subtitle_filters = _build_subtitle_filters(
+                    start_time,
+                    end_time,
+                    subtitle_segments=subtitle_segments,
+                    show_subtitles=show_subtitles,
+                    subtitle_directory=subtitle_directory,
+                    font_file=font_file,
+                    framing_mode=framing_mode,
+                    caption_style=caption_style,
+                )
+                top_line_filters = _build_top_line_filters(
+                    top_line,
+                    subtitle_directory=subtitle_directory,
+                    font_file=font_file,
+                    has_watermark=bool(watermark_path and watermark_path.is_file()),
+                    framing_mode=framing_mode,
+                )
+                all_text_filters = top_line_filters + subtitle_filters
+            else:
+                all_text_filters = [ass_filter] if ass_filter else []
+
             has_audio = has_audio_stream(source_path, ffmpeg_path)
 
             if framing_mode == "square_rounded":
@@ -508,12 +573,19 @@ def create_clip(
                 )
                 if watermark_path and watermark_path.is_file():
                     wm_y = "round(H*0.07)"
-                    base_filter_complex = (
-                        f"{bg_and_square}[base];"
-                        f"[1:v]scale=240:-2[wm];"
-                        f"[base][wm]overlay=(W-w)/2:{wm_y}"
-                    )
-                    if all_text_filters:
+                    if use_ass and ass_filter:
+                        base_filter_complex = (
+                            f"{bg_and_square},{ass_filter}[base];"
+                            f"[1:v]scale=240:-2[wm];"
+                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                        )
+                    else:
+                        base_filter_complex = (
+                            f"{bg_and_square}[base];"
+                            f"[1:v]scale=240:-2[wm];"
+                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                        )
+                    if (not use_ass) and all_text_filters:
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
                     else:
                         filter_graph = base_filter_complex + "[v]"
@@ -544,7 +616,9 @@ def create_clip(
                         "23",
                     ]
                 else:
-                    if all_text_filters:
+                    if use_ass and ass_filter:
+                        filter_graph = f"{bg_and_square},{ass_filter}[v]"
+                    elif (not use_ass) and all_text_filters:
                         filter_graph = bg_and_square + "," + ",".join(all_text_filters) + "[v]"
                     else:
                         filter_graph = bg_and_square + "[v]"
@@ -614,12 +688,19 @@ def create_clip(
 
                 if watermark_path and watermark_path.is_file():
                     wm_y = "round(H*0.07)"
-                    base_filter_complex = (
-                        f"[0:v]{base_filter}[base];"
-                        f"[1:v]scale=240:-2[wm];"
-                        f"[base][wm]overlay=(W-w)/2:{wm_y}"
-                    )
-                    if all_text_filters:
+                    if use_ass and ass_filter:
+                        base_filter_complex = (
+                            f"[0:v]{base_filter},{ass_filter}[base];"
+                            f"[1:v]scale=240:-2[wm];"
+                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                        )
+                    else:
+                        base_filter_complex = (
+                            f"[0:v]{base_filter}[base];"
+                            f"[1:v]scale=240:-2[wm];"
+                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                        )
+                    if (not use_ass) and all_text_filters:
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
                     else:
                         filter_graph = base_filter_complex + "[v]"
@@ -650,32 +731,56 @@ def create_clip(
                         "23",
                     ]
                 else:
-                    filter_graph = (
-                        base_filter + "," + ",".join(all_text_filters)
-                        if all_text_filters
-                        else base_filter
-                    )
-                    filter_script = subtitle_directory / "video-filters.txt"
-                    filter_script.write_text(filter_graph, encoding="utf-8")
-
-                    command = [
-                        ffmpeg_path,
-                        "-y",
-                        "-ss",
-                        str(start_time),
-                        "-i",
-                        str(source_path),
-                        "-t",
-                        str(end_time - start_time),
-                        "-/filter:v",
-                        filter_script.name,
-                        "-c:v",
-                        "libx264",
-                        "-preset",
-                        "medium",
-                        "-crf",
-                        "23",
-                    ]
+                    if use_ass and ass_filter:
+                        filter_graph = f"[0:v]{base_filter},{ass_filter}[v]"
+                        filter_script = subtitle_directory / "filter-complex.txt"
+                        filter_script.write_text(filter_graph, encoding="utf-8")
+                        command = [
+                            ffmpeg_path,
+                            "-y",
+                            "-ss",
+                            str(start_time),
+                            "-i",
+                            str(source_path),
+                            "-t",
+                            str(end_time - start_time),
+                            "-/filter_complex",
+                            filter_script.name,
+                            "-map",
+                            "[v]",
+                            "-c:v",
+                            "libx264",
+                            "-preset",
+                            "medium",
+                            "-crf",
+                            "23",
+                        ]
+                    else:
+                        filter_graph = (
+                            base_filter + "," + ",".join(all_text_filters)
+                            if all_text_filters
+                            else base_filter
+                        )
+                        filter_script = subtitle_directory / "video-filters.txt"
+                        filter_script.write_text(filter_graph, encoding="utf-8")
+                        command = [
+                            ffmpeg_path,
+                            "-y",
+                            "-ss",
+                            str(start_time),
+                            "-i",
+                            str(source_path),
+                            "-t",
+                            str(end_time - start_time),
+                            "-/filter:v",
+                            filter_script.name,
+                            "-c:v",
+                            "libx264",
+                            "-preset",
+                            "medium",
+                            "-crf",
+                            "23",
+                        ]
                 if has_audio:
                     if watermark_path and watermark_path.is_file():
                         command.extend([
@@ -712,12 +817,19 @@ def create_clip(
                 )
                 if watermark_path and watermark_path.is_file():
                     wm_y = "round(H*0.07)" if (top_line and top_line.strip()) else "round(H*0.20)"
-                    base_filter_complex = (
-                        f"{bg_and_video}[base];"
-                        f"[1:v]scale=240:-2[wm];"
-                        f"[base][wm]overlay=(W-w)/2:{wm_y}"
-                    )
-                    if all_text_filters:
+                    if use_ass and ass_filter:
+                        base_filter_complex = (
+                            f"{bg_and_video},{ass_filter}[base];"
+                            f"[1:v]scale=240:-2[wm];"
+                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                        )
+                    else:
+                        base_filter_complex = (
+                            f"{bg_and_video}[base];"
+                            f"[1:v]scale=240:-2[wm];"
+                            f"[base][wm]overlay=(W-w)/2:{wm_y}"
+                        )
+                    if (not use_ass) and all_text_filters:
                         filter_graph = base_filter_complex + "," + ",".join(all_text_filters) + "[v]"
                     else:
                         filter_graph = base_filter_complex + "[v]"
@@ -748,7 +860,9 @@ def create_clip(
                         "23",
                     ]
                 else:
-                    if all_text_filters:
+                    if use_ass and ass_filter:
+                        filter_graph = f"{bg_and_video},{ass_filter}[v]"
+                    elif (not use_ass) and all_text_filters:
                         filter_graph = bg_and_video + "," + ",".join(all_text_filters) + "[v]"
                     else:
                         filter_graph = bg_and_video + "[v]"
