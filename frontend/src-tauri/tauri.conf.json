@@ -32,7 +32,10 @@
     "createUpdaterArtifacts": true,
     "windows": {
       "nsis": {
-        "installerHooks": "nsis/installer-hooks.nsh"
+        "installerHooks": "nsis/installer-hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp"
       }
     },
     "resources": {

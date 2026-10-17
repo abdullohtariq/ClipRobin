@@ -31,11 +31,11 @@ export default function RootLayout({
             <div>
               <div className="mb-8 flex items-center gap-3">
                 <Image
-                  src="/logo.svg"
+                  src="/logo-mark.svg"
                   alt="Clip Robin logo"
                   width={36}
                   height={36}
-                  className="rounded-xl shadow"
+                  className="shrink-0 object-contain"
                   priority
                 />
                 <div>
