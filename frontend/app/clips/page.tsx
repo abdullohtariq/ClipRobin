@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, memo, Suspense, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   CaptionStyle,
   Clip,
@@ -10,125 +10,162 @@ import {
   cancelClipGeneration,
   clipDownloadUrl,
   clipUrl,
-  clipsArchiveDownloadUrl,
   FramingMode,
   generateClips,
   getClips,
   getLatestClipGenerationJob,
+  getProjects,
+  Project,
   removeClipTopLine,
   saveAllClipsWithExplorer,
   saveClipWithExplorer,
   setClipTopLine,
 } from "@/src/lib/api";
 import { ClipSkeletonCard } from "@/src/components/skeletons";
-import {
-  CaptionStylePicker,
-  CAPTION_STYLE_OPTIONS,
-  getPreviewUrls,
-} from "@/src/components/caption-style-picker";
+import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
+import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
+import { Badge } from "@/src/components/ui/badge";
+import { StatusPill } from "@/src/components/ui/status-pill";
+import { IconButton } from "@/src/components/ui/icon-button";
+import { Tooltip } from "@/src/components/ui/tooltip";
 
-const ClipCard = memo(function ClipCard({
+interface AppliedProjectSettings {
+  framingMode: FramingMode;
+  clipDurationSeconds: ClipDuration;
+  captionStyle: CaptionStyle;
+  showWatermark: boolean;
+  showCaptions: boolean;
+}
+
+// Minimal Video Player Card
+const ProClipCard = memo(function ProClipCard({
   clip,
+  index,
   projectId,
-  showWatermark = true,
-  showSubtitles = true,
+  globalVolume,
+  globalMuted,
+  activePlayingClipId,
+  onPlay,
+  onOpenModal,
+  showWatermark,
+  showSubtitles,
   onClipUpdated,
 }: {
   clip: Clip;
+  index: number;
   projectId: string;
+  globalVolume: number;
+  globalMuted: boolean;
+  activePlayingClipId: string | null;
+  onPlay: (clipId: string) => void;
+  onOpenModal: (clip: Clip) => void;
   showWatermark?: boolean;
   showSubtitles?: boolean;
   onClipUpdated?: (updatedClip: Clip) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [volume, setVolume] = useState(1);
-  const [muted, setMuted] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isInView, setIsInView] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [audioStatus, setAudioStatus] = useState("");
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(clip.duration || 0);
   const [mediaUrls, setMediaUrls] = useState<{ clip: string; download: string } | null>(null);
-  const [mediaUrlError, setMediaUrlError] = useState("");
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadMsg, setDownloadMsg] = useState("");
   const [isEditingTopLine, setIsEditingTopLine] = useState(false);
   const [topLineInput, setTopLineInput] = useState(clip.top_line || "");
   const [isSavingTopLine, setIsSavingTopLine] = useState(false);
   const [topLineError, setTopLineError] = useState("");
 
-  const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
   const isTrue916 = clip.framing_mode === "true_9_16";
+  const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
 
+  // Lazy load video stream using IntersectionObserver
   useEffect(() => {
-    setTopLineInput(clip.top_line || "");
-  }, [clip.top_line]);
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsInView(true);
+        }
+      },
+      { rootMargin: "250px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
+  // Fetch clip streaming & download URLs
   useEffect(() => {
     let isActive = true;
-    void Promise.all([
-      clipUrl(projectId, clip.file),
-      clipDownloadUrl(projectId, clip.file),
-    ]).then(([clip, download]) => {
-      if (isActive) {
-        setMediaUrls({ clip, download });
-        setMediaUrlError("");
-      }
-    }).catch((error: unknown) => {
-      if (isActive) {
-        setMediaUrlError(error instanceof Error ? error.message : String(error));
-      }
-    });
+    if (isInView && !mediaUrls) {
+      void Promise.all([
+        clipUrl(projectId, clip.file),
+        clipDownloadUrl(projectId, clip.file),
+      ]).then(([cUrl, dUrl]) => {
+        if (isActive) setMediaUrls({ clip: cUrl, download: dUrl });
+      }).catch(() => {});
+    }
     return () => {
       isActive = false;
     };
-  }, [clip.file, projectId]);
+  }, [isInView, mediaUrls, clip.file, projectId]);
 
-  const playWithSound = async () => {
+  // Sync global volume & mute to video
+  useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    const nextVolume = volume || 1;
-    video.defaultMuted = false;
-    video.muted = false;
-    video.volume = nextVolume;
-    setVolume(nextVolume);
-    setMuted(false);
-    setAudioStatus("");
+    video.volume = globalVolume;
+    video.muted = globalMuted;
+  }, [globalVolume, globalMuted]);
+
+  // Pause if another clip started playing
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (activePlayingClipId !== clip.id && isPlaying) {
+      video.pause();
+      setIsPlaying(false);
+    }
+  }, [activePlayingClipId, clip.id, isPlaying]);
+
+  const togglePlayPause = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const video = videoRef.current;
+    if (!video) return;
+    if (isPlaying) {
+      video.pause();
+      setIsPlaying(false);
+    } else {
+      onPlay(clip.id);
+      video.play().then(() => setIsPlaying(true)).catch(() => {});
+    }
+  };
+
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (isDownloading) return;
+    setIsDownloading(true);
+    setDownloadMsg("");
     try {
-      await video.play();
-    } catch (error) {
-      setAudioStatus(
-        error instanceof Error
-          ? `Could not start playback: ${error.message}`
-          : "Could not start playback. Use the video controls to play the clip.",
-      );
+      const res = await saveClipWithExplorer(projectId, clip.file, `${clip.id}.mp4`);
+      if (res.saved) {
+        setDownloadMsg("Saved!");
+        setTimeout(() => setDownloadMsg(""), 3000);
+      }
+    } catch {
+      setDownloadMsg("Error saving");
+    } finally {
+      setIsDownloading(false);
     }
-  };
-
-  const togglePlaybackSound = () => {
-    const video = videoRef.current;
-    if (!video) return;
-    if (isPlaying && !video.muted) {
-      video.muted = true;
-      setMuted(true);
-      return;
-    }
-    void playWithSound();
-  };
-
-  const handleVolumeChange = (nextVolume: number) => {
-    setVolume(nextVolume);
-    const video = videoRef.current;
-    if (!video) return;
-    video.volume = nextVolume;
-    video.muted = nextVolume === 0;
-    setMuted(video.muted);
   };
 
   const handleSaveTopLine = async () => {
     const trimmed = topLineInput.trim();
     const words = trimmed.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      setTopLineError("Please enter a top line");
-      return;
-    }
-    if (words.length > 15) {
-      setTopLineError("Top line cannot exceed 15 words");
+    if (!words.length || words.length > 15) {
+      setTopLineError("Top line must be 1 to 15 words");
       return;
     }
     setIsSavingTopLine(true);
@@ -149,11 +186,9 @@ const ClipCard = memo(function ClipCard({
         clip: `${cUrl}?t=${timestamp}`,
         download: `${dUrl}&t=${timestamp}`,
       });
-      if (videoRef.current) {
-        videoRef.current.load();
-      }
-    } catch (error) {
-      setTopLineError(error instanceof Error ? error.message : String(error));
+      if (videoRef.current) videoRef.current.load();
+    } catch (err) {
+      setTopLineError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSavingTopLine(false);
     }
@@ -179,121 +214,69 @@ const ClipCard = memo(function ClipCard({
         clip: `${cUrl}?t=${timestamp}`,
         download: `${dUrl}&t=${timestamp}`,
       });
-      if (videoRef.current) {
-        videoRef.current.load();
-      }
-    } catch (error) {
-      setTopLineError(error instanceof Error ? error.message : String(error));
+      if (videoRef.current) videoRef.current.load();
+    } catch (err) {
+      setTopLineError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSavingTopLine(false);
     }
   };
 
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [downloadMessage, setDownloadMessage] = useState("");
-
-  const handleDownloadClip = async () => {
-    if (isDownloading) return;
-    setIsDownloading(true);
-    setDownloadMessage("");
-    try {
-      const res = await saveClipWithExplorer(projectId, clip.file, `${clip.id}.mp4`);
-      if (res.saved) {
-        setDownloadMessage("Saved successfully");
-        setTimeout(() => setDownloadMessage(""), 4000);
-      }
-    } catch (err) {
-      setDownloadMessage(err instanceof Error ? err.message : "Download failed");
-    } finally {
-      setIsDownloading(false);
-    }
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
   };
 
   return (
-    <article className="rounded-[12px] border border-[#232326] bg-[#111113] p-5 shadow-sm transition-all duration-150">
-      {/* Top line editor space above video */}
+    <article
+      ref={containerRef}
+      className="group relative flex flex-col justify-between rounded-2xl border border-zinc-800 bg-[#121215] p-3.5 shadow-sm transition-all duration-150 hover:border-zinc-700 hover:bg-[#141418] hover:shadow-md"
+      style={{ contentVisibility: "auto" }}
+    >
+      {/* Top Line Editor Dropdown */}
       {isEditingTopLine && (
-        <div className="mb-3 max-w-xs rounded-[10px] border border-zinc-700/80 bg-zinc-900/95 p-3 shadow-lg">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-semibold text-white flex items-center gap-1.5">
-              <span className="inline-block size-2 rounded-full bg-[#10b981]" />
-              Top Line (Hook / Context)
-            </span>
-            <span
-              className={`font-mono text-[11px] font-medium ${
-                wordCount > 15
-                  ? "text-rose-400 font-bold"
-                  : wordCount >= 12
-                  ? "text-amber-400"
-                  : "text-zinc-400"
-              }`}
-            >
-              {wordCount} / 15 words
+        <div className="mb-3 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl space-y-2 z-20 animate-in fade-in-0 duration-150">
+          <div className="flex items-center justify-between text-xs font-medium">
+            <span className="text-zinc-200">Headline Hook (Top Line)</span>
+            <span className={wordCount > 15 ? "text-red-400 font-bold" : "text-zinc-400"}>
+              {wordCount}/15 words
             </span>
           </div>
-
           <textarea
             value={topLineInput}
             onChange={(e) => {
               setTopLineInput(e.target.value);
               if (topLineError) setTopLineError("");
             }}
-            placeholder="e.g. MrBeast reacted this way when Ronaldo said it"
+            placeholder="e.g. POV: When your code compiles on the first try"
             rows={2}
-            maxLength={100}
-            className="w-full rounded-[8px] border border-zinc-700 bg-black/60 px-2.5 py-1.5 text-xs text-white placeholder-zinc-500 focus:border-[#10b981] focus:outline-none focus:ring-1 focus:ring-[#10b981] resize-none"
+            className="w-full rounded-lg border border-zinc-700 bg-black/70 p-2 text-xs text-white placeholder:text-zinc-500 focus-ring resize-none"
           />
-
-          <p className="mt-1 text-[10px] text-zinc-400">
-            Enforces 15-word limit &amp; safe margins so line never touches video, watermark, or sides.
-          </p>
-
-          {topLineError && (
-            <p role="alert" className="mt-1.5 text-xs text-rose-400">
-              {topLineError}
-            </p>
-          )}
-
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          {topLineError && <p className="text-[11px] text-red-400">{topLineError}</p>}
+          <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
-              disabled={isSavingTopLine || wordCount === 0 || wordCount > 15}
+              disabled={isSavingTopLine || !wordCount || wordCount > 15}
               onClick={handleSaveTopLine}
-              className="inline-flex items-center gap-1.5 rounded-[7px] bg-[#10b981] px-2.5 py-1.5 text-xs font-semibold text-black transition-all hover:bg-[#059669] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-2.5 py-1 rounded-md bg-[#10b981] text-xs font-semibold text-zinc-950 hover:bg-[#059669] disabled:opacity-50"
             >
-              {isSavingTopLine ? (
-                <>
-                  <svg className="size-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                  </svg>
-                  Burning...
-                </>
-              ) : (
-                "Burn top line"
-              )}
+              {isSavingTopLine ? "Saving..." : "Save"}
             </button>
-
             {clip.top_line && (
               <button
                 type="button"
                 disabled={isSavingTopLine}
                 onClick={handleRemoveTopLine}
-                className="rounded-[7px] border border-rose-900/60 bg-rose-950/40 px-2 py-1.5 text-xs font-medium text-rose-300 transition-all hover:bg-rose-900/60 hover:text-white disabled:opacity-50"
+                className="px-2 py-1 rounded-md border border-zinc-700 text-xs text-zinc-300 hover:text-red-400"
               >
                 Remove
               </button>
             )}
-
             <button
               type="button"
-              disabled={isSavingTopLine}
-              onClick={() => {
-                setIsEditingTopLine(false);
-                setTopLineInput(clip.top_line || "");
-                setTopLineError("");
-              }}
-              className="rounded-[7px] border border-zinc-700 px-2 py-1.5 text-xs font-medium text-zinc-400 transition-all hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => setIsEditingTopLine(false)}
+              className="px-2 py-1 text-xs text-zinc-400 hover:text-white ml-auto"
             >
               Cancel
             </button>
@@ -301,199 +284,293 @@ const ClipCard = memo(function ClipCard({
         </div>
       )}
 
-      {/* Video element with safe-zone live preview overlay */}
-      <div className="relative aspect-[9/16] w-full max-w-xs overflow-hidden rounded-[10px] bg-black">
-        <video
-          ref={videoRef}
-          controls
-          crossOrigin="anonymous"
-          preload="metadata"
-          className="size-full object-contain"
-          onLoadedMetadata={() => {
-            const video = videoRef.current;
-            if (!video) return;
-            video.defaultMuted = false;
-            video.muted = false;
-            video.volume = volume;
-            setMuted(false);
-          }}
-          onVolumeChange={(event) => {
-            setMuted(event.currentTarget.muted);
-            setVolume(event.currentTarget.volume);
-          }}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
-        >
-          {mediaUrls && <source src={mediaUrls.clip} type="video/mp4" />}
-        </video>
-
-        {/* Live overlay showing safe margin positioning while editing */}
-        {isEditingTopLine && (
-          <>
-            {showWatermark && (
-              <div className="pointer-events-none absolute inset-x-0 top-[7%] z-10 flex justify-center px-4">
-                <div className="rounded-[4px] border border-white/20 bg-black/80 px-2 py-0.5 text-center font-medium text-[9px] text-zinc-300 shadow backdrop-blur-xs">
-                  Watermark moves here &uarr;
-                </div>
-              </div>
-            )}
-            {topLineInput.trim() && (
-              <div className="pointer-events-none absolute inset-x-0 top-[20%] z-10 flex justify-center px-4">
-                <div className="rounded-[6px] border border-black/70 bg-black/95 px-3 py-1.5 text-center font-bold text-white text-[11px] leading-tight shadow-xl max-w-[85%] mx-auto backdrop-blur-md">
-                  {topLineInput.trim().split("\n").map((line, idx) => (
-                    <div key={idx}>{line}</div>
-                  ))}
-                  <span className="block mt-0.5 text-[8px] font-normal text-emerald-400">Top line safe zone</span>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      <div className="mt-3 flex max-w-xs items-center gap-2">
-        <button
-          type="button"
-          onClick={togglePlaybackSound}
-          className="shrink-0 rounded-[8px] border border-[#232326] px-2.5 py-1.5 text-xs font-medium text-white transition-all duration-150 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-        >
-          {isPlaying && !muted ? "Mute audio" : "Play with sound"}
-        </button>
-        <label className="flex min-w-0 flex-1 items-center gap-2 text-[11px] text-zinc-400">
-          <span>Vol</span>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={volume}
-            aria-label={`Volume for ${clip.title}`}
-            onChange={(event) => handleVolumeChange(Number(event.target.value))}
-            className="min-w-0 flex-1 accent-[#10b981]"
+      {/* Video Thumbnail / Player Frame */}
+      <div
+        onClick={() => onOpenModal(clip)}
+        className="relative aspect-[9/16] w-full rounded-xl overflow-hidden bg-black border border-zinc-800/80 cursor-pointer group/player shadow-inner"
+      >
+        {mediaUrls && isInView ? (
+          <video
+            ref={videoRef}
+            src={mediaUrls.clip}
+            playsInline
+            preload="metadata"
+            onTimeUpdate={() => {
+              if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+            }}
+            onLoadedMetadata={() => {
+              if (videoRef.current) setDuration(videoRef.current.duration);
+            }}
+            onEnded={() => setIsPlaying(false)}
+            className="size-full object-cover"
           />
-          <span className="w-8 text-right font-mono tabular-nums">{Math.round(volume * 100)}%</span>
-        </label>
-      </div>
+        ) : (
+          <div className="size-full flex flex-col items-center justify-center bg-zinc-950 text-zinc-600">
+            <svg className="size-8 stroke-1 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <rect width="18" height="18" x="3" y="3" rx="2" />
+              <path d="M7 3v18" />
+              <path d="M3 7.5h4" />
+              <path d="M3 12h18" />
+              <path d="M3 16.5h4" />
+              <path d="M17 3v18" />
+              <path d="M17 7.5h4" />
+              <path d="M17 16.5h4" />
+            </svg>
+          </div>
+        )}
 
-      {audioStatus && (
-        <p role="status" className="mt-2 max-w-xs text-xs text-amber-300">
-          {audioStatus}
-        </p>
-      )}
+        {/* Minimal Player Controls Overlay */}
+        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/player:opacity-100 transition-opacity duration-150 flex flex-col justify-between p-2.5">
+          {/* Top Badges */}
+          <div className="flex items-center justify-between">
+            <span className="px-2 py-0.5 rounded-md bg-black/75 text-[11px] font-mono font-bold text-white border border-white/10">
+              #{String(index + 1).padStart(2, "0")}
+            </span>
+            <span className="px-2 py-0.5 rounded-md bg-black/75 text-[11px] font-mono font-medium text-emerald-400 border border-white/10">
+              {clip.duration.toFixed(1)}s
+            </span>
+          </div>
 
-      {/* Action buttons: Download clip and Add/Edit top line */}
-      <div className="mt-3 flex max-w-xs flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void handleDownloadClip()}
-          disabled={isDownloading}
-          className="inline-flex items-center gap-1.5 rounded-[8px] border border-[#232326] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-60"
-        >
-          {isDownloading ? (
-            <>
-              <svg className="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-              </svg>
-              <span>Saving...</span>
-            </>
-          ) : (
-            <>
-              <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-              </svg>
-              <span>Download clip</span>
-            </>
-          )}
-        </button>
-
-        <div className="relative group inline-block">
+          {/* Center Play / Pause Icon Button */}
           <button
             type="button"
-            disabled={isTrue916}
-            aria-disabled={isTrue916}
-            onClick={() => {
-              if (isTrue916) return;
-              setIsEditingTopLine((prev) => !prev);
-              setTopLineInput(clip.top_line || "");
-              setTopLineError("");
-            }}
-            className={`inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-1.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-              isTrue916
-                ? "border-zinc-800 bg-zinc-900/40 text-zinc-500 cursor-not-allowed opacity-50"
-                : clip.top_line
-                ? "border-emerald-600/40 bg-emerald-950/20 text-emerald-300 hover:border-emerald-500 hover:text-white"
-                : "border-[#232326] text-zinc-200 hover:border-zinc-700 hover:text-white"
-            }`}
+            aria-label={isPlaying ? "Pause clip" : "Play clip"}
+            onClick={togglePlayPause}
+            className="mx-auto flex size-12 items-center justify-center rounded-full bg-black/80 border border-white/20 text-white shadow-xl hover:scale-105 active:scale-95 transition-transform"
           >
-            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-            </svg>
-            {clip.top_line ? "Edit top line" : "Add top line"}
+            {isPlaying ? (
+              <svg className="size-5 fill-current" viewBox="0 0 24 24">
+                <rect x="6" y="4" width="4" height="16" />
+                <rect x="14" y="4" width="4" height="16" />
+              </svg>
+            ) : (
+              <svg className="size-5 fill-current ml-0.5" viewBox="0 0 24 24">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            )}
           </button>
-          {isTrue916 && (
-            <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-[11px] font-medium text-amber-300 shadow-xl whitespace-nowrap z-30">
-              Top line generally doesn&apos;t go with 9:16. Try 1:1 or 16:9 for that
-              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
+
+          {/* Bottom Scrubber & Time */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-300">
+              <span>{formatTime(currentTime)}</span>
+              <span>{formatTime(duration)}</span>
             </div>
-          )}
+            <div className="h-1 w-full bg-white/20 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-400"
+                style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      {downloadMessage && (
-        <p
-          role="status"
-          className={`mt-2 max-w-xs text-xs font-medium ${
-            downloadMessage.includes("failed") ? "text-rose-400" : "text-emerald-400"
-          }`}
-        >
-          {downloadMessage}
-        </p>
-      )}
-
-      {mediaUrlError && (
-        <p role="status" className="mt-2 text-xs text-amber-300">
-          Could not load clip URL: {mediaUrlError}
-        </p>
-      )}
-
-      {clip.top_line && (
-        <div className="mt-2.5 flex max-w-xs items-center gap-1.5 rounded-[6px] border border-emerald-900/40 bg-emerald-950/20 px-2 py-1 text-[11px] text-emerald-300">
-          <span className="font-semibold text-emerald-400 shrink-0">Top line:</span>
-          <span className="truncate italic">&ldquo;{clip.top_line}&rdquo;</span>
+      {/* Card Content & Metadata */}
+      <div className="mt-3 space-y-2">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-[13px] font-semibold text-white leading-snug line-clamp-1" title={clip.title}>
+            {clip.title}
+          </h3>
+          <StatusPill status={clip.status} />
         </div>
-      )}
 
-      <h3 className="mt-3 text-sm font-semibold text-white line-clamp-2">{clip.title}</h3>
-      <p className="mt-1 text-xs text-zinc-400 font-mono">
-        {clip.start.toFixed(1)}s → {clip.end.toFixed(1)}s · {clip.duration.toFixed(1)}s
-      </p>
-      <p className="mt-1 text-xs font-medium text-emerald-400">{clip.status}</p>
+        {/* 2-line transcript / reason snippet */}
+        {clip.reason ? (
+          <p
+            className="text-xs text-zinc-400 line-clamp-2 leading-relaxed"
+            title={clip.reason}
+          >
+            {clip.reason}
+          </p>
+        ) : (
+          <p className="text-xs text-zinc-500 italic line-clamp-1">
+            Segment from source video
+          </p>
+        )}
+
+        {/* Timecode badge */}
+        <div className="text-[11px] font-mono text-zinc-500 pt-1">
+          {formatTime(clip.start)} — {formatTime(clip.end)}
+        </div>
+
+        {/* Two actions only: Download & Add Top Line */}
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-800/80 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            disabled={isDownloading}
+            onClick={handleDownload}
+            className="flex-1 py-1.5 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800/90 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors focus-ring flex items-center justify-center gap-1.5"
+          >
+            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            <span>{downloadMsg || (isDownloading ? "Saving..." : "Download")}</span>
+          </button>
+
+          {isTrue916 ? (
+            <Tooltip content="Top line is disabled for True 9:16 clips to preserve AI speaker framing">
+              <button
+                type="button"
+                disabled
+                className="py-1.5 px-2.5 rounded-lg border border-zinc-800/60 bg-zinc-900/50 text-xs font-medium text-zinc-500 cursor-not-allowed"
+              >
+                Top line
+              </button>
+            </Tooltip>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsEditingTopLine((prev) => !prev)}
+              className="py-1.5 px-2.5 rounded-lg border border-zinc-700 bg-transparent hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring"
+            >
+              {clip.top_line ? "Edit top line" : "Add top line"}
+            </button>
+          )}
+        </div>
+      </div>
     </article>
   );
 });
 
-const CLIP_DURATIONS = [15, 30, 60, 90] as const;
-type ClipDuration = (typeof CLIP_DURATIONS)[number];
+// Fullscreen Clip Preview Modal Dialog
+function ClipModalViewer({
+  clip,
+  projectId,
+  onClose,
+}: {
+  clip: Clip | null;
+  projectId: string;
+  onClose: () => void;
+}) {
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
-function ProjectClips({ projectId }: { projectId: string }) {
-  const [clips, setClips] = useState<Clip[]>([]);
-  const [isLoading, setIsLoading] = useState(Boolean(projectId));
-  const [status, setStatus] = useState(
-    projectId ? "" : "Choose a project to view its clips.",
+  useEffect(() => {
+    if (!clip) return;
+    let active = true;
+    clipUrl(projectId, clip.file).then((url) => {
+      if (active) setVideoUrl(url);
+    });
+    return () => {
+      active = false;
+    };
+  }, [clip, projectId]);
+
+  if (!clip) return null;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={clip.title}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
+    >
+      <div className="relative flex flex-col md:flex-row items-center max-w-4xl w-full rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-2xl gap-6 overflow-hidden max-h-[90vh]">
+        {/* Close Button */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close clip preview"
+          className="absolute top-4 right-4 z-20 size-8 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center focus-ring"
+        >
+          ✕
+        </button>
+
+        {/* 9:16 Video Player */}
+        <div className="relative aspect-[9/16] w-full max-w-[280px] shrink-0 rounded-xl overflow-hidden bg-black border border-zinc-800 shadow-xl">
+          {videoUrl && (
+            <video
+              src={videoUrl}
+              controls
+              autoPlay
+              playsInline
+              className="size-full object-cover"
+            />
+          )}
+        </div>
+
+        {/* Details Pane */}
+        <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2">
+          <div>
+            <span className="text-xs font-mono font-semibold text-emerald-400">
+              {clip.id}
+            </span>
+            <h2 className="text-lg font-bold text-white mt-1 leading-snug">
+              {clip.title}
+            </h2>
+            <div className="flex items-center gap-3 mt-2 text-xs text-zinc-400">
+              <span>Duration: {clip.duration.toFixed(1)}s</span>
+              <span>•</span>
+              <span>Framing: {clip.framing_mode || "Standard"}</span>
+            </div>
+          </div>
+
+          {clip.reason && (
+            <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 space-y-1.5">
+              <span className="text-xs font-semibold text-zinc-300">Segment Context</span>
+              <p className="text-xs text-zinc-400 leading-relaxed">{clip.reason}</p>
+            </div>
+          )}
+
+          {clip.top_line && (
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-1">
+              <span className="text-xs font-semibold text-emerald-400">Top Line Context</span>
+              <p className="text-sm font-medium text-white">{clip.top_line}</p>
+            </div>
+          )}
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={() => void saveClipWithExplorer(projectId, clip.file, `${clip.id}.mp4`)}
+              className="px-4 py-2.5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-xs font-bold text-zinc-950 transition-colors focus-ring"
+            >
+              Export with Save As Dialog
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
-  const [showSubtitles, setShowSubtitles] = useState(true);
-  const [showWatermark, setShowWatermark] = useState(true);
-  const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
-  const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
-  const [framingMode, setFramingMode] = useState<FramingMode>("standard");
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
-  const [isCaptionPickerOpen, setIsCaptionPickerOpen] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
+}
+
+// Main Clips Studio Component
+function ProjectClipsContent({ projectId }: { projectId: string }) {
+  const router = useRouter();
+  const [clips, setClips] = useState<Clip[]>([]);
+  const [projectsList, setProjectsList] = useState<Project[]>([]);
+  const [isLoading, setIsLoading] = useState(Boolean(projectId));
+  const [status, setStatus] = useState(projectId ? "" : "Choose a project to view its clips.");
   const [generating, setGenerating] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
 
+  // Settings state
+  const [framingMode, setFramingMode] = useState<FramingMode>("standard");
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
+  const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
+  const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [showWatermark, setShowWatermark] = useState(true);
+
+  // Applied generation settings for dirty detection
+  const [appliedSettings, setAppliedSettings] = useState<AppliedProjectSettings | null>(null);
+
+  // UI State: settings panel toggle, search, sort, audio
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"timeline" | "duration">("timeline");
+  const [globalVolume, setGlobalVolume] = useState<number>(1);
+  const [globalMuted, setGlobalMuted] = useState<boolean>(false);
+  const [activePlayingClipId, setActivePlayingClipId] = useState<string | null>(null);
+  const [selectedClipForModal, setSelectedClipForModal] = useState<Clip | null>(null);
+
+  // Fetch available projects for dropdown switcher
+  useEffect(() => {
+    getProjects().then((res) => setProjectsList(res.projects || [])).catch(() => {});
+  }, []);
+
+  // Restore preferences & applied settings
   useEffect(() => {
     try {
       const savedFraming = localStorage.getItem("cliprobin_framing_mode");
@@ -504,55 +581,35 @@ function ProjectClips({ projectId }: { projectId: string }) {
       if (savedDuration && [15, 30, 60, 90].includes(Number(savedDuration))) {
         setClipDurationSeconds(Number(savedDuration) as ClipDuration);
       }
-      const savedMode = localStorage.getItem("cliprobin_generation_mode");
-      if (savedMode && ["random", "ai"].includes(savedMode)) {
-        setGenerationMode(savedMode as "random" | "ai");
-      }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
-      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
+      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(savedStyle)) {
         setCaptionStyle(savedStyle as CaptionStyle);
-      } else {
-        const stored = localStorage.getItem("cliprobin.settings");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.defaultCaptionStyle) setCaptionStyle(parsed.defaultCaptionStyle);
-        }
+      }
+      const savedVol = localStorage.getItem("cliprobin_volume");
+      if (savedVol) setGlobalVolume(parseFloat(savedVol));
+      const savedMute = localStorage.getItem("cliprobin_muted");
+      if (savedMute) setGlobalMuted(savedMute === "true");
+
+      if (projectId) {
+        const stored = localStorage.getItem(`cliprobin_applied_${projectId}`);
+        if (stored) setAppliedSettings(JSON.parse(stored));
       }
     } catch {}
-  }, []);
+  }, [projectId]);
 
-  const handleFramingModeChange = (mode: FramingMode) => {
-    setFramingMode(mode);
-    try {
-      localStorage.setItem("cliprobin_framing_mode", mode);
-    } catch {}
-  };
+  // Check if current settings differ from applied generation settings (dirty state)
+  const isDirty = useMemo(() => {
+    if (!appliedSettings || !clips.length) return false;
+    return (
+      appliedSettings.framingMode !== framingMode ||
+      appliedSettings.clipDurationSeconds !== clipDurationSeconds ||
+      appliedSettings.captionStyle !== captionStyle ||
+      appliedSettings.showWatermark !== showWatermark ||
+      appliedSettings.showCaptions !== showCaptions
+    );
+  }, [appliedSettings, clips.length, framingMode, clipDurationSeconds, captionStyle, showWatermark, showCaptions]);
 
-  const handleClipDurationChange = (seconds: ClipDuration) => {
-    setClipDurationSeconds(seconds);
-    try {
-      localStorage.setItem("cliprobin_clip_duration", String(seconds));
-    } catch {}
-  };
-
-  const handleGenerationModeChange = (mode: "random" | "ai") => {
-    setGenerationMode(mode);
-    try {
-      localStorage.setItem("cliprobin_generation_mode", mode);
-    } catch {}
-  };
-
-  const handleCaptionStyleChange = (styleId: CaptionStyle) => {
-    setCaptionStyle(styleId);
-    try {
-      localStorage.setItem("cliprobin_caption_style", styleId);
-    } catch {}
-  };
-
-  const activeStyleOption =
-    CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle) || CAPTION_STYLE_OPTIONS[0];
-  const previewUrls = getPreviewUrls(captionStyle);
-
+  // Load clips & generation status
   useEffect(() => {
     if (!projectId) {
       setIsLoading(false);
@@ -560,7 +617,8 @@ function ProjectClips({ projectId }: { projectId: string }) {
     }
     let isCurrentRequest = true;
     let interval: number | undefined;
-    const loadProgressAndClips = async () => {
+
+    const loadClipsAndStatus = async () => {
       try {
         const [result, job] = await Promise.all([
           getClips(projectId),
@@ -568,51 +626,40 @@ function ProjectClips({ projectId }: { projectId: string }) {
         ]);
         if (!isCurrentRequest) return;
         setIsLoading(false);
-        const currentClips = (job?.ready_clips && job.ready_clips.length > result.clips.length)
-          ? job.ready_clips
-          : result.clips;
-        setClips((current) =>
-          JSON.stringify(current) === JSON.stringify(currentClips) ? current : currentClips,
-        );
+        const currentClips =
+          job?.ready_clips && job.ready_clips.length > result.clips.length
+            ? job.ready_clips
+            : result.clips;
+        setClips(currentClips);
         setGenerationProgress(job);
-        if (job?.status === "queued" || job?.status === "processing" || job?.status === "cancelling") {
-          setGenerating(true);
-          setStatus("");
-        } else if (job?.status === "cancelled") {
-          setGenerating(false);
-          setStatus(job.step);
-        } else if (job?.status === "failed") {
-          setGenerating(false);
-          setStatus(job.error ?? `Clip generation failed for ${projectId}.`);
-        } else {
-          setGenerating(false);
-          setStatus(currentClips.length ? "" : `No clips generated yet for ${projectId}.`);
-        }
-        const isGenerating = job?.status === "queued"
-          || job?.status === "processing"
-          || job?.status === "cancelling";
-        if (isGenerating && interval === undefined) {
-          interval = window.setInterval(() => void loadProgressAndClips(), 1000);
-        } else if (!isGenerating && interval !== undefined) {
+
+        const isRunning =
+          job?.status === "queued" || job?.status === "processing" || job?.status === "cancelling";
+        setGenerating(Boolean(isRunning));
+
+        if (isRunning && interval === undefined) {
+          interval = window.setInterval(() => void loadClipsAndStatus(), 1000);
+        } else if (!isRunning && interval !== undefined) {
           window.clearInterval(interval);
           interval = undefined;
         }
-      } catch (error) {
+      } catch (err) {
         if (!isCurrentRequest) return;
         setIsLoading(false);
-        setStatus(error instanceof Error ? error.message : "Could not load clips");
+        setStatus(err instanceof Error ? err.message : "Failed to load clips");
       }
     };
-    void loadProgressAndClips();
 
+    void loadClipsAndStatus();
     return () => {
       isCurrentRequest = false;
       if (interval !== undefined) window.clearInterval(interval);
     };
   }, [projectId]);
 
-  const handleGenerate = async (event: FormEvent) => {
-    event.preventDefault();
+  // Regenerate clips pipeline
+  const handleGenerate = async (e: FormEvent) => {
+    e.preventDefault();
     if (!projectId || generating) return;
     setGenerating(true);
     setClips([]);
@@ -621,23 +668,20 @@ function ProjectClips({ projectId }: { projectId: string }) {
       job_id: "",
       project_id: projectId,
       status: "queued",
-      step: "Starting clip generation",
+      step: "Starting generation pipeline",
       progress: 0,
       completed_clips: 0,
       total_clips: 0,
     });
+
     try {
       const result = await generateClips(
         projectId,
-        showSubtitles,
+        showCaptions,
         (job) => {
           setGenerationProgress(job);
           if (job.ready_clips && job.ready_clips.length > 0) {
-            setClips((current) =>
-              JSON.stringify(current) === JSON.stringify(job.ready_clips)
-                ? current
-                : (job.ready_clips ?? current)
-            );
+            setClips(job.ready_clips);
           }
         },
         clipDurationSeconds,
@@ -645,15 +689,27 @@ function ProjectClips({ projectId }: { projectId: string }) {
         framingMode,
         captionStyle,
       );
+
       setClips(result.clips);
-      setStatus(result.cancelled
-        ? "Generation cancelled. Generated clips were removed."
-        : `${result.clips.length} clips generated for ${projectId}.`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Clip generation failed");
-      setGenerationProgress((current) => current
-        ? { ...current, status: "failed", step: "Clip generation failed" }
-        : null);
+      // Save applied settings
+      const applied: AppliedProjectSettings = {
+        framingMode,
+        clipDurationSeconds,
+        captionStyle,
+        showWatermark,
+        showCaptions,
+      };
+      setAppliedSettings(applied);
+      try {
+        localStorage.setItem(`cliprobin_applied_${projectId}`, JSON.stringify(applied));
+      } catch {}
+      setStatus(
+        result.cancelled
+          ? "Generation cancelled."
+          : `${result.clips.length} clips generated successfully.`,
+      );
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Clip generation failed");
     } finally {
       setGenerating(false);
     }
@@ -662,410 +718,360 @@ function ProjectClips({ projectId }: { projectId: string }) {
   const handleCancel = async () => {
     const job = generationProgress;
     if (!projectId || !job?.job_id || job.status === "cancelling") return;
-    if (!window.confirm("Cancel generation and remove all generated clips for this project? The source video and transcript will be kept.")) {
-      return;
-    }
+    if (!window.confirm("Cancel generation? Existing clips will be removed.")) return;
     try {
-      const updatedJob = await cancelClipGeneration(projectId, job.job_id);
-      setGenerationProgress(updatedJob);
-      setStatus("Cancelling generation and removing generated clips...");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not cancel clip generation");
+      const updated = await cancelClipGeneration(projectId, job.job_id);
+      setGenerationProgress(updated);
+      setStatus("Cancelling generation...");
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Could not cancel");
     }
   };
 
   const handleDownloadAll = async () => {
-    if (!projectId || downloadingAll || generating || clips.length === 0) return;
+    if (!projectId || downloadingAll) return;
     setDownloadingAll(true);
-    setStatus("");
     try {
-      const res = await saveAllClipsWithExplorer(projectId);
-      if (res.saved) {
-        setStatus("All clips archive saved successfully.");
-      }
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Could not download clips");
+      await saveAllClipsWithExplorer(projectId);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to download zip");
     } finally {
       setDownloadingAll(false);
     }
   };
 
+  // Filter & sort clips
+  const filteredClips = useMemo(() => {
+    let result = [...clips];
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(
+        (c) => c.title.toLowerCase().includes(q) || (c.reason && c.reason.toLowerCase().includes(q)),
+      );
+    }
+    if (sortBy === "duration") {
+      result.sort((a, b) => b.duration - a.duration);
+    } else {
+      result.sort((a, b) => a.start - b.start);
+    }
+    return result;
+  }, [clips, searchQuery, sortBy]);
+
+  const activeCaptionName =
+    CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle)?.name || "Classic";
+
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
-      <div className="mx-auto max-w-5xl">
-        <header className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Clips</h1>
-          <p className="mt-1.5 text-sm text-zinc-400">
-            {projectId ? `Previewing clips from project ${projectId}.` : "Select a project to preview its clips."}
-          </p>
-          {status && <p className="mt-2 text-xs text-zinc-500">{status}</p>}
+    <main className="min-h-screen bg-[#09090b] text-[#f4f4f5] px-6 lg:px-10 py-6 lg:py-8">
+      <div className="mx-auto max-w-[1560px] space-y-6">
+        {/* Header with Project Switcher Dropdown */}
+        <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-5">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+              Clips Studio
+            </h1>
+            <Badge variant="emerald" size="md">
+              {clips.length} {clips.length === 1 ? "clip" : "clips"}
+            </Badge>
+          </div>
+
+          {/* Project Switcher Dropdown */}
+          <div className="flex items-center gap-3">
+            <label htmlFor="project-switcher" className="text-xs font-medium text-zinc-400">
+              Project:
+            </label>
+            <select
+              id="project-switcher"
+              value={projectId || ""}
+              onChange={(e) => {
+                if (e.target.value) {
+                  router.push(`/clips?project=${encodeURIComponent(e.target.value)}`);
+                }
+              }}
+              className="rounded-xl border border-zinc-800 bg-[#121215] px-3.5 py-1.5 text-xs font-semibold text-white focus-ring cursor-pointer"
+            >
+              {projectsList.map((p) => (
+                <option key={p.project_id} value={p.project_id}>
+                  {p.project_id} ({p.clips} clips)
+                </option>
+              ))}
+            </select>
+          </div>
         </header>
 
-        {!projectId && (
-          <div className="rounded-[12px] border border-[#232326] bg-[#111113] p-8 text-center">
-            <p className="text-sm text-zinc-400">No project selected.</p>
-            <Link
-              href="/projects"
-              className="mt-3 inline-block rounded-[10px] bg-[#10b981] px-4 py-2 text-xs font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669]"
-            >
-              Choose a project &rarr;
-            </Link>
+        {/* Sticky Toolbar */}
+        <section className="sticky top-4 z-30 rounded-2xl border border-zinc-800 bg-[#121215]/95 backdrop-blur-md p-3.5 shadow-xl space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            {/* Primary Regenerate & ZIP Actions */}
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={(e) => void handleGenerate(e as unknown as FormEvent)}
+                disabled={generating || !projectId}
+                className="relative min-h-[38px] rounded-xl bg-[#10b981] px-5 py-2 text-xs font-bold text-zinc-950 transition-all duration-150 hover:bg-[#059669] hover:shadow-lg disabled:opacity-40 focus-ring flex items-center gap-2"
+              >
+                {isDirty && (
+                  <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
+                )}
+                <span>{generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}</span>
+              </button>
+
+              {generating && (
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  className="min-h-[38px] rounded-xl border border-red-500/30 bg-red-950/20 px-3.5 py-2 text-xs font-semibold text-red-300 hover:bg-red-900/30 focus-ring"
+                >
+                  Cancel
+                </button>
+              )}
+
+              {clips.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDownloadAll}
+                  disabled={downloadingAll}
+                  className="min-h-[38px] rounded-xl border border-zinc-700 bg-zinc-800/80 px-4 py-2 text-xs font-medium text-zinc-200 hover:text-white hover:bg-zinc-700 transition-colors focus-ring flex items-center gap-1.5"
+                >
+                  <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                  </svg>
+                  <span>{downloadingAll ? "Zipping..." : "Download all (ZIP)"}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Settings Summary Chips (Click opens collapsible ClipSettings) */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen((prev) => !prev)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] hover:border-zinc-700 transition-colors text-xs text-zinc-300 focus-ring"
+              >
+                <span>
+                  {framingMode === "true_9_16" ? "9:16 AI" : framingMode === "square_rounded" ? "1:1 Rounded" : "16:9"} • {clipDurationSeconds}s • {showCaptions ? activeCaptionName : "No subs"} • {showWatermark ? "Watermark" : "No logo"}
+                </span>
+                <span className="text-zinc-500">{isSettingsOpen ? "▲" : "▼"}</span>
+              </button>
+
+              {/* Dirty State Notice */}
+              {isDirty && (
+                <Badge variant="amber" size="sm">
+                  Settings changed — Regenerate to apply
+                </Badge>
+              )}
+
+              {/* Global Audio Volume Controls */}
+              <div className="flex items-center gap-1 pl-2 border-l border-zinc-800">
+                <IconButton
+                  label={globalMuted ? "Unmute all" : "Mute all"}
+                  tooltip={globalMuted ? "Unmute all clips" : "Mute all clips"}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    const nextMute = !globalMuted;
+                    setGlobalMuted(nextMute);
+                    try {
+                      localStorage.setItem("cliprobin_muted", String(nextMute));
+                    } catch {}
+                  }}
+                  icon={
+                    globalMuted ? (
+                      <svg className="size-4 text-zinc-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="1" y1="1" x2="23" y2="23" />
+                        <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                        <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
+                      </svg>
+                    ) : (
+                      <svg className="size-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                        <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                      </svg>
+                    )
+                  }
+                />
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={globalMuted ? 0 : globalVolume}
+                  onChange={(e) => {
+                    const vol = parseFloat(e.target.value);
+                    setGlobalVolume(vol);
+                    setGlobalMuted(vol === 0);
+                    try {
+                      localStorage.setItem("cliprobin_volume", String(vol));
+                    } catch {}
+                  }}
+                  aria-label="Global clip volume"
+                  className="w-16 accent-[#10b981] h-1 bg-zinc-800 rounded-lg cursor-pointer"
+                />
+              </div>
+            </div>
           </div>
-        )}
 
-        {projectId && (
-          <section className="mb-8 rounded-[12px] border border-[#232326] bg-[#111113] p-5 shadow-sm space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#232326] pb-4">
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={(e) => void handleGenerate(e as unknown as FormEvent)}
-                  disabled={generating}
-                  className="rounded-[10px] bg-[#10b981] px-5 py-2.5 text-xs font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                >
-                  {generating ? "Generating..." : clips.length ? "Regenerate Clips" : "Generate Clips"}
-                </button>
-                {clips.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadAll()}
-                    disabled={generating || downloadingAll}
-                    className="rounded-[10px] border border-[#232326] bg-transparent px-4 py-2.5 text-xs font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:text-white disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                  >
-                    {downloadingAll ? "Preparing download..." : "Download all clips (ZIP)"}
-                  </button>
-                )}
-              </div>
-
-              {/* Watermark Toggle */}
-              <div className="flex items-center gap-2.5">
-                <span className="text-xs text-zinc-400 font-medium">Watermark</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={showWatermark}
-                  disabled={generating}
-                  onClick={() => setShowWatermark((prev) => !prev)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
-                    showWatermark ? "bg-[#10b981]" : "bg-zinc-800"
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                      showWatermark ? "translate-x-4" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-
-            {/* Controls Grid: Aspect Ratio (16:9, 1:1, 9:16) + Caption Style */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-              {/* Ratio Selector: 16:9, 1:1, 9:16 */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-zinc-400">
-                  Aspect ratio & framing
-                </label>
-                <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Aspect ratio">
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={framingMode === "standard"}
-                    disabled={generating}
-                    onClick={() => handleFramingModeChange("standard")}
-                    className={`flex flex-col items-center justify-center rounded-[10px] border p-2.5 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      framingMode === "standard"
-                        ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
-                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                    }`}
-                  >
-                    <span className="text-xs font-semibold">16:9</span>
-                    <span className="text-[10px] text-zinc-500 mt-0.5">Rounded</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={framingMode === "square_rounded"}
-                    disabled={generating}
-                    onClick={() => handleFramingModeChange("square_rounded")}
-                    className={`flex flex-col items-center justify-center rounded-[10px] border p-2.5 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      framingMode === "square_rounded"
-                        ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
-                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                    }`}
-                  >
-                    <span className="text-xs font-semibold">1:1</span>
-                    <span className="text-[10px] text-emerald-400 mt-0.5">Reels / TikTok</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={framingMode === "true_9_16"}
-                    disabled={generating}
-                    onClick={() => handleFramingModeChange("true_9_16")}
-                    className={`flex flex-col items-center justify-center rounded-[10px] border p-2.5 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      framingMode === "true_9_16"
-                        ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
-                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                    }`}
-                  >
-                    <span className="text-xs font-semibold">9:16</span>
-                    <span className="text-[10px] text-purple-400 mt-0.5">AI Speaker</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Caption Style Selector */}
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-medium text-zinc-400">
-                    Captions
-                  </label>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={showSubtitles}
-                    disabled={generating}
-                    onClick={() => setShowSubtitles((prev) => !prev)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
-                      showSubtitles ? "bg-[#10b981]" : "bg-zinc-800"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                        showSubtitles ? "translate-x-4" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {showSubtitles ? (
-                  <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-2.5 transition-all duration-150 hover:border-zinc-700">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="relative aspect-[9/16] w-7 h-12 shrink-0 overflow-hidden rounded border border-[#232326] bg-black">
-                        <img
-                          src={previewUrls.posterUrl}
-                          alt={`${activeStyleOption.name} caption preview`}
-                          className="size-full object-cover"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold text-white truncate">
-                          Style: {activeStyleOption.name}
-                        </p>
-                        <p className="text-[11px] text-zinc-400 line-clamp-1">
-                          {activeStyleOption.description}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      disabled={generating}
-                      onClick={() => setIsCaptionPickerOpen(true)}
-                      className="shrink-0 px-3 py-1 rounded-lg border border-[#232326] bg-[#111113] text-xs font-medium text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-colors duration-150 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                    >
-                      Change
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center rounded-[10px] border border-dashed border-[#232326] bg-[#0a0a0a] p-3 text-xs text-zinc-500">
-                    Captions disabled
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Row 2: Generation Mode (Random vs AI) + Clip Duration (15s, 30s, 60s, 90s) */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-[#232326]">
-              {/* Generation Mode Selector */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-zinc-400">
-                  Generation mode
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    disabled={generating}
-                    onClick={() => handleGenerationModeChange("random")}
-                    className={`rounded-[10px] border py-2 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      generationMode === "random"
-                        ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
-                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                    }`}
-                  >
-                    Random
-                  </button>
-
-                  <div className="relative group cursor-not-allowed">
-                    <button
-                      type="button"
-                      disabled
-                      title="COMING SOON"
-                      aria-label="AI mode coming soon"
-                      className="w-full h-full rounded-[10px] border border-[#232326] bg-[#0a0a0a]/50 py-2 text-xs font-medium text-zinc-500 cursor-not-allowed flex items-center justify-center gap-1.5 group-hover:border-zinc-700 transition-all duration-150 pointer-events-none"
-                    >
-                      <span className="font-semibold text-zinc-400">AI</span>
-                      <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/90 border border-amber-400/20">
-                        Soon
-                      </span>
-                    </button>
-                    {/* Hover tooltip */}
-                    <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-[10px] font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
-                      COMING SOON
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Clip Duration Selector */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-zinc-400">
-                  Clip duration
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {CLIP_DURATIONS.map((seconds) => {
-                    const isSelected = clipDurationSeconds === seconds;
-                    return (
-                      <button
-                        key={seconds}
-                        type="button"
-                        disabled={generating}
-                        onClick={() => handleClipDurationChange(seconds)}
-                        className={`rounded-[10px] border py-2 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                          isSelected
-                            ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
-                            : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                        }`}
-                      >
-                        {seconds}s
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <CaptionStylePicker
-              isOpen={isCaptionPickerOpen}
-              onClose={() => setIsCaptionPickerOpen(false)}
-              selectedStyle={captionStyle}
-              onSelect={(style) => handleCaptionStyleChange(style)}
-            />
-          </section>
-        )}
-
-        {generationProgress && ["queued", "processing", "cancelling"].includes(generationProgress.status) && (
-          <section aria-live="polite" className="mb-8 rounded-[12px] border border-[#232326] bg-[#111113] p-5">
-            <div className="flex items-center justify-between gap-4">
-              <p className="text-xs font-medium text-zinc-200">{generationProgress.step}</p>
-              <p className="text-xs font-mono font-medium text-emerald-400">{generationProgress.progress}%</p>
-            </div>
-            <div
-              role="progressbar"
-              aria-label={`Clip generation progress for ${projectId}`}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={generationProgress.progress}
-              className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-zinc-800"
-            >
-              <div
-                className="h-full rounded-full bg-[#10b981] transition-[width] duration-300"
-                style={{ width: `${generationProgress.progress}%` }}
+          {/* Collapsible ClipSettings drawer */}
+          {isSettingsOpen && (
+            <div className="pt-3 border-t border-zinc-800/80 animate-in fade-in-0 duration-150">
+              <ClipSettings
+                variant="compact"
+                generationMode={generationMode}
+                onGenerationModeChange={setGenerationMode}
+                clipDurationSeconds={clipDurationSeconds}
+                onClipDurationChange={setClipDurationSeconds}
+                framingMode={framingMode}
+                onFramingModeChange={setFramingMode}
+                showCaptions={showCaptions}
+                onShowCaptionsChange={setShowCaptions}
+                captionStyle={captionStyle}
+                onCaptionStyleChange={setCaptionStyle}
+                showWatermark={showWatermark}
+                onShowWatermarkChange={setShowWatermark}
+                disabled={generating}
               />
             </div>
-            <p className="mt-2 text-[11px] text-zinc-500">
-              {generationProgress.total_clips > 0
-                ? `Rendered ${generationProgress.completed_clips} of ${generationProgress.total_clips} clips`
-                : "Preparing transcript analysis"}
-            </p>
-            <button
-              type="button"
-              onClick={() => void handleCancel()}
-              disabled={!generationProgress.job_id || generationProgress.status === "cancelling"}
-              className="mt-3 rounded-[8px] border border-red-500/30 px-2.5 py-1 text-xs text-red-300 hover:bg-red-950/30 disabled:opacity-50"
-            >
-              {generationProgress.status === "cancelling" ? "Cancelling..." : "Cancel generation"}
-            </button>
-          </section>
+          )}
+        </section>
+
+        {/* Filter, Search & Sorting Bar */}
+        {clips.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <div className="relative flex-1 max-w-sm">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search transcript text..."
+                className="w-full rounded-xl border border-zinc-800 bg-[#121215] px-3.5 py-2 text-xs text-white placeholder:text-zinc-500 focus-ring"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-zinc-500 hover:text-white"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span>Sort by:</span>
+              <button
+                type="button"
+                onClick={() => setSortBy("timeline")}
+                className={`px-2.5 py-1 rounded-lg border transition-colors ${
+                  sortBy === "timeline"
+                    ? "border-zinc-700 bg-zinc-800 text-white font-semibold"
+                    : "border-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                Timeline order
+              </button>
+              <button
+                type="button"
+                onClick={() => setSortBy("duration")}
+                className={`px-2.5 py-1 rounded-lg border transition-colors ${
+                  sortBy === "duration"
+                    ? "border-zinc-700 bg-zinc-800 text-white font-semibold"
+                    : "border-transparent text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                Longest duration
+              </button>
+            </div>
+          </div>
         )}
 
+        {/* Main Clips Studio Grid: Responsive 220px auto-fill (up to 6+ columns on 2560px screen) */}
         {isLoading ? (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
-              <ClipSkeletonCard key={`initial-skeleton-${i}`} message="Loading clips..." />
+              <ClipSkeletonCard key={`skel-${i}`} index={i + 1} total={6} />
             ))}
           </div>
-        ) : clips.length > 0 || generating ? (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {clips.map((clip) => (
-              <ClipCard
+        ) : filteredClips.length === 0 ? (
+          <div className="rounded-2xl border border-zinc-800 bg-[#121215] p-12 text-center space-y-3">
+            <div className="size-12 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-500 mx-auto flex items-center justify-center">
+              <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            </div>
+            <h3 className="text-base font-semibold text-white">
+              {searchQuery ? "No matching clips found" : "No clips generated yet"}
+            </h3>
+            <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+              {searchQuery
+                ? `No clips containing "${searchQuery}". Clear your search query to see all clips.`
+                : "Click \"Generate Clips\" above to extract short vertical clips from this video."}
+            </p>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="px-3.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 text-xs text-white"
+              >
+                Clear search
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+            {filteredClips.map((clip, idx) => (
+              <ProClipCard
                 key={clip.id}
                 clip={clip}
+                index={idx}
                 projectId={projectId}
+                globalVolume={globalVolume}
+                globalMuted={globalMuted}
+                activePlayingClipId={activePlayingClipId}
+                onPlay={(id) => setActivePlayingClipId(id)}
+                onOpenModal={(c) => setSelectedClipForModal(c)}
                 showWatermark={showWatermark}
-                showSubtitles={showSubtitles}
-                onClipUpdated={(updatedClip) => {
-                  setClips((prev) =>
-                    prev.map((c) => (c.id === updatedClip.id ? updatedClip : c)),
-                  );
+                showSubtitles={showCaptions}
+                onClipUpdated={(updated) => {
+                  setClips((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
                 }}
               />
             ))}
-            {generating && Array.from({
-              length: Math.max(
-                1,
-                (generationProgress?.total_clips || 4) - clips.length
-              ),
-            }).map((_, i) => (
-              <ClipSkeletonCard
-                key={`generating-skeleton-${i}`}
-                index={clips.length + i + 1}
-                total={generationProgress?.total_clips || undefined}
-              />
-            ))}
           </div>
-        ) : projectId ? (
-          <div className="rounded-[12px] border border-[#232326] bg-[#111113] p-8 text-center">
-            <p className="text-sm text-zinc-400">No clips generated yet for {projectId}.</p>
-            <p className="mt-1 text-xs text-zinc-500">
-              Click &ldquo;Generate Clips&rdquo; above to start slicing this video into vertical shorts.
-            </p>
-          </div>
-        ) : null}
+        )}
+
+        {/* Modal Player Dialog */}
+        <ClipModalViewer
+          clip={selectedClipForModal}
+          projectId={projectId}
+          onClose={() => setSelectedClipForModal(null)}
+        />
       </div>
     </main>
   );
-}
-
-function ClipsContent() {
-  const searchParams = useSearchParams();
-  const projectId = searchParams.get("project")?.trim() ?? "";
-  return <ProjectClips key={projectId} projectId={projectId} />;
 }
 
 export default function ClipsPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
-          <div className="mx-auto max-w-5xl">
-            <header className="mb-8">
-              <div className="h-8 w-36 rounded bg-zinc-800/80 skeleton-shimmer" />
-              <div className="mt-2 h-4 w-60 rounded bg-zinc-800/50 skeleton-shimmer" />
-            </header>
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <ClipSkeletonCard key={`suspense-skeleton-${i}`} />
-              ))}
-            </div>
+        <div className="min-h-screen bg-[#09090b] p-6 lg:p-10 flex items-center justify-center">
+          <div className="flex items-center gap-2.5 text-xs text-zinc-400">
+            <svg className="size-4 animate-spin text-[#10b981]" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".2" />
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+            <span>Loading clips studio...</span>
           </div>
-        </main>
+        </div>
       }
     >
-      <ClipsContent />
+      <ClipsPageInner />
     </Suspense>
   );
+}
+
+function ClipsPageInner() {
+  const searchParams = useSearchParams();
+  const projectId = searchParams.get("project") ?? "";
+  return <ProjectClipsContent projectId={projectId} />;
 }
