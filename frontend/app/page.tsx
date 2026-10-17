@@ -1,29 +1,31 @@
 "use client";
 
+import React, { ChangeEvent, DragEvent, FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import {
-  ActiveJob,
-  CaptionStyle,
-  Clip,
   downloadVideo,
-  FramingMode,
   generateClips,
-  getActiveJobs,
+  getDownloadJob,
   getLatestClipGenerationJob,
   getLocalTranscriptionJob,
   getProjects,
-  LocalTranscriptionJob,
-  Project,
   transcribeLocalVideo,
   transcribeVideo,
+  Clip,
+  Project,
+  FramingMode,
+  CaptionStyle,
 } from "@/src/lib/api";
 import { RecentProjectSkeletonItem } from "@/src/components/skeletons";
 import {
-  CaptionStylePicker,
   CAPTION_STYLE_OPTIONS,
   getPreviewUrls,
 } from "@/src/components/caption-style-picker";
+import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
+import { Badge } from "@/src/components/ui/badge";
+import { StatusPill } from "@/src/components/ui/status-pill";
+import { IconButton } from "@/src/components/ui/icon-button";
+import { Tooltip } from "@/src/components/ui/tooltip";
 
 type VideoProcessingProgress = {
   kind: "transcription" | "generation" | "complete" | "failed";
@@ -36,19 +38,66 @@ type ActiveVideo =
   | { kind: "file"; file: File; name: string; size: number }
   | { kind: "downloaded"; projectId: string; fileName: string; name: string };
 
-const CLIP_DURATIONS = [15, 30, 60, 90] as const;
+const isValidYouTubeUrl = (url: string) => {
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  return /^(https?:\/\/)?(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]{11}(\S*)?$/i.test(
+    trimmed,
+  );
+};
+
+const formatFileSize = (bytes: number) => {
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadStatus, setDownloadStatus] = useState("");
-  const [downloadProgress, setDownloadProgress] = useState<{ step: string; progress: number; title?: string } | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{
+    step: string;
+    progress: number;
+    title?: string;
+  } | null>(null);
   const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
-  const [clipDurationSeconds, setClipDurationSeconds] = useState<15 | 30 | 60 | 90>(30);
+  const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
   const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
-  const [isCaptionPickerOpen, setIsCaptionPickerOpen] = useState(false);
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [showWatermark, setShowWatermark] = useState(true);
+  const [transcriptionProgress, setTranscriptionProgress] =
+    useState<VideoProcessingProgress | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [generatedClips, setGeneratedClips] = useState<Clip[]>([]);
+  const [generatedProjectId, setGeneratedProjectId] = useState<string | null>(null);
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const transcriptionProgressRef = useRef(transcriptionProgress);
+
+  useEffect(() => {
+    transcriptionProgressRef.current = transcriptionProgress;
+  }, [transcriptionProgress]);
+
+  // Manage video preview object URL
+  useEffect(() => {
+    if (activeVideo?.kind === "file") {
+      const url = URL.createObjectURL(activeVideo.file);
+      setVideoPreviewUrl(url);
+      return () => {
+        URL.revokeObjectURL(url);
+      };
+    }
+    setVideoPreviewUrl(null);
+  }, [activeVideo]);
+
+  // Sync settings with localStorage on mount
   useEffect(() => {
     try {
       const savedFraming = localStorage.getItem("cliprobin_framing_mode");
@@ -57,14 +106,19 @@ export default function Home() {
       }
       const savedDuration = localStorage.getItem("cliprobin_clip_duration");
       if (savedDuration && [15, 30, 60, 90].includes(Number(savedDuration))) {
-        setClipDurationSeconds(Number(savedDuration) as 15 | 30 | 60 | 90);
+        setClipDurationSeconds(Number(savedDuration) as ClipDuration);
       }
       const savedMode = localStorage.getItem("cliprobin_generation_mode");
       if (savedMode && ["random", "ai"].includes(savedMode)) {
         setGenerationMode(savedMode as "random" | "ai");
       }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
-      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
+      if (
+        savedStyle &&
+        ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(
+          savedStyle,
+        )
+      ) {
         setCaptionStyle(savedStyle as CaptionStyle);
       } else {
         const stored = localStorage.getItem("cliprobin.settings");
@@ -83,7 +137,7 @@ export default function Home() {
     } catch {}
   };
 
-  const handleClipDurationChange = (seconds: 15 | 30 | 60 | 90) => {
+  const handleClipDurationChange = (seconds: ClipDuration) => {
     setClipDurationSeconds(seconds);
     try {
       localStorage.setItem("cliprobin_clip_duration", String(seconds));
@@ -104,29 +158,8 @@ export default function Home() {
     } catch {}
   };
 
-  const activeStyleOption =
-    CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle) || CAPTION_STYLE_OPTIONS[0];
-  const previewUrls = getPreviewUrls(captionStyle);
-  const [showCaptions, setShowCaptions] = useState(true);
-  const [showWatermark, setShowWatermark] = useState(true);
-  const [transcriptionProgress, setTranscriptionProgress] = useState<VideoProcessingProgress | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
-  const [generatedClips, setGeneratedClips] = useState<Clip[]>([]);
-  const [generatedProjectId, setGeneratedProjectId] = useState<string | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const transcriptionProgressRef = useRef(transcriptionProgress);
-
-  useEffect(() => {
-    transcriptionProgressRef.current = transcriptionProgress;
-  }, [transcriptionProgress]);
-
   const isProcessingVideo = Boolean(
-    transcriptionProgress
-    && ["transcription", "generation"].includes(transcriptionProgress.kind),
+    transcriptionProgress && ["transcription", "generation"].includes(transcriptionProgress.kind),
   );
   const activeVideoJob = isProcessingVideo ? transcriptionProgress : null;
 
@@ -145,37 +178,35 @@ export default function Home() {
     void refreshProjectsList();
   }, []);
 
-  // Poll active jobs
+  // Poll for background generation/transcription updates
   useEffect(() => {
     let isCurrent = true;
     let timeoutId: number | undefined;
 
     const restoreProgress = async () => {
       try {
-        const jobs: ActiveJob[] = await getActiveJobs();
-        if (isCurrent) {
-          // Check for download jobs
-          const downloadJob = jobs.find((activeJob) => activeJob.kind === "download");
-          if (downloadJob) {
-            setIsDownloading(true);
-            setDownloadProgress({
-              step: downloadJob.step,
-              progress: downloadJob.progress,
-              title: downloadJob.title,
-            });
-          }
-
-          const current = transcriptionProgressRef.current;
-          const job = jobs.find((activeJob): activeJob is ActiveJob & { kind: "transcription" | "generation" } =>
-            (activeJob.kind === "transcription" || activeJob.kind === "generation")
-            && (!current?.projectId || activeJob.project_id === current.projectId));
+        const current = transcriptionProgressRef.current;
+        const res = await fetch("/api/jobs/active");
+        if (!isCurrent) return;
+        if (res.ok) {
+          const data = (await res.json()) as {
+            jobs: Array<{
+              id: string;
+              project_id: string;
+              kind: "transcription" | "generation";
+              status: string;
+              step: string;
+              progress: number;
+              ready_clips?: Clip[];
+            }>;
+          };
+          const job = data.jobs[0];
           if (job) {
             setTranscriptionProgress({
               kind: job.kind,
               step: job.step,
-              progress: job.kind === "transcription"
-                ? 25 + Math.round(job.progress * 0.75)
-                : job.progress,
+              progress:
+                job.kind === "transcription" ? 25 + Math.round(job.progress * 0.75) : job.progress,
               projectId: job.project_id,
             });
             if (job.kind === "generation" && job.ready_clips && job.ready_clips.length > 0) {
@@ -265,32 +296,30 @@ export default function Home() {
     });
 
     try {
-      // 1. Start transcription for the project
       const job = await transcribeVideo(projectId);
       setTranscriptionProgress({
         kind: "transcription",
         step: job.step || "Transcribing audio",
-        progress: 25 + Math.round((job.progress || 0) * 0.75),
+        progress: 25 + Math.round(job.progress * 0.75),
         projectId,
       });
 
-      let completedJob: LocalTranscriptionJob = job;
-      while (completedJob.status !== "completed" && completedJob.status !== "failed") {
-        await new Promise((resolve) => window.setTimeout(resolve, 900));
-        completedJob = await getLocalTranscriptionJob(projectId);
+      let currentJob = job;
+      while (currentJob.status !== "completed" && currentJob.status !== "failed") {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        currentJob = await getLocalTranscriptionJob(projectId);
         setTranscriptionProgress({
           kind: "transcription",
-          step: completedJob.step,
-          progress: 25 + Math.round(completedJob.progress * 0.75),
+          step: currentJob.step,
+          progress: 25 + Math.round(currentJob.progress * 0.75),
           projectId,
         });
       }
 
-      if (completedJob.status === "failed") {
-        throw new Error(completedJob.error ?? "Video transcription failed");
+      if (currentJob.status === "failed") {
+        throw new Error(currentJob.error || "Audio transcription failed");
       }
 
-      // 2. Start clip generation
       setTranscriptionProgress({
         kind: "generation",
         step: "Clip generation started",
@@ -336,7 +365,7 @@ export default function Home() {
       void refreshProjectsList();
     } catch (error) {
       setDownloadStatus(
-        error instanceof Error ? error.message : "Clip generation failed",
+        error instanceof Error ? error.message : "Video processing failed",
       );
       setTranscriptionProgress((current) =>
         current ? { ...current, kind: "failed", step: "Video processing failed" } : null,
@@ -344,62 +373,57 @@ export default function Home() {
     }
   };
 
-  // Download YouTube video -> display in drop/browse section -> automatically start generating clips!
-  const handleDownload = async () => {
-    const trimmedUrl = youtubeUrl.trim();
-    if (!trimmedUrl || isDownloading || isProcessingVideo) return;
+  const handleDownload = async (event?: FormEvent) => {
+    event?.preventDefault();
+    if (!youtubeUrl.trim() || isDownloading || isProcessingVideo) return;
+    if (!isValidYouTubeUrl(youtubeUrl)) {
+      setDownloadStatus("Please enter a valid YouTube video or Shorts link.");
+      return;
+    }
+
     setIsDownloading(true);
-    setDownloadProgress({ step: "Extracting video info...", progress: 5.0 });
-    setDownloadStatus("Downloading video from YouTube...");
+    setDownloadStatus("Connecting to YouTube...");
+    setDownloadProgress({ step: "Downloading video from YouTube", progress: 5 });
 
     try {
-      const result = await downloadVideo(trimmedUrl, (job) => {
+      const result = await downloadVideo(youtubeUrl, (job) => {
         setDownloadProgress({
           step: job.step,
           progress: job.progress,
           title: job.title,
         });
-        setDownloadStatus(job.step);
       });
-      const videoTitle = result.title || result.file || "YouTube video";
-      setIsDownloading(false);
-      setDownloadProgress(null);
 
-      // 1. Show the downloaded video in the local browse / drop section
+      const videoLabel = result.title || result.file;
       setActiveVideo({
         kind: "downloaded",
-        name: videoTitle,
         projectId: result.project_id,
         fileName: result.file,
+        name: videoLabel,
       });
-      setYoutubeUrl(""); // Clear URL input
-      setDownloadStatus(`Downloaded "${videoTitle}". Starting transcription & clip generation...`);
+      setDownloadStatus(`Downloaded ${videoLabel}.`);
+      setYoutubeUrl("");
       void refreshProjectsList();
-
-      // 2. Automatically start generating clips!
-      await runGenerationPipeline(result.project_id, videoTitle);
     } catch (error) {
-      setIsDownloading(false);
-      setDownloadProgress(null);
       setDownloadStatus(
         error instanceof Error ? error.message : "Video download failed",
       );
+    } finally {
+      setIsDownloading(false);
+      setDownloadProgress(null);
     }
   };
 
-  // Handle local video generation flow
   const handleStartGenerating = async () => {
     if (!activeVideo || isProcessingVideo) return;
 
     if (activeVideo.kind === "downloaded") {
-      // Re-run pipeline for downloaded video
       await runGenerationPipeline(activeVideo.projectId, activeVideo.name);
       return;
     }
 
-    // Local file upload flow
-    const file = activeVideo.file;
-    setDownloadStatus("");
+    // Local file upload & generation
+    setDownloadStatus("Uploading video for local processing...");
     setTranscriptionProgress({
       kind: "transcription",
       step: "Uploading video",
@@ -407,38 +431,35 @@ export default function Home() {
     });
 
     try {
-      const job = await transcribeLocalVideo(file, (progress) => {
+      const result = await transcribeLocalVideo(activeVideo.file, (uploadProgress) => {
         setTranscriptionProgress({
           kind: "transcription",
           step: "Uploading video",
-          progress: Math.round(progress * 0.25),
+          progress: Math.round(uploadProgress * 0.25),
         });
       });
+
       setTranscriptionProgress({
         kind: "transcription",
-        step: job.step,
-        progress: 25 + Math.round(job.progress * 0.75),
-        projectId: job.project_id,
+        step: "Speech model loading",
+        progress: 25,
+        projectId: result.project_id,
       });
 
-      let completedJob: LocalTranscriptionJob = job;
-      while (completedJob.status !== "completed" && completedJob.status !== "failed") {
-        await new Promise((resolve) => window.setTimeout(resolve, 900));
-        completedJob = await getLocalTranscriptionJob(job.project_id);
+      let currentJob = result;
+      while (currentJob.status !== "completed" && currentJob.status !== "failed") {
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        currentJob = await getLocalTranscriptionJob(result.project_id);
         setTranscriptionProgress({
           kind: "transcription",
-          step: completedJob.step,
-          progress: 25 + Math.round(completedJob.progress * 0.75),
-          projectId: completedJob.project_id,
+          step: currentJob.step,
+          progress: 25 + Math.round(currentJob.progress * 0.75),
+          projectId: result.project_id,
         });
       }
 
-      if (completedJob.status === "failed") {
-        throw new Error(completedJob.error ?? "Local video transcription failed");
-      }
-      const result = completedJob.result;
-      if (!result) {
-        throw new Error("Transcription completed without a result");
+      if (currentJob.status === "failed") {
+        throw new Error(currentJob.error || "Audio transcription failed");
       }
 
       setTranscriptionProgress({
@@ -447,7 +468,7 @@ export default function Home() {
         progress: 0,
         projectId: result.project_id,
       });
-      setDownloadStatus(`Transcribed ${result.segments} segments. Generating clips...`);
+      setDownloadStatus("Generating vertical clips with local AI...");
 
       const generation = await generateClips(
         result.project_id,
@@ -486,13 +507,11 @@ export default function Home() {
       void refreshProjectsList();
     } catch (error) {
       setDownloadStatus(
-        error instanceof Error
-          ? error.message
-          : "Local video processing failed",
+        error instanceof Error ? error.message : "Local video processing failed",
       );
-      setTranscriptionProgress((current) => current
-        ? { ...current, kind: "failed", step: "Video processing failed" }
-        : null);
+      setTranscriptionProgress((current) =>
+        current ? { ...current, kind: "failed", step: "Video processing failed" } : null,
+      );
     }
   };
 
@@ -544,656 +563,301 @@ export default function Home() {
     }
   };
 
+  const activeStyleName =
+    CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle)?.name || "Classic";
+
   return (
-    <main className="min-h-screen bg-[#0a0a0a] p-6 lg:p-10">
-      <div className="mx-auto max-w-6xl">
+    <main className="min-h-screen bg-[#09090b] text-[#f4f4f5] px-6 lg:px-10 py-6 lg:py-8">
+      <div className="mx-auto max-w-[1560px] space-y-8">
         {/* Header */}
-        <header className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            Dashboard
-          </h1>
-          <p className="mt-1.5 text-sm text-zinc-400">
-            Turn long videos into engaging, vertical short clips with local AI.
-          </p>
+        <header className="border-b border-zinc-800/80 pb-5">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                Dashboard
+              </h1>
+              <p className="mt-1 text-[13px] text-zinc-400">
+                Turn long videos into engaging, vertical short clips with local AI.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="emerald" size="md">Local Engine Ready</Badge>
+            </div>
+          </div>
         </header>
 
-        {/* Layout Grid: Centered max-w-[720px] main column + Recent Projects on right */}
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,720px)_340px] gap-8 items-start">
-          {/* Main Column (Max-width ~720px) */}
-          <div className="w-full max-w-[720px] space-y-6">
-            {/* Card 1: 1. Add a video */}
-            <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150">
+        {/* 2-Column Responsive Layout: Left Inputs + Right Sticky Live Preview Aside */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_420px] gap-8 items-start">
+          {/* Left Column: 1. Add video & 2. Clip settings */}
+          <div className="space-y-6 min-w-0">
+            {/* Step 1: Add a video */}
+            <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150">
               <div className="mb-5 flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <span className="flex size-6 items-center justify-center rounded-full bg-zinc-800 text-xs font-semibold text-zinc-300">
+                <div className="flex items-center gap-3">
+                  <span className="flex size-7 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-300">
                     1
                   </span>
-                  <h2 className="text-base font-semibold text-white">Add a video</h2>
-                </div>
-                <span className="text-xs text-zinc-400 font-medium">YouTube or local file</span>
-              </div>
-
-              {/* YouTube URL input with inline Download video button */}
-              <div className="space-y-2">
-                <label htmlFor="youtube-url-input" className="block text-xs font-medium text-zinc-400">
-                  YouTube URL
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    id="youtube-url-input"
-                    type="url"
-                    value={youtubeUrl}
-                    onChange={(event) => setYoutubeUrl(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void handleDownload();
-                      }
-                    }}
-                    placeholder="https://www.youtube.com/watch?v=..."
-                    disabled={isDownloading || isProcessingVideo}
-                    className="flex-1 rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-500 transition-all duration-150 focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleDownload}
-                    disabled={!youtubeUrl.trim() || isDownloading || isProcessingVideo}
-                    className="inline-flex shrink-0 items-center justify-center rounded-[10px] border border-[#232326] bg-transparent px-4 py-2.5 text-sm font-medium text-zinc-200 transition-all duration-150 hover:border-zinc-700 hover:bg-[#18181b] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:border-[#232326] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                  >
-                    {isDownloading ? (
-                      <span className="flex items-center gap-2">
-                        <svg className="size-4 animate-spin text-zinc-400" viewBox="0 0 24 24" fill="none">
-                          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".2" />
-                          <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                        </svg>
-                        Downloading...
-                      </span>
-                    ) : (
-                      "Download video"
-                    )}
-                  </button>
-                </div>
-
-                {/* Subtle helper text */}
-                {youtubeUrl.trim() ? (
-                  <p className="text-[12px] text-zinc-400 truncate">
-                    Ready to download: <span className="text-zinc-300 font-mono">{youtubeUrl}</span>
-                  </p>
-                ) : (
-                  <p className="text-[12px] text-zinc-400">
-                    Paste any YouTube video or Shorts URL to download.
-                  </p>
-                )}
-
-                {/* Live Download Progress Bar */}
-                {isDownloading && downloadProgress && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="mt-3 rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3.5 transition-all duration-150 space-y-2.5"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2 min-w-0 pr-2">
-                        <svg className="size-4 animate-spin text-[#10b981] shrink-0" viewBox="0 0 24 24" fill="none">
-                          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".25" />
-                          <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                        </svg>
-                        <span className="font-semibold text-white truncate">
-                          {downloadProgress.title || "Downloading video from YouTube..."}
-                        </span>
-                      </div>
-                      <span className="font-mono font-medium text-emerald-400 shrink-0">
-                        {Math.round(downloadProgress.progress)}%
-                      </span>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div
-                      role="progressbar"
-                      aria-label="YouTube video download progress"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={Math.round(downloadProgress.progress)}
-                      className="h-2 w-full overflow-hidden rounded-full bg-zinc-800"
-                    >
-                      <div
-                        className="h-full rounded-full bg-[#10b981] transition-[width] duration-200 ease-out"
-                        style={{ width: `${Math.max(4, Math.round(downloadProgress.progress))}%` }}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between text-[11px] text-zinc-400">
-                      <span className="truncate">{downloadProgress.step}</span>
-                      <span className="font-mono text-zinc-500 shrink-0">YouTube Download</span>
-                    </div>
+                  <div>
+                    <h2 className="text-base font-semibold text-white">Add a video</h2>
+                    <p className="text-xs text-zinc-400">Select a local video file or download from YouTube</p>
                   </div>
-                )}
+                </div>
               </div>
 
-              {/* "or" divider */}
-              <div className="relative my-6 flex items-center justify-center">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-[#232326]" />
-                </div>
-                <span className="relative bg-[#111113] px-3 text-xs uppercase tracking-wider text-zinc-400 font-medium">
-                  or
-                </span>
-              </div>
-
-              {/* Dropzone / Active Video Section */}
-              <div
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  if (!isProcessingVideo) setIsDragging(true);
-                }}
-                onDragEnter={(event) => {
-                  event.preventDefault();
-                  if (!isProcessingVideo) setIsDragging(true);
-                }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={handleDrop}
-                onClick={() => {
-                  if (!isProcessingVideo && !activeVideo) fileInputRef.current?.click();
-                }}
-                className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-[12px] border-2 border-dashed p-8 text-center transition-all duration-150 ${
-                  isDragging
-                    ? "border-[#10b981] bg-[#10b981]/5 text-emerald-400"
-                    : activeVideo
-                    ? "border-[#232326] bg-[#0a0a0a]/70 hover:border-zinc-700"
-                    : "border-[#232326] bg-[#0a0a0a]/40 hover:border-zinc-700 hover:bg-[#0a0a0a]/70"
-                } ${isProcessingVideo ? "cursor-not-allowed opacity-60" : ""}`}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*,.mkv,.avi,.webm"
-                  onChange={handleFileChange}
-                  disabled={isProcessingVideo}
-                  className="hidden"
-                />
-
-                {/* Upload icon */}
-                <div
-                  className={`mb-3 flex size-12 items-center justify-center rounded-full transition-all duration-150 ${
-                    isDragging
-                      ? "bg-[#10b981]/15 text-[#10b981]"
-                      : activeVideo
-                      ? "bg-[#10b981]/10 border border-[#10b981]/30 text-[#10b981]"
-                      : "bg-zinc-900 border border-[#232326] text-zinc-400 group-hover:text-zinc-200"
-                  }`}
-                >
-                  {activeVideo?.kind === "downloaded" ? (
-                    <svg className="size-6 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" fillOpacity=".2" />
-                    </svg>
-                  ) : (
-                    <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                    </svg>
-                  )}
-                </div>
-
-                <p className="text-sm font-medium text-zinc-200">
-                  {activeVideo ? (
-                    <span>Ready for processing</span>
-                  ) : (
-                    <>Drag &amp; drop or <span className="text-[#10b981] underline underline-offset-4">browse</span></>
-                  )}
-                </p>
-                <p className="mt-1 text-xs text-zinc-400">
-                  {activeVideo ? "Video loaded into project engine" : "MP4, MOV, MKV, or WebM up to 4GB"}
-                </p>
-
-                {/* Selected / Downloaded Video Chip */}
-                {activeVideo && (
-                  <div
-                    role="status"
-                    onClick={(e) => e.stopPropagation()}
-                    className="mt-4 flex w-full max-w-md items-center justify-between rounded-[10px] border border-[#232326] bg-[#111113] p-3 text-left transition-all duration-150"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-[#10b981]/10 text-[#10b981]">
-                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <polyline points="20 6 9 17 4 12" />
+              {/* Collapsed File Card when Video is chosen */}
+              {activeVideo ? (
+                <div className="rounded-xl border border-zinc-700/80 bg-[#0c0c0e] p-4 transition-all duration-150">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[#10b981]">
+                        <svg className="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" fillOpacity=".2" />
                         </svg>
-                      </span>
+                      </div>
                       <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-white">
+                        <p className="text-sm font-semibold text-white truncate max-w-md" title={activeVideo.name}>
                           {activeVideo.name}
                         </p>
-                        <p className="text-[11px] text-zinc-400">
-                          {activeVideo.kind === "downloaded"
-                            ? `YouTube video (${activeVideo.projectId}) · Generating clips`
-                            : `${(activeVideo.size / (1024 * 1024)).toFixed(1)} MB · Ready for generation`}
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isProcessingVideo) return;
-                        setActiveVideo(null);
-                        setDownloadStatus("");
-                      }}
-                      disabled={isProcessingVideo}
-                      className="shrink-0 rounded-[8px] border border-[#232326] px-2.5 py-1 text-[11px] font-medium text-zinc-300 transition-all duration-150 hover:bg-zinc-800 hover:text-white disabled:opacity-50"
-                    >
-                      Change
-                    </button>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            {/* Card 2: 2. Clip settings */}
-            <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm space-y-6 transition-all duration-150">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <span className="flex size-6 items-center justify-center rounded-full bg-zinc-800 text-xs font-semibold text-zinc-300">
-                    2
-                  </span>
-                  <h2 className="text-base font-semibold text-white">Clip settings</h2>
-                </div>
-                <span className="text-xs text-zinc-400 font-medium">Timing &amp; captions</span>
-              </div>
-
-              {/* Generation Mode Selector */}
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-2">
-                  Generation mode
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    disabled={isProcessingVideo}
-                    onClick={() => handleGenerationModeChange("random")}
-                    className={`rounded-[10px] border py-2.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      generationMode === "random"
-                        ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
-                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                    }`}
-                  >
-                    Random
-                  </button>
-
-                  <div className="relative group cursor-not-allowed">
-                    <button
-                      type="button"
-                      disabled
-                      title="COMING SOON"
-                      aria-label="AI mode coming soon"
-                      className="w-full h-full rounded-[10px] border border-[#232326] bg-[#0a0a0a]/50 py-2.5 text-xs font-medium text-zinc-500 cursor-not-allowed flex items-center justify-center gap-2 group-hover:border-zinc-700 transition-all duration-150 pointer-events-none"
-                    >
-                      <span className="font-semibold text-zinc-400">AI</span>
-                      <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/90 border border-amber-400/20">
-                        Soon
-                      </span>
-                    </button>
-                    {/* Hover tooltip */}
-                    <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-[10px] font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
-                      COMING SOON
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Clip Length Selector */}
-              <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-2">
-                  Clip length
-                </label>
-                <div className="grid grid-cols-4 gap-2">
-                  {CLIP_DURATIONS.map((seconds) => {
-                    const isSelected = clipDurationSeconds === seconds;
-                    return (
-                      <button
-                        key={seconds}
-                        type="button"
-                        disabled={isProcessingVideo}
-                        onClick={() => handleClipDurationChange(seconds)}
-                        className={`rounded-[10px] border py-2.5 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                          isSelected
-                            ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
-                            : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                        }`}
-                      >
-                        {seconds}s
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Video Framing / Layout Visual Selector */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-xs font-medium text-zinc-400">
-                    Video layout & framing
-                  </label>
-                  <span className="text-[11px] text-zinc-500 font-normal">
-                    Visual preview
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="radiogroup" aria-label="Video framing mode">
-                  {/* Option 1: 16:9 Rounded */}
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={framingMode === "standard"}
-                    disabled={isProcessingVideo}
-                    onClick={() => handleFramingModeChange("standard")}
-                    className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      framingMode === "standard"
-                        ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                        : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                    }`}
-                  >
-                    {/* Visual Phone Mockup */}
-                    <div className="relative mb-3 flex h-24 w-14 items-center justify-center rounded-lg border border-zinc-700 bg-black p-1 shadow-inner overflow-hidden">
-                      {/* Subtle notch */}
-                      <div className="absolute top-1 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-zinc-700" />
-                      
-                      {/* 16:9 Rounded video rectangle in center */}
-                      <div className="w-full h-8 rounded-[6px] bg-gradient-to-br from-zinc-700 via-zinc-600 to-zinc-700 flex items-center justify-center border border-zinc-500/50 shadow-sm overflow-hidden">
-                        <svg className="size-3 text-zinc-300" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      </div>
-
-                      {/* Bottom subtitle mock lines */}
-                      <div className="absolute bottom-2 left-1.5 right-1.5 space-y-0.5">
-                        <div className="h-0.5 w-3/4 mx-auto rounded bg-zinc-600/80" />
-                        <div className="h-0.5 w-1/2 mx-auto rounded bg-amber-400/80" />
-                      </div>
-                    </div>
-
-                    <div className="w-full text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <span className={`text-xs font-semibold ${framingMode === "standard" ? "text-white" : "text-zinc-300"}`}>
-                          16:9 Rounded
-                        </span>
-                        {framingMode === "standard" && (
-                          <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                            ✓
+                        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+                          <span>
+                            {activeVideo.kind === "downloaded"
+                              ? `YouTube Project ${activeVideo.projectId}`
+                              : formatFileSize(activeVideo.size)}
                           </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-[10px] text-zinc-400">
-                        Classic 16:9 rounded
-                      </p>
-                    </div>
-                  </button>
-
-                  {/* Option 2: 1:1 Rounded Square (TikTok & Reels Style) */}
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={framingMode === "square_rounded"}
-                    disabled={isProcessingVideo}
-                    onClick={() => handleFramingModeChange("square_rounded")}
-                    className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      framingMode === "square_rounded"
-                        ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                        : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                    }`}
-                  >
-                    {/* Trending / Popular Pill Badge */}
-                    <div className="absolute -top-2 right-2 z-10 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 px-1.5 py-0.5 text-[9px] font-bold text-zinc-950 shadow-md">
-                      POPULAR
-                    </div>
-
-                    {/* Visual Phone Mockup */}
-                    <div className="relative mb-3 flex h-24 w-14 items-center justify-center rounded-lg border border-zinc-700 bg-black p-1 shadow-inner overflow-hidden">
-                      {/* Subtle notch */}
-                      <div className="absolute top-1 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-zinc-700" />
-                      
-                      {/* Top hook line preview */}
-                      <div className="absolute top-2.5 left-1.5 right-1.5">
-                        <div className="h-0.5 w-4/5 mx-auto rounded bg-emerald-400/90" />
-                      </div>
-
-                      {/* 1:1 Square with rounded corners in center */}
-                      <div className="size-11 rounded-[6px] bg-gradient-to-br from-emerald-600/90 via-teal-700 to-zinc-800 flex items-center justify-center border border-emerald-400/40 shadow-sm relative overflow-hidden">
-                        <svg className="size-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                          <path d="M8 5v14l11-7z" />
-                        </svg>
-                      </div>
-
-                      {/* Bottom subtitle mock lines */}
-                      <div className="absolute bottom-2 left-1.5 right-1.5 space-y-0.5">
-                        <div className="h-0.5 w-3/4 mx-auto rounded bg-amber-400/90" />
-                        <div className="h-0.5 w-1/2 mx-auto rounded bg-zinc-500" />
-                      </div>
-                    </div>
-
-                    <div className="w-full text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <span className={`text-xs font-semibold ${framingMode === "square_rounded" ? "text-white" : "text-zinc-300"}`}>
-                          1:1 Rounded
-                        </span>
-                        {framingMode === "square_rounded" && (
-                          <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                            ✓
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-[10px] text-emerald-400 font-medium">
-                        TikTok &amp; Reels square
-                      </p>
-                    </div>
-                  </button>
-
-                  {/* Option 3: True 9:16 (Powered by AI Active Speaker Tracking) */}
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={framingMode === "true_9_16"}
-                    disabled={isProcessingVideo}
-                    onClick={() => handleFramingModeChange("true_9_16")}
-                    className={`group relative flex flex-col items-center justify-between rounded-[12px] border p-3.5 transition-all duration-150 text-left focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                      framingMode === "true_9_16"
-                        ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981]"
-                        : "border-[#232326] bg-[#0a0a0a] hover:border-zinc-700"
-                    }`}
-                  >
-                    {/* AI Powered Badge */}
-                    <div className="absolute -top-2 right-2 z-10 rounded-full bg-gradient-to-r from-purple-500 via-indigo-500 to-emerald-400 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-md flex items-center gap-1">
-                      <svg className="size-2.5 text-amber-300" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
-                      </svg>
-                      AI POWERED
-                    </div>
-
-                    {/* Visual Phone Mockup */}
-                    <div className="relative mb-3 flex h-24 w-14 items-center justify-center rounded-lg border border-zinc-700 bg-black p-0 shadow-inner overflow-hidden">
-                      {/* Full bleed 9:16 vertical video background */}
-                      <div className="absolute inset-0 bg-gradient-to-b from-indigo-950/70 via-zinc-900 to-black flex items-center justify-center">
-                        {/* AI Face Detection tracking reticle */}
-                        <div className="relative flex flex-col items-center -mt-2">
-                          <div className="size-7 rounded-full border border-dashed border-emerald-400/90 bg-emerald-500/15 flex items-center justify-center shadow-xs">
-                            <svg className="size-4 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
-                            </svg>
-                          </div>
-                          <span className="mt-0.5 text-[7px] font-mono font-bold text-emerald-400 uppercase tracking-tighter">SPEAKER</span>
+                          <span>•</span>
+                          <span className="text-emerald-400 font-medium">Ready for generation</span>
                         </div>
                       </div>
-
-                      {/* Subtle notch */}
-                      <div className="absolute top-1 left-1/2 -translate-x-1/2 h-0.5 w-3 rounded-full bg-zinc-700 z-10" />
-
-                      {/* Bottom subtitle mock lines */}
-                      <div className="absolute bottom-2 left-1.5 right-1.5 space-y-0.5 z-10">
-                        <div className="h-0.5 w-3/4 mx-auto rounded bg-white/90 shadow-xs" />
-                        <div className="h-0.5 w-1/2 mx-auto rounded bg-yellow-400/90 shadow-xs" />
-                      </div>
                     </div>
 
-                    <div className="w-full text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <span className={`text-xs font-semibold ${framingMode === "true_9_16" ? "text-white" : "text-zinc-300"}`}>
-                          True 9:16
-                        </span>
-                        {framingMode === "true_9_16" && (
-                          <span className="size-3.5 rounded-full bg-[#10b981] text-[9px] font-bold text-zinc-950 flex items-center justify-center">
-                            ✓
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isProcessingVideo}
+                        onClick={() => {
+                          if (fileInputRef.current) fileInputRef.current.click();
+                        }}
+                        className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 text-xs font-medium text-zinc-200 hover:text-white hover:bg-zinc-700 transition-colors focus-ring"
+                      >
+                        Replace
+                      </button>
+                      <IconButton
+                        label="Remove video"
+                        tooltip="Remove video"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isProcessingVideo}
+                        onClick={() => {
+                          setActiveVideo(null);
+                          setDownloadStatus("");
+                        }}
+                        icon={
+                          <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  {/* YouTube URL input */}
+                  <div>
+                    <label htmlFor="youtube-url-input" className="block text-xs font-medium text-zinc-400 mb-1.5">
+                      YouTube URL
+                    </label>
+                    <div className="flex gap-2.5">
+                      <input
+                        id="youtube-url-input"
+                        type="url"
+                        value={youtubeUrl}
+                        onChange={(e) => setYoutubeUrl(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            void handleDownload();
+                          }
+                        }}
+                        placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
+                        disabled={isDownloading || isProcessingVideo}
+                        className="flex-1 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 focus-ring disabled:opacity-50"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleDownload}
+                        disabled={!youtubeUrl.trim() || !isValidYouTubeUrl(youtubeUrl) || isDownloading || isProcessingVideo}
+                        className="shrink-0 px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800/90 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 hover:text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-ring"
+                      >
+                        {isDownloading ? (
+                          <span className="flex items-center gap-2">
+                            <svg className="size-4 animate-spin text-zinc-400" viewBox="0 0 24 24" fill="none">
+                              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".2" />
+                              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                            </svg>
+                            Downloading...
                           </span>
+                        ) : (
+                          "Download video"
                         )}
-                      </div>
-                      <p className="mt-0.5 text-[10px] text-purple-300 font-medium">
-                        AI speaker tracking
-                      </p>
+                      </button>
                     </div>
-                  </button>
-                </div>
-              </div>
 
-              {/* Captions Toggle Switch */}
-              <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-4 transition-all duration-150">
-                <div className="pr-4">
-                  <p className="text-sm font-medium text-white">Burn captions into clips</p>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    Word-by-word animated highlights in 9:16 vertical video
-                  </p>
-                </div>
-
-                {/* Accessible Toggle Switch */}
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={showCaptions}
-                  disabled={isProcessingVideo}
-                  onClick={() => setShowCaptions((prev) => !prev)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] focus:ring-offset-2 focus:ring-offset-[#111113] disabled:cursor-not-allowed disabled:opacity-50 ${
-                    showCaptions ? "bg-[#10b981]" : "bg-zinc-800"
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md transition duration-150 ease-in-out ${
-                      showCaptions ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {/* Caption Style Visual Selector */}
-              {showCaptions && (
-                <div className="space-y-2 pt-1 transition-all duration-200">
-                  <label className="block text-xs font-medium text-zinc-400">
-                    Caption style
-                  </label>
-                  <div className="flex items-center justify-between rounded-[12px] border border-[#232326] bg-[#0a0a0a] p-3 transition-all duration-150 hover:border-zinc-700">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="relative aspect-[9/16] w-9 h-16 shrink-0 overflow-hidden rounded-md border border-[#232326] bg-black">
-                        <img
-                          src={previewUrls.posterUrl}
-                          alt={`${activeStyleOption.name} caption preview`}
-                          className="size-full object-cover"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-white truncate">
-                          Caption style: {activeStyleOption.name}
+                    {/* Inline Validation / Feedback */}
+                    <div className="mt-2 text-xs">
+                      {youtubeUrl.trim() && !isValidYouTubeUrl(youtubeUrl) ? (
+                        <p className="text-amber-400/90 flex items-center gap-1.5">
+                          <span>⚠️</span> Enter a valid YouTube video or Shorts link (e.g. https://www.youtube.com/watch?v=...)
                         </p>
-                        <p className="mt-0.5 text-xs text-zinc-400 line-clamp-1">
-                          {activeStyleOption.description}
+                      ) : youtubeUrl.trim() && isValidYouTubeUrl(youtubeUrl) ? (
+                        <p className="text-emerald-400 flex items-center gap-1.5">
+                          <span>✓</span> Valid YouTube link ready for download
                         </p>
-                      </div>
+                      ) : (
+                        <p className="text-zinc-400">
+                          Paste any YouTube video or Shorts URL to import directly.
+                        </p>
+                      )}
                     </div>
-                    <button
-                      type="button"
+
+                    {/* Live Download Progress Bar */}
+                    {isDownloading && downloadProgress && (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="mt-3.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5 space-y-2.5 animate-in fade-in-0 duration-150"
+                      >
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <svg className="size-4 animate-spin text-[#10b981] shrink-0" viewBox="0 0 24 24" fill="none">
+                              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".25" />
+                              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                            </svg>
+                            <span className="font-semibold text-white truncate">
+                              {downloadProgress.title || "Downloading video from YouTube..."}
+                            </span>
+                          </div>
+                          <span className="font-mono font-medium text-emerald-400 shrink-0">
+                            {Math.round(downloadProgress.progress)}%
+                          </span>
+                        </div>
+
+                        <div
+                          role="progressbar"
+                          aria-label="YouTube video download progress"
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-valuenow={Math.round(downloadProgress.progress)}
+                          className="h-2 w-full overflow-hidden rounded-full bg-zinc-800"
+                        >
+                          <div
+                            className="h-full rounded-full bg-[#10b981] transition-[width] duration-200 ease-out"
+                            style={{ width: `${Math.max(4, Math.round(downloadProgress.progress))}%` }}
+                          />
+                        </div>
+
+                        <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                          <span className="truncate">{downloadProgress.step}</span>
+                          <span className="font-mono text-zinc-500 shrink-0">yt-dlp engine</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* "or" divider */}
+                  <div className="relative my-4 flex items-center justify-center">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-zinc-800" />
+                    </div>
+                    <span className="relative bg-[#121215] px-3 text-xs uppercase tracking-wider text-zinc-500 font-medium">
+                      or
+                    </span>
+                  </div>
+
+                  {/* Drag & Drop File Zone */}
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (!isProcessingVideo) setIsDragging(true);
+                    }}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      if (!isProcessingVideo) setIsDragging(true);
+                    }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={handleDrop}
+                    onClick={() => {
+                      if (!isProcessingVideo) fileInputRef.current?.click();
+                    }}
+                    className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all duration-150 ${
+                      isDragging
+                        ? "border-[#10b981] bg-[#10b981]/5 text-emerald-400"
+                        : "border-zinc-800 bg-[#0c0c0e]/60 hover:border-zinc-700 hover:bg-[#0c0c0e]"
+                    } ${isProcessingVideo ? "cursor-not-allowed opacity-50" : ""}`}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="video/*,.mkv,.avi,.webm"
+                      onChange={handleFileChange}
                       disabled={isProcessingVideo}
-                      onClick={() => setIsCaptionPickerOpen(true)}
-                      className="shrink-0 px-3.5 py-1.5 rounded-lg border border-[#232326] bg-[#111113] text-xs font-medium text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-colors duration-150 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                    >
-                      Change
-                    </button>
+                      className="hidden"
+                    />
+
+                    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all duration-150">
+                      <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                      </svg>
+                    </div>
+
+                    <p className="text-sm font-semibold text-zinc-200">
+                      Drag &amp; drop a video or <span className="text-[#10b981] underline underline-offset-4">browse files</span>
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      MP4, MOV, MKV, or WebM up to 4GB
+                    </p>
                   </div>
                 </div>
               )}
+            </section>
 
-              <CaptionStylePicker
-                isOpen={isCaptionPickerOpen}
-                onClose={() => setIsCaptionPickerOpen(false)}
-                selectedStyle={captionStyle}
-                onSelect={(style) => {
-                  handleCaptionStyleChange(style);
-                }}
-              />
-
-              {/* Watermark Toggle Switch */}
-              <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-4 transition-all duration-150">
-                <div className="pr-4">
-                  <p className="text-sm font-medium text-white">Add a watermark: Made with Clip Robin</p>
-                  <p className="text-xs text-zinc-400 mt-0.5">
-                    Overlay Clip Robin watermark at top-center of vertical video
-                  </p>
+            {/* Step 2: Clip settings */}
+            <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-6">
+              <div className="flex items-center gap-3">
+                <span className="flex size-7 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-300">
+                  2
+                </span>
+                <div>
+                  <h2 className="text-base font-semibold text-white">Clip settings</h2>
+                  <p className="text-xs text-zinc-400">Customize framing, caption style, and clip durations</p>
                 </div>
-
-                {/* Accessible Toggle Switch */}
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={showWatermark}
-                  disabled={isProcessingVideo}
-                  onClick={() => setShowWatermark((prev) => !prev)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] focus:ring-offset-2 focus:ring-offset-[#111113] disabled:cursor-not-allowed disabled:opacity-50 ${
-                    showWatermark ? "bg-[#10b981]" : "bg-zinc-800"
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md transition duration-150 ease-in-out ${
-                      showWatermark ? "translate-x-5" : "translate-x-0"
-                    }`}
-                  />
-                </button>
               </div>
 
-              {/* Single Primary Button: Start generating */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => void handleStartGenerating()}
-                  disabled={!activeVideo || isProcessingVideo}
-                  className="w-full rounded-[10px] bg-[#10b981] py-3.5 px-6 text-sm font-semibold text-zinc-950 transition-all duration-150 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#10b981] disabled:hover:shadow-none focus:outline-none focus:ring-2 focus:ring-[#10b981] focus:ring-offset-2 focus:ring-offset-[#0a0a0a]"
-                >
-                  {activeVideoJob?.kind === "transcription" ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="size-4 animate-spin text-zinc-950" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
-                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                      </svg>
-                      Transcribing audio...
-                    </span>
-                  ) : activeVideoJob?.kind === "generation" ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="size-4 animate-spin text-zinc-950" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
-                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                      </svg>
-                      Rendering clips...
-                    </span>
-                  ) : (
-                    "Start generating"
-                  )}
-                </button>
-
-                {!activeVideo && (
-                  <p className="mt-2 text-center text-xs text-zinc-500">
-                    Select a video or download from YouTube to enable generation.
-                  </p>
-                )}
-              </div>
+              {/* Single Source of Truth ClipSettings */}
+              <ClipSettings
+                variant="full"
+                generationMode={generationMode}
+                onGenerationModeChange={handleGenerationModeChange}
+                clipDurationSeconds={clipDurationSeconds}
+                onClipDurationChange={handleClipDurationChange}
+                framingMode={framingMode}
+                onFramingModeChange={handleFramingModeChange}
+                showCaptions={showCaptions}
+                onShowCaptionsChange={setShowCaptions}
+                captionStyle={captionStyle}
+                onCaptionStyleChange={handleCaptionStyleChange}
+                showWatermark={showWatermark}
+                onShowWatermarkChange={setShowWatermark}
+                disabled={isProcessingVideo}
+              />
             </section>
 
             {/* Active Processing Card (Progress) */}
             {transcriptionProgress && (
               <section
                 aria-live="polite"
-                className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm space-y-4 transition-all duration-150"
+                className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4 transition-all duration-150"
               >
                 <div className="flex items-center justify-between">
                   <div>
@@ -1226,8 +890,8 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Step checklist */}
-                <ol className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-[#232326]">
+                {/* Steps Checklist */}
+                <ol className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-zinc-800">
                   {(transcriptionProgress.kind === "transcription"
                     ? ["Uploading video", "Loading speech model", "Transcribing audio", "Saving transcript", "Complete"]
                     : ["Transcription complete", "Clip generation started", "Clips ready"]
@@ -1254,7 +918,7 @@ export default function Home() {
                             ? "text-emerald-400 font-medium"
                             : done
                             ? "text-zinc-300"
-                            : "text-zinc-600"
+                            : "text-zinc-500"
                         }`}
                       >
                         <span className={`flex size-4 items-center justify-center rounded-full text-[10px] ${
@@ -1281,35 +945,14 @@ export default function Home() {
               </section>
             )}
 
-            {/* Download feedback status */}
-            {downloadStatus && (
-              <div
-                className={`rounded-[10px] border p-3.5 text-xs transition-all duration-150 ${
-                  downloadStatus.includes("failed") || downloadStatus.includes("Could not")
-                    ? "border-red-500/30 bg-red-950/20 text-red-300"
-                    : "border-[#232326] bg-[#111113] text-zinc-300"
-                }`}
-              >
-                <p>{downloadStatus}</p>
-              </div>
-            )}
-
-            {/* Generated clips section or Empty state */}
-            {generatedClips.length > 0 || (isProcessingVideo && transcriptionProgress?.kind === "generation") ? (
-              <div className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm space-y-4 transition-all duration-150">
+            {/* Generated clips preview section if ready */}
+            {generatedClips.length > 0 && (
+              <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="flex size-5 items-center justify-center rounded-full bg-[#10b981]/15 text-[10px] text-[#10b981]">
-                      {isProcessingVideo && transcriptionProgress?.kind === "generation" ? (
-                        <span className="size-2 rounded-full bg-[#10b981] animate-pulse" />
-                      ) : (
-                        "✓"
-                      )}
-                    </span>
+                    <span className="flex size-5 items-center justify-center rounded-full bg-[#10b981]/15 text-[10px] text-[#10b981]">✓</span>
                     <h3 className="text-sm font-semibold text-white">
-                      {isProcessingVideo && transcriptionProgress?.kind === "generation"
-                        ? `Generating Clips (${generatedClips.length} ready)`
-                        : `Generated Clips (${generatedClips.length})`}
+                      Generated Clips ({generatedClips.length})
                     </h3>
                   </div>
                   {generatedProjectId && (
@@ -1317,7 +960,7 @@ export default function Home() {
                       href={`/clips?project=${encodeURIComponent(generatedProjectId)}`}
                       className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
                     >
-                      View all in Clips studio &rarr;
+                      View all in Clips Studio &rarr;
                     </Link>
                   )}
                 </div>
@@ -1326,7 +969,7 @@ export default function Home() {
                   {generatedClips.slice(0, 4).map((clip) => (
                     <div
                       key={clip.id}
-                      className="rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3 transition-all duration-150 hover:border-zinc-700"
+                      className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3 transition-all duration-150 hover:border-zinc-700"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <span className="font-mono text-xs font-semibold text-white truncate">
@@ -1339,8 +982,8 @@ export default function Home() {
                       <p className="mt-1.5 text-xs text-zinc-300 line-clamp-2" title={clip.title}>
                         {clip.title}
                       </p>
-                      <div className="mt-2.5 flex items-center justify-between border-t border-[#232326] pt-2 text-[11px]">
-                        <span className="text-zinc-500 font-mono">
+                      <div className="mt-2.5 flex items-center justify-between border-t border-zinc-800/80 pt-2 text-[11px]">
+                        <span className="text-zinc-400 font-mono">
                           {Math.floor(clip.start / 60)}:{String(Math.floor(clip.start % 60)).padStart(2, "0")} - {Math.floor(clip.end / 60)}:{String(Math.floor(clip.end % 60)).padStart(2, "0")}
                         </span>
                         {generatedProjectId && (
@@ -1354,112 +997,300 @@ export default function Home() {
                       </div>
                     </div>
                   ))}
-                  {isProcessingVideo && transcriptionProgress?.kind === "generation" && Array.from({
-                    length: Math.max(1, Math.min(2, 4 - generatedClips.length))
-                  }).map((_, i) => (
-                    <div
-                      key={`dash-skel-${i}`}
-                      className="rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3 space-y-2.5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="h-3.5 w-24 rounded bg-zinc-800/80 skeleton-shimmer" />
-                        <div className="h-3 w-10 rounded bg-zinc-800/50 skeleton-shimmer" />
-                      </div>
-                      <div className="h-3 w-4/5 rounded bg-zinc-800/60 skeleton-shimmer" />
-                      <div className="h-3 w-1/2 rounded bg-zinc-800/40 skeleton-shimmer" />
-                    </div>
-                  ))}
                 </div>
-              </div>
-            ) : (
-              <div className="rounded-[12px] border border-[#232326] bg-[#111113] p-8 text-center transition-all duration-150">
-                <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-full bg-[#0a0a0a] border border-[#232326] text-zinc-500">
-                  <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
-                  </svg>
-                </div>
-                <h3 className="text-sm font-semibold text-white">No clips yet</h3>
-                <p className="mt-1 text-xs text-zinc-400">
-                  No clips yet, your generated clips will show up here.
-                </p>
-              </div>
+              </section>
             )}
           </div>
 
-          {/* Right Column: Recent Projects */}
-          <div className="space-y-4">
-            <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-white">Recent projects</h2>
-                <Link
-                  href="/projects"
-                  className="text-xs text-zinc-400 hover:text-emerald-400 transition-colors duration-150"
-                >
-                  View all &rarr;
-                </Link>
+          {/* Right Column: Sticky Aside with Live 9:16 Preview, Summary Chips & Primary CTA */}
+          <aside className="sticky top-6 space-y-6">
+            <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-semibold text-white">Live 9:16 Output Preview</span>
+                <Badge variant="emerald" size="sm">Real-time</Badge>
               </div>
 
-              {isLoadingProjects ? (
-                <ul className="space-y-2.5">
-                  <RecentProjectSkeletonItem />
-                  <RecentProjectSkeletonItem />
-                  <RecentProjectSkeletonItem />
-                </ul>
-              ) : recentProjects.length === 0 ? (
-                <div className="py-8 text-center text-xs text-zinc-400 space-y-1.5">
-                  <p className="font-medium text-zinc-300">No projects created yet.</p>
-                  <p className="text-[11px] text-zinc-500">
-                    Upload a video or download from YouTube to create your first project.
-                  </p>
-                </div>
-              ) : (
-                <ul className="space-y-2.5">
-                  {recentProjects.slice(0, 5).map((project) => (
-                    <li
-                      key={project.project_id}
-                      className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3 text-xs transition-all duration-150 hover:border-zinc-700"
-                    >
-                      <div className="min-w-0 pr-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-white font-mono">
-                            {project.project_id}
-                          </span>
-                          <span className={`inline-block size-1.5 rounded-full ${
-                            project.status === "Ready" ? "bg-[#10b981]" : "bg-amber-400"
-                          }`} />
-                        </div>
-                        <p className="mt-0.5 text-[11px] text-zinc-400">
-                          {project.source_type} · {project.clips} {project.clips === 1 ? "clip" : "clips"}
-                        </p>
-                      </div>
+              {/* 9:16 Phone Mockup Container */}
+              <div className="relative mx-auto aspect-[9/16] w-full max-w-[240px] rounded-2xl border-2 border-zinc-700/80 bg-[#0a0a0c] overflow-hidden shadow-2xl flex flex-col items-center justify-center p-1.5">
+                {/* Phone Speaker Notch */}
+                <div className="absolute top-2.5 left-1/2 -translate-x-1/2 h-1 w-10 rounded-full bg-zinc-700/80 z-20" />
 
+                {/* Video / Graphic Area */}
+                <div className="relative size-full rounded-xl overflow-hidden bg-black flex items-center justify-center">
+                  {/* Dynamic Layout Representation */}
+                  {framingMode === "true_9_16" ? (
+                    // Full bleed True 9:16
+                    videoPreviewUrl ? (
+                      <video
+                        src={videoPreviewUrl}
+                        muted
+                        autoPlay
+                        loop
+                        playsInline
+                        className="size-full object-cover"
+                      />
+                    ) : (
+                      <div className="size-full bg-gradient-to-b from-indigo-950/60 via-zinc-900 to-black flex items-center justify-center relative">
+                        <div className="relative flex flex-col items-center">
+                          <div className="size-16 rounded-full border border-dashed border-emerald-400/90 bg-emerald-500/15 flex items-center justify-center">
+                            <svg className="size-8 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                            </svg>
+                          </div>
+                          <span className="mt-1 text-[9px] font-mono font-bold text-emerald-400">SPEAKER TRACKING</span>
+                        </div>
+                      </div>
+                    )
+                  ) : framingMode === "square_rounded" ? (
+                    // 1:1 Rounded Square Card
+                    <div className="size-full bg-black flex items-center justify-center p-3">
+                      <div className="size-28 rounded-xl overflow-hidden border border-emerald-500/30 bg-zinc-900 shadow-md relative flex items-center justify-center">
+                        {videoPreviewUrl ? (
+                          <video
+                            src={videoPreviewUrl}
+                            muted
+                            autoPlay
+                            loop
+                            playsInline
+                            className="size-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center text-center p-2">
+                            <span className="text-xs font-bold text-emerald-400">1:1 Square</span>
+                            <span className="text-[9px] text-zinc-400">TikTok &amp; Reels</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    // 16:9 Rounded Card
+                    <div className="size-full bg-black flex items-center justify-center p-2.5">
+                      <div className="w-full aspect-video rounded-xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
+                        {videoPreviewUrl ? (
+                          <video
+                            src={videoPreviewUrl}
+                            muted
+                            autoPlay
+                            loop
+                            playsInline
+                            className="size-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center text-center p-1.5">
+                            <span className="text-xs font-semibold text-zinc-200">16:9 Card</span>
+                            <span className="text-[9px] text-zinc-400">Rounded Corners</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Watermark Overlay Preview */}
+                  {showWatermark && (
+                    <div className="absolute top-7 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-xs">
+                      <span className="size-2 rounded-full bg-emerald-400" />
+                      <span className="text-[8px] font-semibold text-white tracking-tight">Clip Robin</span>
+                    </div>
+                  )}
+
+                  {/* Captions Overlay Preview */}
+                  {showCaptions && (
+                    <div className="absolute bottom-6 left-2 right-2 z-20 text-center pointer-events-none">
+                      {captionStyle === "classic" ? (
+                        <div className="inline-block px-2 py-1 rounded bg-black/75 border border-black text-[10px] font-bold text-white shadow-md">
+                          <span>This is </span>
+                          <span className="text-yellow-400 underline underline-offset-2">captions</span>
+                        </div>
+                      ) : captionStyle === "punch" ? (
+                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-black uppercase tracking-tight text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+                          <span>HOW YOUR </span>
+                          <span className="text-[#F7C204]">CAPTIONS</span>
+                        </div>
+                      ) : captionStyle === "robin" ? (
+                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-tight text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+                          <span>MOVE WITH </span>
+                          <span className="text-[#34D399]">ROBIN</span>
+                        </div>
+                      ) : captionStyle === "pill" ? (
+                        <div className="inline-block px-2.5 py-1 rounded-full bg-black/85 text-[10px] font-semibold text-white shadow-md">
+                          <span>Clean </span>
+                          <span className="text-[#34D399] font-bold">Pill Box</span>
+                        </div>
+                      ) : captionStyle === "karaoke" ? (
+                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-bold text-white drop-shadow">
+                          <span>Karaoke </span>
+                          <span className="text-emerald-400 underline decoration-2">Sweep</span>
+                        </div>
+                      ) : (
+                        <div className="inline-block px-1.5 py-0.5 text-[10px] font-bold text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+                          <span>Clean </span>
+                          <span className="text-zinc-200">Typography</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Summary Chips */}
+              <div className="pt-2 border-t border-zinc-800 space-y-2">
+                <span className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block">
+                  Configured options
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge variant="neutral">
+                    {framingMode === "true_9_16"
+                      ? "True 9:16 (AI)"
+                      : framingMode === "square_rounded"
+                      ? "1:1 Rounded"
+                      : "16:9 Rounded"}
+                  </Badge>
+                  <Badge variant="neutral">{clipDurationSeconds}s length</Badge>
+                  <Badge variant={showCaptions ? "emerald" : "neutral"}>
+                    {showCaptions ? `${activeStyleName} captions` : "No captions"}
+                  </Badge>
+                  <Badge variant={showWatermark ? "neutral" : "neutral"}>
+                    {showWatermark ? "Watermark on" : "No watermark"}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Primary Action Button */}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => void handleStartGenerating()}
+                  disabled={!activeVideo || isProcessingVideo}
+                  className="w-full min-h-[44px] rounded-xl bg-[#10b981] px-5 py-3 text-[13px] font-bold text-zinc-950 transition-all duration-150 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#10b981] disabled:hover:shadow-none focus-ring flex items-center justify-center gap-2"
+                >
+                  {activeVideoJob?.kind === "transcription" ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="size-4 animate-spin text-zinc-950" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
+                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      </svg>
+                      Transcribing audio...
+                    </span>
+                  ) : activeVideoJob?.kind === "generation" ? (
+                    <span className="flex items-center gap-2">
+                      <svg className="size-4 animate-spin text-zinc-950" viewBox="0 0 24 24" fill="none">
+                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
+                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                      </svg>
+                      Rendering clips ({transcriptionProgress?.progress ?? 0}%)...
+                    </span>
+                  ) : (
+                    <>
+                      <svg className="size-4 fill-current" viewBox="0 0 24 24">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                      <span>Generate Clips</span>
+                    </>
+                  )}
+                </button>
+
+                {!activeVideo && (
+                  <p className="mt-2 text-center text-xs text-zinc-500">
+                    Select a local file or YouTube link to start.
+                  </p>
+                )}
+              </div>
+            </section>
+          </aside>
+        </div>
+
+        {/* Wide Lower Section: Recent Projects & Engine Guarantee Card */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pt-4 border-t border-zinc-800/80">
+          {/* Recent Projects List (Span 2 cols) */}
+          <section className="lg:col-span-2 rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-white">Recent projects</h2>
+                <p className="text-xs text-zinc-400">Your recent video clip generation runs</p>
+              </div>
+              <Link
+                href="/projects"
+                className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
+              >
+                View all projects &rarr;
+              </Link>
+            </div>
+
+            {isLoadingProjects ? (
+              <ul className="space-y-2.5">
+                <RecentProjectSkeletonItem />
+                <RecentProjectSkeletonItem />
+                <RecentProjectSkeletonItem />
+              </ul>
+            ) : recentProjects.length === 0 ? (
+              <div className="py-10 text-center text-xs text-zinc-400 space-y-1.5">
+                <p className="font-medium text-zinc-300 text-sm">No projects created yet</p>
+                <p className="text-xs text-zinc-500">
+                  Import a video above to generate your first vertical clips.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {recentProjects.slice(0, 4).map((project) => (
+                  <div
+                    key={project.project_id}
+                    className="flex flex-col justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 transition-all duration-150 hover:border-zinc-700 hover:bg-[#101014]"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-white font-mono text-xs">
+                          {project.project_id}
+                        </span>
+                        <StatusPill status={project.status} />
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        {project.source_type} • {project.clips} {project.clips === 1 ? "clip" : "clips"}
+                      </p>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between">
+                      <span className="text-[11px] text-zinc-500">
+                        {new Date(project.created_at).toLocaleDateString()}
+                      </span>
                       <Link
                         href={`/clips?project=${encodeURIComponent(project.project_id)}`}
-                        className="shrink-0 rounded-[8px] border border-[#232326] px-2.5 py-1 text-[11px] font-medium text-zinc-300 transition-all duration-150 hover:border-[#10b981] hover:text-[#10b981]"
+                        className="text-xs font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
                       >
-                        {project.clips > 0 ? "View clips" : "Generate"}
+                        {project.clips > 0 ? "View clips →" : "Generate →"}
                       </Link>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
 
-            {/* Local Processing Guarantee Card */}
-            <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-5 shadow-sm transition-all duration-150">
-              <div className="flex items-center gap-2 mb-2 text-zinc-300">
-                <svg className="size-4 text-[#10b981]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
-                </svg>
-                <h3 className="text-xs font-semibold uppercase tracking-wider">
+          {/* Local Processing Engine Card */}
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm flex flex-col justify-between space-y-4">
+            <div>
+              <div className="flex items-center gap-2.5 mb-2 text-zinc-200">
+                <div className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[#10b981]">
+                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                  </svg>
+                </div>
+                <h3 className="text-sm font-semibold text-white">
                   Local-First Engine
                 </h3>
               </div>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Clip Robin executes transcription, audio ripping, and FFmpeg video slicing directly on your machine. Your media stays private.
+              <p className="text-xs text-zinc-400 leading-relaxed mt-2">
+                Clip Robin executes speech transcription, framing, and subtitle burn-in locally on your machine via faster-whisper and FFmpeg. Your media stays completely private and never leaves your computer.
               </p>
-            </section>
-          </div>
+            </div>
+
+            <div className="pt-4 border-t border-zinc-800 flex items-center justify-between">
+              <span className="text-xs text-zinc-500">Processing Mode</span>
+              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+                <span className="size-2 rounded-full bg-[#10b981] animate-pulse" />
+                <span>100% Offline Capable</span>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </main>
