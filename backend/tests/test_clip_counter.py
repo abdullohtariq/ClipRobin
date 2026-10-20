@@ -115,3 +115,4 @@ def test_probe_video_duration_ffprobe(tmp_path: Path):
          patch("subprocess.run", return_value=mock_res):
         dur = probe_video_duration(dummy_video)
         assert dur == 42.75
+
