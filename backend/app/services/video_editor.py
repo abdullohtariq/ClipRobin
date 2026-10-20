@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.services.ass_captions import generate_ass_subtitles, stage_caption_fonts
 from app.services.caption_styles import get_caption_animation, get_caption_style
+from app.services.process_utils import get_no_window_subprocess_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ def has_ass_filter(ffmpeg_path: str | None = None) -> bool:
             stderr=subprocess.PIPE,
             text=True,
             timeout=5,
+            **get_no_window_subprocess_kwargs(),
         )
         supported = False
         for line in result.stdout.splitlines():
@@ -103,6 +105,7 @@ def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
             stderr=subprocess.PIPE,
             text=True,
             timeout=5,
+            **get_no_window_subprocess_kwargs(),
         )
         return "Audio:" in result.stderr
     except Exception:
@@ -773,6 +776,7 @@ def create_clip(
                 stderr=subprocess.PIPE,
                 text=True,
                 cwd=Path(temporary_directory),
+                **get_no_window_subprocess_kwargs(),
             )
             while True:
                 try:

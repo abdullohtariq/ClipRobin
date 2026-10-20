@@ -88,6 +88,7 @@ def download_video(
         "noplaylist": True,
         "outtmpl": str(output_path),
         "quiet": True,
+        "windows_hide_window": True,
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
     }

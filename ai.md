@@ -1,6 +1,6 @@
 # Clip Robin — AI Context, Codebase Audit & Engineering Handbook
 
-> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.19**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
+> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.20**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
 >
 > **Do NOT delete or overwrite this file.** Maintain and update this context as the project evolves.
 
@@ -516,7 +516,7 @@ projects/
 1. **Text below 12px (violates the Phase A type-scale rule)**: 53 `text-[9–11px]` usages remain: `projects/page.tsx` (12), `page.tsx` (11), `caption-style-picker.tsx` (8), `clips/page.tsx` (7: card timecode, `#NN`/duration chips, error text), `live-moving-captions.tsx` (5), `job-progress.tsx` (5), plus 1 each in `segmented-control.tsx`, `badge.tsx`, `skeletons.tsx`, `clip-settings.tsx` and `layout.tsx`. The ones in `live-moving-captions.tsx` and the layout-card mockups are scaled depictions of the output and can stay small. The rest should move to `text-xs` (12px).
 2. **Dashboard shows another project's job**: When any generation is running (even for a different project), the dashboard CTA shows "Rendering clips (NN%)…" and is locked. The helper text underneath still says "Select a local file or YouTube link to start." Fix: name the project in the button or status ("Rendering project_020 · 56%") with a link to its Clips page, and hide the contradictory helper text while a job runs.
 
-#### 30. Top Line Headline Hook Enabled for True 9:16 Clips with Transparent Background (v0.1.20) `[RESOLVED / IMPLEMENTED]`
+#### 30. Top Line Headline Hook Enabled for True 9:16 Clips with Transparent Background (v0.1.19+) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `frontend/app/clips/page.tsx`, `backend/app/services/video_editor.py`, `backend/app/services/ass_captions.py`, `backend/app/services/clip_generator.py`, `backend/tests/test_ass_captions.py`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Features Implemented**:
@@ -527,22 +527,31 @@ projects/
   - **Card Hook Indicator**: Added a prominent `Hook active` emerald chip to clip cards in Clips Studio when a top line is set.
 - **Tests**: All 103 backend pytest suites passed in `3.21s`, `npm run lint` passed with 0 errors, Next.js build compiled cleanly, and visual frame output verified via Playwright and FFmpeg extraction.
 
+#### 31. Windows CLI Popup Suppression and Comprehensive 9:16 Face Detection Hardening (v0.1.20) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/services/process_utils.py`, `backend/app/services/smart_framing.py`, `backend/app/services/video_editor.py`, `backend/app/services/downloader.py`, `backend/app/routes/clips.py`, `backend/tests/test_process_utils.py`, `backend/tests/test_smart_framing.py`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Features Implemented**:
+  - **Console Window Popup Suppression**: Eliminated flashing/persisting black console (CLI) windows when running as a Tauri/PyInstaller GUI desktop app. Centralized `get_no_window_subprocess_kwargs()` helper injecting Win32 `CREATE_NO_WINDOW` (`0x08000000`) and `STARTF_USESHOWWINDOW` + `SW_HIDE` across all `subprocess.Popen` and `subprocess.run` calls (FFmpeg face scanning, clip rendering, filter probe, audio stream probe, Tkinter save dialogs), plus `"windows_hide_window": True` in yt-dlp.
+  - **14 Edge Case Failure Modes in Smart Framing**: Hardened 9:16 face detection against low-light/distant faces, edge cutoffs (IoU matching + velocity clamping), rapid multi-speaker head movements (2.0s hold before cutting), mobile video rotation metadata tags (`rotate` and `side_data_list.rotation`), B-roll natural center fallback (>2.5s), and odd dimension codec alignment (even width/height).
+- **Tests**: `backend/tests/test_process_utils.py` (2 tests), `backend/tests/test_smart_framing.py` (26 tests covering all 14 failure modes). All 123 backend tests pass in < 3s.
+
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **103 tests** across 15 test suites in `backend/tests/` (All 103 passing via `pytest`).
+- **Active Backend Automated Tests**: **123 tests** across 16 test suites in `backend/tests/` (All 123 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (103 Implemented & Passing)
+### Backend Test Inventory (123 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
+| **`app.services.process_utils`** | `tests/test_process_utils.py` | ✅ Passed | • On Windows, supplies `CREATE_NO_WINDOW` and `SW_HIDE` startupinfo.<br>• On non-Windows, returns empty dict without throwing errors. |
 | **`app.services.smart_framing`** | `tests/test_smart_framing.py` | ✅ Passed | • YuNet ONNX model path resolution.<br>• Bounding box IoU calculations.<br>• Speech window extraction and VAD tolerance check.<br>• Single-shot crop expression generation.<br>• Multi-cut piecewise `if(lt(t,...))` crop expression generation.<br>• Already-vertical video bypass. |
 | **`app.routes.health`** | `tests/test_routes_health.py` | ✅ Passed | • `GET /api/health` returns status 200 and `{"status": "healthy"}`. |
 | **`app.routes.jobs`** | `tests/test_routes_jobs.py` | ✅ Passed | • Empty job queue returns empty list.<br>• Active transcription & clip generation jobs reported with step progress.<br>• Thread safety and status segregation. |

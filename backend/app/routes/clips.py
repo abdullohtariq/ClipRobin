@@ -16,6 +16,7 @@ from starlette.background import BackgroundTask
 from app.services.caption_styles import ANIMATIONS, CAPTION_STYLES, STYLE_ALIASES
 from app.services.clip_generator import generate_clips, render_single_clip
 from app.services.project_manager import get_clips_directory, get_project_directory
+from app.services.process_utils import get_no_window_subprocess_kwargs
 from app.services.video_editor import (
     ClipGenerationCancelled,
     VideoEditorError,
@@ -78,6 +79,7 @@ def ask_save_path_dialog(default_filename: str, file_type: str = "mp4") -> Path 
             capture_output=True,
             text=True,
             timeout=120,
+            **get_no_window_subprocess_kwargs(),
         )
         chosen = result.stdout.strip()
         return Path(chosen) if chosen else None
