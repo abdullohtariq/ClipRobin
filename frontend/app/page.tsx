@@ -1,6 +1,6 @@
 "use client";
 
-import React, { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import React, { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   downloadVideo,
@@ -52,6 +52,27 @@ const formatFileSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+const getFileDuration = (file: File): Promise<number | null> => {
+  return new Promise((resolve) => {
+    try {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      const u = URL.createObjectURL(file);
+      v.src = u;
+      v.onloadedmetadata = () => {
+        URL.revokeObjectURL(u);
+        resolve(v.duration || null);
+      };
+      v.onerror = () => {
+        URL.revokeObjectURL(u);
+        resolve(null);
+      };
+    } catch {
+      resolve(null);
+    }
+  });
+};
+
 export default function Home() {
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadStatus, setDownloadStatus] = useState("");
@@ -63,6 +84,24 @@ export default function Home() {
   } | null>(null);
   const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
   const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
+  const [clipCount, setClipCount] = useState<number>(3);
+  const [sourceDuration, setSourceDuration] = useState<number | null>(null);
+  const clipCountRef = useRef(clipCount);
+
+  useEffect(() => {
+    clipCountRef.current = clipCount;
+  }, [clipCount]);
+
+  const maxClips = useMemo(() => {
+    if (!sourceDuration || sourceDuration <= 0) return 10;
+    return Math.max(1, Math.floor(sourceDuration / clipDurationSeconds));
+  }, [sourceDuration, clipDurationSeconds]);
+
+  useEffect(() => {
+    if (clipCount > maxClips) {
+      setClipCount(maxClips);
+    }
+  }, [maxClips, clipCount]);
   const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
@@ -126,8 +165,12 @@ export default function Home() {
         setFramingMode(savedFraming as FramingMode);
       }
       const savedDuration = localStorage.getItem("cliprobin_clip_duration");
-      if (savedDuration && [15, 30, 60, 90].includes(Number(savedDuration))) {
+      if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
         setClipDurationSeconds(Number(savedDuration) as ClipDuration);
+      }
+      const savedCount = localStorage.getItem("cliprobin_clip_count");
+      if (savedCount && Number(savedCount) >= 1) {
+        setClipCount(Number(savedCount));
       }
       const savedMode = localStorage.getItem("cliprobin_generation_mode");
       if (savedMode && ["random", "ai"].includes(savedMode)) {
@@ -162,6 +205,14 @@ export default function Home() {
     setClipDurationSeconds(seconds);
     try {
       localStorage.setItem("cliprobin_clip_duration", String(seconds));
+    } catch {}
+  };
+
+  const handleClipCountChange = (count: number) => {
+    const clamped = Math.max(1, Math.min(maxClips, count));
+    setClipCount(clamped);
+    try {
+      localStorage.setItem("cliprobin_clip_count", String(clamped));
     } catch {}
   };
 
@@ -242,6 +293,9 @@ export default function Home() {
         wm,
         fm,
         cs,
+        undefined,
+        clipCountRef.current,
+        generationMode,
       );
 
       if (generation.cancelled) {
@@ -470,6 +524,9 @@ export default function Home() {
       });
 
       const videoLabel = result.title || result.file;
+      if (result.duration) {
+        setSourceDuration(result.duration);
+      }
       setActiveVideo({
         kind: "downloaded",
         projectId: result.project_id,
@@ -576,6 +633,9 @@ export default function Home() {
         setDownloadStatus("Please choose a valid video file (MP4, MOV, MKV, WebM, AVI).");
         return;
       }
+      void getFileDuration(video).then((dur) => {
+        if (dur) setSourceDuration(dur);
+      });
       setActiveVideo({
         kind: "file",
         file: video,
@@ -920,6 +980,9 @@ export default function Home() {
                 onGenerationModeChange={handleGenerationModeChange}
                 clipDurationSeconds={clipDurationSeconds}
                 onClipDurationChange={handleClipDurationChange}
+                clipCount={clipCount}
+                onClipCountChange={handleClipCountChange}
+                maxClips={maxClips}
                 framingMode={framingMode}
                 onFramingModeChange={handleFramingModeChange}
                 showCaptions={showCaptions}
@@ -1239,7 +1302,7 @@ export default function Home() {
                       ? "1:1 Rounded"
                       : "16:9 Rounded"}
                   </Badge>
-                  <Badge variant="neutral">{clipDurationSeconds}s length</Badge>
+                  <Badge variant="neutral">{clipCount} {clipCount === 1 ? "clip" : "clips"} · {clipDurationSeconds}s</Badge>
                   <Badge variant={showCaptions ? "emerald" : "neutral"}>
                     {showCaptions ? `${activeStyleName} captions` : "No captions"}
                   </Badge>

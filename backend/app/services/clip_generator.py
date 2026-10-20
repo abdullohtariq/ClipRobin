@@ -66,9 +66,11 @@ def generate_clips(
     project_directory: Path,
     show_subtitles: bool = True,
     show_watermark: bool = False,
-    progress_callback: Callable[[str, int, int], None] | None = None,
+    progress_callback: Callable[..., None] | None = None,
     cancel_event: threading.Event | None = None,
-    max_clip_seconds: float = 60.0,
+    max_clip_seconds: float = 30.0,
+    requested_clip_count: int | None = None,
+    generation_mode: str = "random",
     framing_mode: str | None = None,
     caption_style: str | None = None,
     caption_animation: str | None = None,
@@ -151,16 +153,23 @@ def generate_clips(
                     def report_transcription(step_name: str, pct: float) -> None:
                         if progress_callback:
                             progress_callback(f"Transcribing audio ({round(pct)}%)", 0, 0)
+                    target_count = requested_clip_count or 10
+                    max_d = None if generation_mode == "ai" else (target_count * max_clip_seconds * 1.15)
                     transcribe_video(
                         source_video,
                         project_directory / "transcription",
                         progress_callback=report_transcription,
                         cancel_event=cancel_event,
+                        max_duration=max_d,
                     )
 
         if progress_callback:
             progress_callback("Analyzing transcript", 0, 0)
-        analysis = create_mock_analysis(project_directory, max_clip_seconds=max_clip_seconds)
+        analysis = create_mock_analysis(
+            project_directory,
+            max_clip_seconds=max_clip_seconds,
+            max_clips=requested_clip_count,
+        )
 
     saved_options = analysis.get("generation_options", {}) if isinstance(analysis, dict) else {}
     if framing_mode is not None:
@@ -198,6 +207,8 @@ def generate_clips(
     transcript_segments = _load_transcript_segments(project_directory)
     generated = []
     analysis_clips = analysis.get("clips", [])
+    if requested_clip_count is not None and len(analysis_clips) > requested_clip_count:
+        analysis_clips = analysis_clips[:requested_clip_count]
     if not analysis_clips:
         raise ValueError("Analysis contains no clips")
     # If True 9:16 is requested, run speaker tracking analysis with live progress BEFORE rendering
@@ -211,11 +222,13 @@ def generate_clips(
             if progress_callback:
                 progress_callback(step_str, 0, len(analysis_clips))
 
+        max_tracking_duration = max((c.get("end", 0.0) for c in analysis_clips), default=100.0) + 1.0
         analyze_speaker_tracking(
             project_directory=project_directory,
             ffmpeg_path=find_ffmpeg(),
             cancel_event=cancel_event,
             progress_callback=track_progress,
+            max_duration=max_tracking_duration,
         )
 
     if progress_callback:

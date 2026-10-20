@@ -116,10 +116,18 @@ def transcribe_local_video(
         source_path,
         project_directory,
     )
+    dur = 0.0
+    try:
+        from app.services.video_editor import probe_video_duration
+        dur = probe_video_duration(source_path)
+    except Exception:
+        pass
+
     return JSONResponse(
         status_code=202,
         content={
             "project_id": project_id,
+            "duration": round(dur, 2),
             "status": "queued",
             "step": "Preparing transcription",
             "progress": 0,
@@ -171,10 +179,18 @@ def transcribe_from_path(
         source_path,
         project_directory,
     )
+    dur = 0.0
+    try:
+        from app.services.video_editor import probe_video_duration
+        dur = probe_video_duration(source_path)
+    except Exception:
+        pass
+
     return JSONResponse(
         status_code=202,
         content={
             "project_id": project_id,
+            "duration": round(dur, 2),
             "status": "queued",
             "step": "Preparing transcription",
             "progress": 0,

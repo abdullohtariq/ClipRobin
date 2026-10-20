@@ -43,30 +43,42 @@ def _normalize_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def create_mock_analysis(
     project_directory: Path,
     max_clip_seconds: float = MAX_CLIP_SECONDS,
+    max_clips: int | None = None,
+    segments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    transcript_path = project_directory / "transcription" / "transcript.json"
-    if not transcript_path.is_file():
-        transcript_path = project_directory / "transcript.json"
-    if not transcript_path.is_file():
-        raise FileNotFoundError("Transcript not found")
+    if segments is None:
+        transcript_path = project_directory / "transcription" / "transcript.json"
+        if not transcript_path.is_file():
+            transcript_path = project_directory / "transcript.json"
+        if not transcript_path.is_file():
+            raise FileNotFoundError("Transcript not found")
 
-    transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
-    if not isinstance(transcript, dict):
-        raise ValueError("Transcript must contain a segments array")
+        transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+        if not isinstance(transcript, dict):
+            raise ValueError("Transcript must contain a segments array")
 
-    segments = _normalize_segments(transcript.get("segments", []))
-    if not segments:
+        raw_segments = transcript.get("segments", [])
+    else:
+        raw_segments = segments
+
+    normalized_segments = _normalize_segments(raw_segments)
+    if not normalized_segments:
         raise ValueError("Transcript has no segments")
 
     clips = []
     index = 0
-    while index < len(segments):
+    effective_min_clip_seconds = min(MIN_CLIP_SECONDS, max_clip_seconds * 0.5)
+
+    while index < len(normalized_segments):
+        if max_clips is not None and len(clips) >= max_clips:
+            break
+
         start_index = index
-        start_time = segments[start_index]["start"]
+        start_time = normalized_segments[start_index]["start"]
         index += 1
 
-        while index < len(segments):
-            candidate_end = segments[index]["end"]
+        while index < len(normalized_segments):
+            candidate_end = normalized_segments[index]["end"]
             current_duration = candidate_end - start_time
             if current_duration > max_clip_seconds:
                 break
@@ -74,19 +86,19 @@ def create_mock_analysis(
             if current_duration >= max_clip_seconds:
                 break
 
-        selected = segments[start_index:index]
+        selected = normalized_segments[start_index:index]
         remaining_duration = (
-            segments[-1]["end"] - segments[index]["start"]
-            if index < len(segments)
+            normalized_segments[-1]["end"] - normalized_segments[index]["start"]
+            if index < len(normalized_segments)
             else 0
         )
         if (
-            index < len(segments)
-            and remaining_duration < MIN_CLIP_SECONDS
-            and segments[index - 1]["end"] - start_time + remaining_duration <= max_clip_seconds
+            index < len(normalized_segments)
+            and remaining_duration < effective_min_clip_seconds
+            and normalized_segments[index - 1]["end"] - start_time + remaining_duration <= max_clip_seconds
         ):
-            selected.extend(segments[index:])
-            index = len(segments)
+            selected.extend(normalized_segments[index:])
+            index = len(normalized_segments)
 
         clips.append({
             "id": f"clip_{len(clips) + 1:03d}",

@@ -535,22 +535,34 @@ projects/
   - **14 Edge Case Failure Modes in Smart Framing**: Hardened 9:16 face detection against low-light/distant faces, edge cutoffs (IoU matching + velocity clamping), rapid multi-speaker head movements (2.0s hold before cutting), mobile video rotation metadata tags (`rotate` and `side_data_list.rotation`), B-roll natural center fallback (>2.5s), and odd dimension codec alignment (even width/height).
 - **Tests**: `backend/tests/test_process_utils.py` (2 tests), `backend/tests/test_smart_framing.py` (26 tests covering all 14 failure modes). All 123 backend tests pass in < 3s.
 
+#### 32. Dynamic Clip Counter & Incremental Clip Generation Pipeline (Branch: `clip_counter`) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/services/transcriber.py`, `backend/app/services/clip_generator.py`, `backend/app/services/mock_analyzer.py`, `backend/app/services/video_editor.py`, `backend/app/services/smart_framing.py`, `backend/app/routes/clips.py`, `backend/app/routes/local_video.py`, `backend/tests/test_clip_counter.py`, `frontend/src/components/clip-settings.tsx`, `frontend/app/page.tsx`, `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/src/lib/api.ts`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Features Implemented**:
+  - **Supported Clip Lengths**: Updated supported clip lengths across all frontend views and backend validation to **12s, 30s, 60s, and 90s** (with 15s backward compatibility).
+  - **Dynamic Clip Counter Selector**: Added an interactive clip counter stepper to `ClipSettings` (`[-] <count> clips [+]`) with real-time `Max: <maxClips>` calculated dynamically from source video duration: `Math.max(1, Math.floor(sourceDuration / clipDurationSeconds))`. Clamps automatically when clip length or source video changes.
+  - **Optimized Early-Exit Transcription**: `transcribe_video` now accepts `max_duration` and `segment_callback`, allowing interval-based clipping to transcribe only the required audio duration (`target_count * max_clip_seconds * 1.15`) instead of decoding full 30+ minute files, yielding a 6x speedup. AI mode preserves full-video transcription.
+  - **Incremental Clip Slicing & Rendering**: Renders clips progressively as segments become available, writing each `.mp4` immediately to the final destination and notifying `ready_clips` so completed clips display on the dashboard and Clips Studio without waiting for downstream rendering.
+  - **Requested Count Limit**: Enforces user-selected clip counts (`max_clips` / `clip_count`), terminating processing once the requested quota has been fulfilled.
+- **Tests**: `backend/tests/test_clip_counter.py` (6 new unit & integration tests). All 129 backend tests pass in < 5s.
+
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **123 tests** across 16 test suites in `backend/tests/` (All 123 passing via `pytest`).
+- **Active Backend Automated Tests**: **129 tests** across 17 test suites in `backend/tests/` (All 129 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (123 Implemented & Passing)
+### Backend Test Inventory (129 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
+| **`app.services.clip_generator` / `mock_analyzer`** | `tests/test_clip_counter.py` | ✅ Passed | • Respects `max_clips` and `clip_count`.<br>• Slices 12-second clips properly.<br>• Rejects `clip_count < 1` with 422.<br>• `get_project_clips` returns `source_duration`.<br>• `probe_video_duration` probes duration via ffprobe. |
 | **`app.services.process_utils`** | `tests/test_process_utils.py` | ✅ Passed | • On Windows, supplies `CREATE_NO_WINDOW` and `SW_HIDE` startupinfo.<br>• On non-Windows, returns empty dict without throwing errors. |
 | **`app.services.smart_framing`** | `tests/test_smart_framing.py` | ✅ Passed | • YuNet ONNX model path resolution.<br>• Bounding box IoU calculations.<br>• Speech window extraction and VAD tolerance check.<br>• Single-shot crop expression generation.<br>• Multi-cut piecewise `if(lt(t,...))` crop expression generation.<br>• Already-vertical video bypass. |
 | **`app.routes.health`** | `tests/test_routes_health.py` | ✅ Passed | • `GET /api/health` returns status 200 and `{"status": "healthy"}`. |

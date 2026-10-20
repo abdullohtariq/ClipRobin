@@ -136,15 +136,22 @@ def generate_project_clips(
     background_tasks: BackgroundTasks,
     show_subtitles: bool = True,
     show_watermark: bool = False,
-    clip_duration_seconds: int = 60,
+    clip_duration_seconds: int = 30,
+    clip_count: int | None = None,
+    generation_mode: str = "random",
     framing_mode: str | None = None,
     caption_style: str | None = None,
     caption_animation: str | None = None,
 ) -> dict[str, str]:
-    if clip_duration_seconds not in {15, 30, 60, 90}:
+    if clip_duration_seconds not in {12, 15, 30, 60, 90}:
         raise HTTPException(
             status_code=422,
-            detail="Clip duration must be 15, 30, 60, or 90 seconds",
+            detail="Clip duration must be 12, 15, 30, 60, or 90 seconds",
+        )
+    if clip_count is not None and clip_count < 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Clip count must be at least 1",
         )
     if framing_mode is not None and framing_mode not in {"standard", "square_rounded", "true_9_16"}:
         raise HTTPException(
@@ -200,6 +207,8 @@ def generate_project_clips(
         show_subtitles,
         cancel_event,
         clip_duration_seconds,
+        clip_count,
+        generation_mode,
         show_watermark,
         framing_mode,
         caption_style,
@@ -214,7 +223,9 @@ def run_clip_generation(
     project_directory: Path,
     show_subtitles: bool,
     cancel_event: threading.Event,
-    clip_duration_seconds: int = 60,
+    clip_duration_seconds: int = 30,
+    clip_count: int | None = None,
+    generation_mode: str = "random",
     show_watermark: bool = False,
     framing_mode: str | None = None,
     caption_style: str | None = None,
@@ -276,6 +287,8 @@ def run_clip_generation(
             progress_callback=report_progress,
             cancel_event=cancel_event,
             max_clip_seconds=clip_duration_seconds,
+            requested_clip_count=clip_count,
+            generation_mode=generation_mode,
             framing_mode=framing_mode,
             caption_style=caption_style,
             caption_animation=caption_animation,
@@ -399,7 +412,16 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "caption_animation": metadata.get("caption_animation", caption_animation),
             "status": "ready",
         })
-    return {"clips": clips}
+    source_duration = 0.0
+    source_files = list(project_directory.glob("source.*"))
+    if source_files:
+        try:
+            from app.services.video_editor import probe_video_duration
+            source_duration = probe_video_duration(source_files[0])
+        except Exception:
+            source_duration = 0.0
+
+    return {"clips": clips, "source_duration": round(source_duration, 2)}
 
 
 @router.post("/{project_id}/clips/{clip_id}/top-line")

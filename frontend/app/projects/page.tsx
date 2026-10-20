@@ -22,7 +22,7 @@ import {
   getPreviewUrls,
 } from "@/src/components/caption-style-picker";
 
-const CLIP_DURATIONS = [15, 30, 60, 90] as const;
+const CLIP_DURATIONS = [12, 30, 60, 90] as const;
 type ClipDuration = (typeof CLIP_DURATIONS)[number];
 
 export default function Projects() {
@@ -53,7 +53,7 @@ export default function Projects() {
         setDefaultFraming(savedFraming as FramingMode);
       }
       const savedDuration = localStorage.getItem("cliprobin_clip_duration");
-      if (savedDuration && [15, 30, 60, 90].includes(Number(savedDuration))) {
+      if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
         setDefaultDuration(Number(savedDuration) as ClipDuration);
       }
       const savedMode = localStorage.getItem("cliprobin_generation_mode");

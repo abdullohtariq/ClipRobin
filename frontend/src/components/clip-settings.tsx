@@ -12,7 +12,7 @@ import { ToggleRow } from "./ui/toggle-row";
 import { OptionCard } from "./ui/option-card";
 import { Badge } from "./ui/badge";
 
-export const CLIP_DURATIONS = [15, 30, 60, 90] as const;
+export const CLIP_DURATIONS = [12, 30, 60, 90] as const;
 export type ClipDuration = (typeof CLIP_DURATIONS)[number];
 
 export interface ClipSettingsProps {
@@ -21,6 +21,9 @@ export interface ClipSettingsProps {
   onGenerationModeChange: (mode: "random" | "ai") => void;
   clipDurationSeconds: ClipDuration;
   onClipDurationChange: (duration: ClipDuration) => void;
+  clipCount?: number;
+  onClipCountChange?: (count: number) => void;
+  maxClips?: number;
   framingMode: FramingMode;
   onFramingModeChange: (mode: FramingMode) => void;
   showCaptions: boolean;
@@ -39,6 +42,9 @@ export function ClipSettings({
   onGenerationModeChange,
   clipDurationSeconds,
   onClipDurationChange,
+  clipCount = 3,
+  onClipCountChange,
+  maxClips = 10,
   framingMode,
   onFramingModeChange,
   showCaptions,
@@ -76,8 +82,8 @@ export function ClipSettings({
 
   return (
     <div className={`space-y-5 ${className}`}>
-      {/* 1. Generation Mode & Clip Length Row */}
-      <div className={variant === "full" ? "grid grid-cols-1 sm:grid-cols-2 gap-4" : "grid grid-cols-1 sm:grid-cols-2 gap-3"}>
+      {/* 1. Generation Mode, Clip Length & Clip Count Row */}
+      <div className={onClipCountChange ? "grid grid-cols-1 sm:grid-cols-3 gap-3.5" : (variant === "full" ? "grid grid-cols-1 sm:grid-cols-2 gap-4" : "grid grid-cols-1 sm:grid-cols-2 gap-3")}>
         {/* Generation Mode */}
         <div>
           <label className="block text-[13px] font-medium text-zinc-300 mb-2">
@@ -105,6 +111,43 @@ export function ClipSettings({
             ariaLabel="Clip length duration selection"
           />
         </div>
+
+        {/* Clip Count Selector */}
+        {onClipCountChange && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-[13px] font-medium text-zinc-300">
+                Number of clips
+              </label>
+              <span className="text-[11px] text-zinc-400 font-medium">
+                Max: {maxClips}
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-[#0c0c0e] p-1 h-9">
+              <button
+                type="button"
+                onClick={() => onClipCountChange(Math.max(1, clipCount - 1))}
+                disabled={disabled || clipCount <= 1}
+                aria-label="Decrease clip count"
+                className="flex h-7 w-8 items-center justify-center rounded-md border border-zinc-700/60 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                −
+              </button>
+              <span className="text-xs font-bold text-zinc-100 tabular-nums px-2 select-none">
+                {clipCount} {clipCount === 1 ? "clip" : "clips"}
+              </span>
+              <button
+                type="button"
+                onClick={() => onClipCountChange(Math.min(maxClips, clipCount + 1))}
+                disabled={disabled || clipCount >= maxClips}
+                aria-label="Increase clip count"
+                className="flex h-7 w-8 items-center justify-center rounded-md border border-zinc-700/60 bg-zinc-800/80 text-zinc-300 hover:bg-zinc-700 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 2. Video Layout & Framing Selection */}

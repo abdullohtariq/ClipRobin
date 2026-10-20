@@ -845,6 +845,7 @@ def _scan_faces(
     video_duration: float,
     cancel_event: threading.Event | None,
     progress_callback: Any | None,
+    max_duration: float | None = None,
 ) -> tuple[list[tuple[float, list[_Visible], float]], dict[int, _FaceTrack], float]:
     """Decode sampled frames, detect faces, track them and record Pass 1 targets."""
     import cv2
@@ -901,6 +902,9 @@ def _scan_faces(
                 break
 
             t = frame_idx * frame_interval
+            if max_duration is not None and t >= max_duration:
+                process.terminate()
+                break
             if progress_callback and frame_idx % report_every == 0:
                 pct = min(99, int(round((t / max(1.0, video_duration)) * 100)))
                 progress_callback(f"Analyzing speaker tracking (True 9:16): {pct}%", int(t), int(video_duration))
@@ -949,6 +953,7 @@ def analyze_speaker_tracking(
     ffmpeg_path: str,
     cancel_event: threading.Event | None = None,
     progress_callback: Any | None = None,
+    max_duration: float | None = None,
 ) -> dict[str, Any]:
     """
     Run YuNet face detection and mouth-movement speech correlation across the video.
@@ -960,7 +965,7 @@ def analyze_speaker_tracking(
     # One analysis per project at a time: a concurrent caller waits and then hits the cache
     # instead of decoding the whole video a second time.
     with lock:
-        return _analyze_speaker_tracking_locked(project_directory, ffmpeg_path, cancel_event, progress_callback)
+        return _analyze_speaker_tracking_locked(project_directory, ffmpeg_path, cancel_event, progress_callback, max_duration=max_duration)
 
 
 def _analyze_speaker_tracking_locked(
@@ -968,6 +973,7 @@ def _analyze_speaker_tracking_locked(
     ffmpeg_path: str,
     cancel_event: threading.Event | None,
     progress_callback: Any | None,
+    max_duration: float | None = None,
 ) -> dict[str, Any]:
     source_path = _find_source_video(project_directory)
     signature = _source_signature(source_path)
@@ -1029,9 +1035,11 @@ def _analyze_speaker_tracking_locked(
 
     from app.services.video_editor import ClipGenerationCancelled
     try:
+        effective_duration = min(video_duration, max_duration) if max_duration is not None else video_duration
         frames, tracks, frame_interval = _scan_faces(
             source_path, ffmpeg_path, orig_w, orig_h, crop_w,
-            speech_windows, video_duration, cancel_event, progress_callback,
+            speech_windows, effective_duration, cancel_event, progress_callback,
+            max_duration=max_duration,
         )
     except ClipGenerationCancelled:
         raise

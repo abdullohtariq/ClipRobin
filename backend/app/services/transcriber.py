@@ -25,6 +25,8 @@ def transcribe_video(
     output_directory: Path,
     progress_callback: Callable[[str, float], None] | None = None,
     cancel_event: threading.Event | None = None,
+    max_duration: float | None = None,
+    segment_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     output_directory.mkdir(parents=True, exist_ok=True)
     if progress_callback:
@@ -36,10 +38,28 @@ def transcribe_video(
         word_timestamps=True,
     )
 
-    transcript_segments = []
+    transcript_segments: list[dict[str, Any]] = []
     duration = max(info.duration, 0.001)
+    effective_duration = min(duration, max_duration) if max_duration is not None else duration
     if progress_callback:
         progress_callback("Transcribing audio", 0)
+
+    def _flush_transcript() -> None:
+        transcript_text = "\n".join(
+            f"[{segment['start']:.3f} - {segment['end']:.3f}] {segment['text']}"
+            for segment in transcript_segments
+        )
+        transcript_json = {
+            "language": info.language,
+            "language_probability": info.language_probability,
+            "segments": transcript_segments,
+            "duration": duration,
+        }
+        (output_directory / "transcript.txt").write_text(transcript_text + "\n", encoding="utf-8")
+        (output_directory / "transcript.json").write_text(
+            json.dumps(transcript_json, indent=2),
+            encoding="utf-8",
+        )
 
     for segment in segments:
         if cancel_event is not None and cancel_event.is_set():
@@ -60,32 +80,29 @@ def transcribe_video(
                 if word.start is not None and word.end is not None and word.word.strip()
             ]
         transcript_segments.append(transcript_segment)
+
+        if segment_callback:
+            segment_callback(transcript_segment)
+
+        _flush_transcript()
+
         if progress_callback:
+            pct = min(99, round(segment.end / max(effective_duration, 0.001) * 100))
             progress_callback(
                 "Transcribing audio",
-                min(99, round(segment.end / duration * 100)),
+                pct,
             )
 
-    if progress_callback:
-        progress_callback("Saving transcript", 0)
-    transcript_text = "\n".join(
-        f"[{segment['start']:.3f} - {segment['end']:.3f}] {segment['text']}"
-        for segment in transcript_segments
-    )
-    transcript_json = {
-        "language": info.language,
-        "language_probability": info.language_probability,
-        "segments": transcript_segments,
-    }
+        if max_duration is not None and segment.end >= max_duration:
+            break
 
-    (output_directory / "transcript.txt").write_text(transcript_text + "\n", encoding="utf-8")
-    (output_directory / "transcript.json").write_text(
-        json.dumps(transcript_json, indent=2),
-        encoding="utf-8",
-    )
+    if progress_callback:
+        progress_callback("Saving transcript", 100)
+    _flush_transcript()
 
     return {
         "text_file": "transcript.txt",
         "json_file": "transcript.json",
         "segments": len(transcript_segments),
+        "duration": duration,
     }

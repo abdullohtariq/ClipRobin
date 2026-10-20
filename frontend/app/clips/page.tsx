@@ -30,6 +30,7 @@ import { IconButton } from "@/src/components/ui/icon-button";
 interface AppliedProjectSettings {
   framingMode: FramingMode;
   clipDurationSeconds: ClipDuration;
+  clipCount?: number;
   captionStyle: CaptionStyle;
   showWatermark: boolean;
   showCaptions: boolean;
@@ -569,7 +570,20 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
   const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
+  const [clipCount, setClipCount] = useState<number>(3);
+  const [sourceDuration, setSourceDuration] = useState<number | null>(null);
   const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
+
+  const maxClips = useMemo(() => {
+    if (!sourceDuration || sourceDuration <= 0) return 10;
+    return Math.max(1, Math.floor(sourceDuration / clipDurationSeconds));
+  }, [sourceDuration, clipDurationSeconds]);
+
+  useEffect(() => {
+    if (clipCount > maxClips) {
+      setClipCount(maxClips);
+    }
+  }, [maxClips, clipCount]);
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
 
@@ -645,6 +659,9 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
           getLatestClipGenerationJob(projectId),
         ]);
         if (!isCurrentRequest) return;
+        if (result.source_duration) {
+          setSourceDuration(result.source_duration);
+        }
         setIsLoading(false);
         const currentClips =
           job?.status !== "cancelled" &&
@@ -720,6 +737,9 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         showWatermark,
         framingMode,
         captionStyle,
+        undefined,
+        clipCount,
+        generationMode,
       );
 
       setClips(result.clips);
@@ -978,6 +998,9 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 onGenerationModeChange={setGenerationMode}
                 clipDurationSeconds={clipDurationSeconds}
                 onClipDurationChange={setClipDurationSeconds}
+                clipCount={clipCount}
+                onClipCountChange={setClipCount}
+                maxClips={maxClips}
                 framingMode={framingMode}
                 onFramingModeChange={setFramingMode}
                 showCaptions={showCaptions}

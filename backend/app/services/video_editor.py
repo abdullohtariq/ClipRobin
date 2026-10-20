@@ -112,6 +112,63 @@ def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
         return True
 
 
+
+def probe_video_duration(source_path: Path, ffmpeg_path: str | None = None) -> float:
+    """Probe the duration of a video in seconds using ffprobe or ffmpeg."""
+    ffprobe_path = shutil.which("ffprobe")
+    if not ffprobe_path and ffmpeg_path:
+        candidate = Path(ffmpeg_path).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if candidate.is_file():
+            ffprobe_path = str(candidate)
+
+    if ffprobe_path:
+        try:
+            cmd = [
+                ffprobe_path,
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "json",
+                str(source_path),
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                **get_no_window_subprocess_kwargs(),
+            )
+            if result.returncode == 0:
+                import json
+                data = json.loads(result.stdout)
+                dur = float(data.get("format", {}).get("duration", 0))
+                if dur > 0:
+                    return dur
+        except Exception as e:
+            logger.warning("ffprobe duration check failed: %s", e)
+
+    # Fallback to ffmpeg -i inspection
+    ff_exec = ffmpeg_path or shutil.which("ffmpeg") or "ffmpeg"
+    try:
+        res = subprocess.run(
+            [ff_exec, "-i", str(source_path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            **get_no_window_subprocess_kwargs(),
+        )
+        import re
+        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", res.stderr)
+        if match:
+            h, m, s = float(match.group(1)), float(match.group(2)), float(match.group(3))
+            return h * 3600.0 + m * 60.0 + s
+    except Exception:
+        pass
+
+    return 0.0
+
+
+get_media_duration = probe_video_duration
+
 def find_watermark_file() -> Path | None:
     env_path = os.environ.get("CLIPROBIN_WATERMARK_PATH")
     if env_path and Path(env_path).is_file():

@@ -43,6 +43,7 @@ export type DownloadResponse = {
   status: string;
   file: string;
   title?: string;
+  duration?: number;
 };
 
 export type TranscriptionResponse = {
@@ -312,18 +313,22 @@ export async function generateClips(
   projectId: string,
   showSubtitles: boolean = true,
   onProgress?: (job: ClipGenerationJob) => void,
-  clipDurationSeconds: 15 | 30 | 60 | 90 = 60,
+  clipDurationSeconds: 12 | 15 | 30 | 60 | 90 = 30,
   showWatermark: boolean = false,
   framingMode?: FramingMode,
   captionStyle?: CaptionStyle,
   captionAnimation?: CaptionAnimation,
+  clipCount?: number,
+  generationMode: "random" | "ai" = "random",
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const framingQuery = framingMode ? `&framing_mode=${encodeURIComponent(framingMode)}` : "";
   const captionQuery = captionStyle ? `&caption_style=${encodeURIComponent(captionStyle)}` : "";
   const animQuery = captionAnimation ? `&caption_animation=${encodeURIComponent(captionAnimation)}` : "";
+  const countQuery = typeof clipCount === "number" && clipCount > 0 ? `&clip_count=${clipCount}` : "";
+  const modeQuery = `&generation_mode=${encodeURIComponent(generationMode)}`;
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}${countQuery}${modeQuery}`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -394,7 +399,7 @@ export async function getLatestClipGenerationJob(
   return result.job;
 }
 
-export async function getClips(projectId: string): Promise<{ clips: Clip[] }> {
+export async function getClips(projectId: string): Promise<{ clips: Clip[]; source_duration?: number }> {
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/projects/${projectId}/clips`);
   if (!response.ok) {
