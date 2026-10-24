@@ -205,7 +205,7 @@ export default function SettingsPage() {
   const { directory, openClips, confirmDelete, outputFormat, aspectRatio, quality, defaultCaptionStyle } = settings;
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
+    <main className="min-h-screen bg-[#09090b] text-white p-6 lg:p-10">
       <div className="mx-auto max-w-2xl">
         <header className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -223,7 +223,7 @@ export default function SettingsPage() {
         </header>
 
         <div className="space-y-6">
-          <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150 space-y-5">
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-5">
             <h2 className="text-base font-semibold text-white">General</h2>
             <div>
               <label htmlFor="settings-directory-input" className="block text-xs font-medium text-zinc-400 mb-1.5">
@@ -233,12 +233,12 @@ export default function SettingsPage() {
                 id="settings-directory-input"
                 value={directory}
                 onChange={(event) => updateSetting("directory", event.target.value)}
-                className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-500 transition-all duration-150 focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-500 transition-all duration-150 focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
               />
             </div>
 
             <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3.5">
+              <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5">
                 <span className="text-xs text-zinc-300">Automatically open generated clips</span>
                 <button
                   type="button"
@@ -257,7 +257,7 @@ export default function SettingsPage() {
                 </button>
               </div>
 
-              <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3.5">
+              <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5">
                 <span className="text-xs text-zinc-300">Confirm before deleting projects</span>
                 <button
                   type="button"
@@ -278,7 +278,7 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150 space-y-4">
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-4">
             <h2 className="text-base font-semibold text-white">Video Defaults</h2>
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
@@ -287,7 +287,7 @@ export default function SettingsPage() {
                   id="settings-format-select"
                   value={outputFormat}
                   onChange={(e) => updateSetting("outputFormat", e.target.value)}
-                  className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                  className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
                 >
                   <option value="MP4">MP4</option>
                   <option value="MOV">MOV</option>
@@ -300,7 +300,7 @@ export default function SettingsPage() {
                   id="settings-aspect-select"
                   value={aspectRatio}
                   onChange={(e) => updateSetting("aspectRatio", e.target.value)}
-                  className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                  className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
                 >
                   <option value="9:16 (Vertical)">9:16 (Vertical)</option>
                   <option value="Original">Original</option>
@@ -313,7 +313,7 @@ export default function SettingsPage() {
                   id="settings-quality-select"
                   value={quality}
                   onChange={(e) => updateSetting("quality", e.target.value)}
-                  className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                  className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
                 >
                   <option value="High">High</option>
                   <option value="Original">Original</option>
@@ -323,7 +323,7 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150 space-y-4">
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-4">
             <h2 className="text-base font-semibold text-white">Caption Defaults</h2>
             <div>
               <label htmlFor="settings-caption-style-select" className="block text-xs font-medium text-zinc-400 mb-1.5">Default caption style</label>
@@ -331,7 +331,7 @@ export default function SettingsPage() {
                 id="settings-caption-style-select"
                 value={defaultCaptionStyle}
                 onChange={(e) => updateSetting("defaultCaptionStyle", e.target.value)}
-                className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
               >
                 <option value="classic">Classic (Original Clip Robin word-by-word)</option>
                 <option value="robin">Robin (Signature viral all-caps)</option>
@@ -344,7 +344,7 @@ export default function SettingsPage() {
           </section>
 
           {/* AI Developer Mode */}
-          <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150 space-y-4">
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="size-6 rounded-md bg-violet-500/15 flex items-center justify-center text-violet-300 border border-violet-400/30 text-sm">✦</div>
@@ -384,7 +384,7 @@ export default function SettingsPage() {
                   value={geminiApiKey}
                   onChange={(e) => setGeminiApiKey(e.target.value)}
                   placeholder={aiDevStatus?.gemini_configured ? "Key saved; enter a new key to replace it" : "Paste your free-tier Gemini API key"}
-                  className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
                 />
                 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="mt-1.5 inline-block text-xs text-violet-300 hover:text-violet-200 hover:underline">
                   Get a Gemini API key in Google AI Studio
@@ -411,7 +411,7 @@ export default function SettingsPage() {
           </section>
 
           {/* YouTube Integration Section */}
-          <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150 space-y-4">
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="size-6 rounded-md bg-[#FF0000]/15 flex items-center justify-center text-[#FF0000] border border-[#FF0000]/30">
@@ -504,7 +504,7 @@ export default function SettingsPage() {
                     value={ytClientId}
                     onChange={(e) => setYtClientId(e.target.value)}
                     placeholder="xxxx.apps.googleusercontent.com"
-                    className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                    className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
                   />
                 </div>
                 <div>
@@ -516,7 +516,7 @@ export default function SettingsPage() {
                     value={ytClientSecret}
                     onChange={(e) => setYtClientSecret(e.target.value)}
                     placeholder="GOCSPX-xxxx"
-                    className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
+                    className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
                   />
                 </div>
                 {ytError && <p className="text-xs text-rose-400">{ytError}</p>}

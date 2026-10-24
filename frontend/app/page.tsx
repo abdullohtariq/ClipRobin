@@ -16,7 +16,7 @@ import {
   FramingMode,
   CaptionStyle,
 } from "@/src/lib/api";
-import { RecentProjectSkeletonItem } from "@/src/components/skeletons";
+import { RecentProjectSkeletonItem, DashboardProjectSkeleton } from "@/src/components/skeletons";
 import {
   CAPTION_STYLE_OPTIONS,
 } from "@/src/components/caption-style-picker";
@@ -78,6 +78,7 @@ export default function Home() {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
   const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [importTab, setImportTab] = useState<"file" | "youtube">("file");
   const [downloadStatus, setDownloadStatus] = useState("");
   const [youtubeDownloadError, setYoutubeDownloadError] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<{
@@ -734,7 +735,7 @@ export default function Home() {
         </header>
 
         {/* 2-Column Responsive Layout: Left Inputs + Right Sticky Live Preview Aside */}
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] 2xl:grid-cols-[1fr_400px] gap-6 xl:gap-8 items-start">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] 2xl:grid-cols-[1fr_420px] gap-6 xl:gap-8 items-start">
           {/* Left Column: 1. Add video & 2. Clip settings */}
           <div className="space-y-6 min-w-0">
             {/* Step 1: Add a video */}
@@ -749,11 +750,44 @@ export default function Home() {
                     <p className="text-xs text-zinc-400">Select a local video file or download from YouTube</p>
                   </div>
                 </div>
+
+                {!activeVideo && (
+                  <div className="flex items-center rounded-xl border border-zinc-800 bg-[#0d0d10] p-1">
+                    <button
+                      type="button"
+                      onClick={() => setImportTab("file")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        importTab === "file"
+                          ? "bg-zinc-800 text-white font-semibold shadow-sm"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                      </svg>
+                      <span>Upload File</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImportTab("youtube")}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        importTab === "youtube"
+                          ? "bg-zinc-800 text-white font-semibold shadow-sm"
+                          : "text-zinc-400 hover:text-zinc-200"
+                      }`}
+                    >
+                      <svg className="size-3.5 text-red-400" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                      </svg>
+                      <span>YouTube Link</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Collapsed File Card when Video is chosen */}
               {activeVideo ? (
-                <div className="rounded-xl border border-zinc-700/80 bg-[#0c0c0e] p-4 transition-all duration-150">
+                <div className="rounded-xl border border-zinc-700/80 bg-[#0c0c0e] p-4 transition-all duration-150 animate-fade-in">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3.5 min-w-0">
                       <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[#10b981]">
@@ -771,8 +805,17 @@ export default function Home() {
                               ? `YouTube Project ${activeVideo.projectId}`
                               : formatFileSize(activeVideo.size)}
                           </span>
+                          {sourceDuration && (
+                            <>
+                              <span>•</span>
+                              <span>{Math.round(sourceDuration)}s</span>
+                            </>
+                          )}
                           <span>•</span>
-                          <span className="text-emerald-400 font-medium">Ready for generation</span>
+                          <span className="text-emerald-400 font-medium flex items-center gap-1">
+                            <span className="size-1.5 rounded-full bg-[#10b981]" />
+                            Ready for generation
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -784,7 +827,7 @@ export default function Home() {
                         onClick={() => {
                           if (fileInputRef.current) fileInputRef.current.click();
                         }}
-                        className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 text-xs font-medium text-zinc-200 hover:text-white hover:bg-zinc-700 transition-colors focus-ring"
+                        className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 text-xs font-medium text-zinc-200 hover:text-white hover:bg-zinc-700 transition-colors focus-ring cursor-pointer"
                       >
                         Replace
                       </button>
@@ -797,6 +840,7 @@ export default function Home() {
                         onClick={() => {
                           setActiveVideo(null);
                           setDownloadStatus("");
+                          setTranscriptionProgress(null);
                         }}
                         icon={
                           <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -808,12 +852,62 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
+              ) : importTab === "file" ? (
+                /* Drag & Drop File Zone */
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (!isProcessingVideo) setIsDragging(true);
+                  }}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    if (!isProcessingVideo) setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => {
+                    if (!isProcessingVideo) fileInputRef.current?.click();
+                  }}
+                  className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all duration-200 ${
+                    isDragging
+                      ? "border-[#10b981] bg-[#10b981]/10 text-emerald-400 shadow-lg shadow-emerald-950/20"
+                      : "border-zinc-800 bg-[#0c0c0e]/60 hover:border-zinc-700 hover:bg-[#0c0c0e]"
+                  } ${isProcessingVideo ? "cursor-not-allowed opacity-50" : ""}`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="video/*,.mkv,.avi,.webm"
+                    onChange={handleFileChange}
+                    disabled={isProcessingVideo}
+                    className="hidden"
+                  />
+
+                  <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all duration-150">
+                    <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                    </svg>
+                  </div>
+
+                  <p className="text-sm font-semibold text-zinc-200">
+                    Drag &amp; drop a video or <span className="text-[#10b981] underline underline-offset-4">browse files</span>
+                  </p>
+                  <p className="mt-1 text-xs text-zinc-400">
+                    MP4, MOV, MKV, or WebM up to 4 GB
+                  </p>
+
+                  <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
+                    <span className="px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/50">Local privacy</span>
+                    <span>•</span>
+                    <span>Processed 100% on device</span>
+                  </div>
+                </div>
               ) : (
-                <div className="space-y-5">
-                  {/* YouTube URL input */}
+                /* YouTube URL Input Mode */
+                <div className="space-y-4 animate-fade-in">
                   <div>
                     <label htmlFor="youtube-url-input" className="block text-xs font-medium text-zinc-400 mb-1.5">
-                      YouTube URL
+                      YouTube Video or Shorts URL
                     </label>
                     <div className="flex flex-col sm:flex-row gap-2.5">
                       <input
@@ -838,7 +932,7 @@ export default function Home() {
                         type="button"
                         onClick={handleDownload}
                         disabled={!youtubeUrl.trim() || !isValidYouTubeUrl(youtubeUrl) || isDownloading || isProcessingVideo}
-                        className="shrink-0 px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800/90 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 hover:text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-ring"
+                        className="shrink-0 px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800/90 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 hover:text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-ring cursor-pointer"
                       >
                         {isDownloading ? (
                           <span className="flex items-center gap-2">
@@ -849,7 +943,7 @@ export default function Home() {
                             Downloading...
                           </span>
                         ) : (
-                          "Download video"
+                          "Import video"
                         )}
                       </button>
                     </div>
@@ -862,11 +956,11 @@ export default function Home() {
                         </p>
                       ) : youtubeUrl.trim() && isValidYouTubeUrl(youtubeUrl) ? (
                         <p className="text-emerald-400 flex items-center gap-1.5">
-                          <span>✓</span> Valid YouTube link ready for download
+                          <span>✓</span> Valid YouTube link ready for import
                         </p>
                       ) : (
                         <p className="text-zinc-400">
-                          Paste any YouTube video or Shorts URL to import directly.
+                          Paste any public YouTube video or Shorts URL to import directly.
                         </p>
                       )}
                     </div>
@@ -875,7 +969,7 @@ export default function Home() {
                     {youtubeDownloadError && (
                       <div
                         role="alert"
-                        className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-200 animate-in fade-in-0 duration-150"
+                        className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-200 animate-fade-in"
                       >
                         <svg className="size-4 shrink-0 text-amber-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -883,13 +977,13 @@ export default function Home() {
                         <div className="flex-1 space-y-1">
                           <p className="font-medium text-amber-200">{youtubeDownloadError}</p>
                           <p className="text-xs text-amber-300/80">
-                            YouTube may be restricting automated downloads or the video might be private/geo-blocked. Choose or drop your file below to proceed immediately.
+                            YouTube may be restricting automated downloads or the video might be private/geo-blocked. Choose or drop your file directly to proceed.
                           </p>
                         </div>
                         <button
                           type="button"
                           onClick={() => setYoutubeDownloadError(null)}
-                          className="text-amber-400 hover:text-amber-200 p-0.5 transition-colors"
+                          className="text-amber-400 hover:text-amber-200 p-0.5 transition-colors cursor-pointer"
                           aria-label="Dismiss message"
                         >
                           <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -904,7 +998,7 @@ export default function Home() {
                       <div
                         role="status"
                         aria-live="polite"
-                        className="mt-3.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5 space-y-2.5 animate-in fade-in-0 duration-150"
+                        className="mt-3.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5 space-y-2.5 animate-fade-in"
                       >
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2 min-w-0 pr-2">
@@ -941,60 +1035,6 @@ export default function Home() {
                         </div>
                       </div>
                     )}
-                  </div>
-
-                  {/* "or" divider */}
-                  <div className="relative my-4 flex items-center justify-center">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-zinc-800" />
-                    </div>
-                    <span className="relative bg-[#121215] px-3 text-xs uppercase tracking-wider text-zinc-500 font-medium">
-                      or
-                    </span>
-                  </div>
-
-                  {/* Drag & Drop File Zone */}
-                  <div
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      if (!isProcessingVideo) setIsDragging(true);
-                    }}
-                    onDragEnter={(e) => {
-                      e.preventDefault();
-                      if (!isProcessingVideo) setIsDragging(true);
-                    }}
-                    onDragLeave={() => setIsDragging(false)}
-                    onDrop={handleDrop}
-                    onClick={() => {
-                      if (!isProcessingVideo) fileInputRef.current?.click();
-                    }}
-                    className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all duration-150 ${
-                      isDragging
-                        ? "border-[#10b981] bg-[#10b981]/5 text-emerald-400"
-                        : "border-zinc-800 bg-[#0c0c0e]/60 hover:border-zinc-700 hover:bg-[#0c0c0e]"
-                    } ${isProcessingVideo ? "cursor-not-allowed opacity-50" : ""}`}
-                  >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="video/*,.mkv,.avi,.webm"
-                      onChange={handleFileChange}
-                      disabled={isProcessingVideo}
-                      className="hidden"
-                    />
-
-                    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all duration-150">
-                      <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                      </svg>
-                    </div>
-
-                    <p className="text-sm font-semibold text-zinc-200">
-                      Drag &amp; drop a video or <span className="text-[#10b981] underline underline-offset-4">browse files</span>
-                    </p>
-                    <p className="mt-1 text-xs text-zinc-400">
-                      MP4, MOV, MKV, or WebM up to 4GB
-                    </p>
                   </div>
                 </div>
               )}
@@ -1040,7 +1080,7 @@ export default function Home() {
             {transcriptionProgress && (
               <section
                 aria-live="polite"
-                className={`rounded-2xl border p-6 shadow-sm space-y-4 transition-all duration-150 ${
+                className={`rounded-2xl border p-6 shadow-sm space-y-4 transition-all duration-150 animate-fade-in ${
                   transcriptionProgress.kind === "failed"
                     ? "border-red-500/30 bg-red-950/15"
                     : "border-zinc-800 bg-[#121215]"
@@ -1068,7 +1108,7 @@ export default function Home() {
                           setTranscriptionProgress(null);
                           setDownloadStatus("");
                         }}
-                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-200 hover:bg-red-500/20 transition-colors"
+                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-200 hover:bg-red-500/20 transition-colors cursor-pointer"
                       >
                         Dismiss &amp; Reset
                       </button>
@@ -1175,7 +1215,7 @@ export default function Home() {
 
             {/* Generated clips preview section if ready */}
             {generatedClips.length > 0 && (
-              <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
+              <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4 animate-fade-in">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="flex size-5 items-center justify-center rounded-full bg-[#10b981]/15 text-xs text-[#10b981]">✓</span>
@@ -1235,16 +1275,16 @@ export default function Home() {
             <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-[13px] font-semibold text-white">Live 9:16 Output Preview</span>
-                <Badge variant="emerald" size="sm">Real-time</Badge>
+                <Badge variant="emerald" size="sm">9:16 Vertical</Badge>
               </div>
 
               {/* 9:16 Phone Mockup Container */}
-              <div className="relative mx-auto aspect-[9/16] w-full max-w-[240px] rounded-2xl border-2 border-zinc-700/80 bg-[#0a0a0c] overflow-hidden shadow-2xl flex flex-col items-center justify-center p-1.5">
+              <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] rounded-3xl border-2 border-zinc-700/80 bg-[#0a0a0c] overflow-hidden shadow-2xl flex flex-col items-center justify-center p-2 ring-1 ring-white/5">
                 {/* Phone Speaker Notch */}
-                <div className="absolute top-2.5 left-1/2 -translate-x-1/2 h-1 w-10 rounded-full bg-zinc-700/80 z-20" />
+                <div className="absolute top-2.5 left-1/2 -translate-x-1/2 h-1 w-12 rounded-full bg-zinc-700/80 z-20" />
 
                 {/* Video / Graphic Area */}
-                <div className="relative size-full rounded-xl overflow-hidden bg-black flex items-center justify-center">
+                <div className="relative size-full rounded-2xl overflow-hidden bg-black flex items-center justify-center">
                   {/* Dynamic Layout Representation */}
                   {framingMode === "true_9_16" ? (
                     // Full bleed True 9:16
@@ -1259,20 +1299,22 @@ export default function Home() {
                         className="size-full object-cover"
                       />
                     ) : (
-                      <div className="size-full bg-gradient-to-b from-indigo-950/60 via-zinc-900 to-black flex items-center justify-center relative">
+                      <div className="size-full bg-gradient-to-b from-purple-950/40 via-zinc-950 to-black flex items-center justify-center relative p-4 text-center">
                         <div className="relative flex flex-col items-center">
-                          <div className="size-16 rounded-full border border-dashed border-emerald-400/90 bg-emerald-500/15 flex items-center justify-center">
-                            <svg className="size-8 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+                          <div className="size-14 rounded-full border border-dashed border-purple-400/80 bg-purple-500/10 flex items-center justify-center">
+                            <svg className="size-7 text-purple-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="12" cy="8" r="4" strokeWidth="2" />
+                              <path d="M6 20v-2a6 6 0 0 1 12 0v2" strokeWidth="2" />
                             </svg>
                           </div>
-                          <span className="mt-1 text-[9px] font-mono font-bold text-emerald-400">SPEAKER TRACKING</span>
+                          <span className="mt-2 text-[10px] font-semibold text-purple-300">Full 9:16 Crop</span>
+                          <span className="text-[8px] text-zinc-400 mt-0.5">Speaker tracking focus</span>
                         </div>
                       </div>
                     )
                   ) : framingMode === "square_rounded" ? (
-                    // 1:1 Rounded Square Card (660/720 ≈ 91.7% width, centered vertically matching FFmpeg output)
-                    <div className="size-full bg-black flex items-center justify-center p-2.5">
+                    // 1:1 Rounded Square Card
+                    <div className="size-full bg-black flex items-center justify-center p-3">
                       <div className="w-full aspect-square rounded-2xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
                         {videoPreviewUrl ? (
                           <video
@@ -1286,15 +1328,15 @@ export default function Home() {
                           />
                         ) : (
                           <div className="flex flex-col items-center text-center p-2">
-                            <span className="text-xs font-semibold text-zinc-200">1:1 Square</span>
-                            <span className="text-[9px] text-zinc-400">TikTok &amp; Reels</span>
+                            <span className="text-xs font-semibold text-emerald-300">1:1 Rounded</span>
+                            <span className="text-[9px] text-zinc-400 mt-0.5">Centered Square Card</span>
                           </div>
                         )}
                       </div>
                     </div>
                   ) : (
-                    // 16:9 Rounded Card
-                    <div className="size-full bg-black flex items-center justify-center p-2.5">
+                    // 16:9 Letterbox Card
+                    <div className="size-full bg-black flex items-center justify-center p-3">
                       <div className="w-full aspect-video rounded-xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
                         {videoPreviewUrl ? (
                           <video
@@ -1307,19 +1349,26 @@ export default function Home() {
                             className="size-full object-cover"
                           />
                         ) : (
-                          <div className="flex flex-col items-center text-center p-1.5">
-                            <span className="text-xs font-semibold text-zinc-200">16:9 Card</span>
-                            <span className="text-[9px] text-zinc-400">Rounded Corners</span>
+                          <div className="flex flex-col items-center text-center p-2">
+                            <span className="text-xs font-semibold text-zinc-200">16:9 Letterbox</span>
+                            <span className="text-[9px] text-zinc-400 mt-0.5">Floating Widescreen Card</span>
                           </div>
                         )}
                       </div>
                     </div>
                   )}
 
+                  {/* Empty state overlay message if no video loaded */}
+                  {!activeVideo && !videoPreviewUrl && (
+                    <div className="absolute inset-x-3 bottom-3 rounded-lg bg-black/80 border border-white/10 p-2 text-center backdrop-blur-xs">
+                      <p className="text-[10px] text-zinc-300 font-medium">Add a video to preview framing</p>
+                    </div>
+                  )}
+
                   {/* Watermark Overlay Preview (Top-right corner with platform safe-space margins) */}
                   {showWatermark && (
                     <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-xs shadow-sm">
-                      <span className="size-2 rounded-full bg-emerald-400" />
+                      <span className="size-1.5 rounded-full bg-[#10b981]" />
                       <span className="text-[8px] font-semibold text-white tracking-tight">Clip Robin</span>
                     </div>
                   )}
@@ -1341,14 +1390,14 @@ export default function Home() {
                 <div className="flex flex-wrap gap-1.5">
                   <Badge variant="neutral">
                     {framingMode === "true_9_16"
-                      ? "True 9:16 (AI)"
+                      ? "Full 9:16 (AI)"
                       : framingMode === "square_rounded"
                       ? "1:1 Rounded"
-                      : "16:9 Rounded"}
+                      : "16:9 Letterbox"}
                   </Badge>
                   <Badge variant="neutral">{clipCount} {clipCount === 1 ? "clip" : "clips"} · {clipDurationSeconds}s</Badge>
                   <Badge variant={showCaptions ? "emerald" : "neutral"}>
-                    {showCaptions ? `${activeStyleName} captions` : "No captions"}
+                    {showCaptions ? `${activeStyleName} subtitles` : "No subtitles"}
                   </Badge>
                   <Badge variant={showWatermark ? "neutral" : "neutral"}>
                     {showWatermark ? "Watermark on" : "No watermark"}
@@ -1362,7 +1411,11 @@ export default function Home() {
                   type="button"
                   onClick={() => void handleStartGenerating()}
                   disabled={!canStartOrRetry}
-                  className="w-full min-h-[44px] rounded-xl bg-[#10b981] px-5 py-3 text-[13px] font-bold text-zinc-950 transition-all duration-150 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-[#10b981] disabled:hover:shadow-none focus-ring flex items-center justify-center gap-2"
+                  className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 ${
+                    canStartOrRetry
+                      ? "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 cursor-pointer"
+                      : "border border-zinc-800 bg-zinc-900/60 text-zinc-500 cursor-not-allowed opacity-60"
+                  }`}
                 >
                   {activeVideoJob?.kind === "transcription" ? (
                     <span className="flex items-center gap-2">
@@ -1370,7 +1423,7 @@ export default function Home() {
                         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
                         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                       </svg>
-                      Transcribing {activeVideoJob.projectId ? `${activeVideoJob.projectId}...` : "audio..."}
+                      Transcribing audio...
                     </span>
                   ) : activeVideoJob?.kind === "generation" ? (
                     <span className="flex items-center gap-2">
@@ -1378,7 +1431,7 @@ export default function Home() {
                         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
                         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                       </svg>
-                      Rendering {activeVideoJob.projectId ? `${activeVideoJob.projectId} ` : ""}clips ({transcriptionProgress?.progress ?? 0}%)...
+                      Rendering clips ({transcriptionProgress?.progress ?? 0}%)...
                     </span>
                   ) : transcriptionProgress?.kind === "failed" && transcriptionProgress?.projectId ? (
                     <>
@@ -1392,14 +1445,14 @@ export default function Home() {
                       <svg className="size-4 fill-current" viewBox="0 0 24 24">
                         <polygon points="5 3 19 12 5 21 5 3" />
                       </svg>
-                      <span>Generate Clips</span>
+                      <span>Generate {clipCount} {clipCount === 1 ? "Clip" : "Clips"}</span>
                     </>
                   )}
                 </button>
 
                 {!activeVideo && !isProcessingVideo && !transcriptionProgress?.projectId && (
                   <p className="mt-2 text-center text-xs text-zinc-500">
-                    Select a local file or YouTube link to start.
+                    Select a local file or YouTube link to enable generation.
                   </p>
                 )}
               </div>
@@ -1425,11 +1478,12 @@ export default function Home() {
             </div>
 
             {isLoadingProjects ? (
-              <ul className="space-y-2.5">
-                <RecentProjectSkeletonItem />
-                <RecentProjectSkeletonItem />
-                <RecentProjectSkeletonItem />
-              </ul>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <DashboardProjectSkeleton />
+                <DashboardProjectSkeleton />
+                <DashboardProjectSkeleton />
+                <DashboardProjectSkeleton />
+              </div>
             ) : recentProjects.length === 0 ? (
               <div className="py-10 text-center text-xs text-zinc-400 space-y-1.5">
                 <p className="font-medium text-zinc-300 text-sm">No projects created yet</p>
@@ -1464,7 +1518,7 @@ export default function Home() {
                         href={`/clips?project=${encodeURIComponent(project.project_id)}`}
                         className="text-xs font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
                       >
-                        {project.clips > 0 ? "View clips →" : "Generate →"}
+                        {project.clips > 0 ? "Open in Studio →" : "Generate →"}
                       </Link>
                     </div>
                   </div>

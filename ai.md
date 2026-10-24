@@ -589,7 +589,20 @@ projects/
   - **Google Cloud Console Credentials Setup**: Allows users to configure Client ID and Secret in settings or modal, or paste their downloaded `client_secret_*.json` file directly with step-by-step guidance.
   - **Shorts Upload Dialog**: Pre-fills clip title (with `#shorts` tag), description, custom tags, privacy setting (`Public`, `Unlisted`, `Private`), and COPPA "Made for Kids" compliance, uploading via YouTube Data API v3 resumable protocol with direct links to the published Short (`https://youtube.com/shorts/{id}`).
   - **Settings Integration**: Dedicated YouTube section in `/settings` to inspect connection state, switch accounts, or update credentials.
-- **Tests**: `backend/tests/test_youtube.py` (6 unit and API integration tests). All 139 backend tests passing.
+- **Tests**: `backend/tests/test_youtube.py` (6 unit and API integration tests). All 140 backend tests passing.
+
+#### 35. Comprehensive UI/UX Redesign, Workflow Simplification & Fluid Animations (Branch: `gui`) `[IMPLEMENTED]`
+- **Files**: `frontend/app/globals.css`, `frontend/app/page.tsx`, `frontend/src/components/clip-settings.tsx`, `frontend/src/components/skeletons.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/settings/page.tsx`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Features Implemented**:
+  - **Calmer, Intentional Visual Hierarchy**: Preserved Clip Robin's dark aesthetic (`#09090b` / `#121215`) and emerald accent (`#10b981`), while removing superfluous nested borders, pills, badges, and decorative noise. Standardized typography scale across titles, headers, labels, and helper text.
+  - **Dual-Mode Video Intake**: Split video import into two dedicated tabs (`Upload File` and `YouTube Link`) with clear states for idle, drag-and-drop feedback, download progress with percentage, and active video summary card (showing file name, size, duration, and replace/remove actions). Supported formats (`MP4, MOV, MKV, WebM, AVI`) and the 4 GB limit are displayed directly near the upload control.
+  - **Streamlined Clip Settings**: Restructured settings into Primary Controls (Target duration, Clip count stepper, and Framing in 9:16 Canvas) and a secondary/collapsible "Captions & branding" drawer (Subtitles toggle with visual style sample + modal picker, and Watermark toggle).
+  - **Clarified Control Terminology**: Replaced ambiguous "Random" label with "Fast Interval" (local offline evenly spaced cuts) vs "AI Hook Finder" (Gemini moments when Developer Mode is active). Clarified that output is always vertical 9:16 while source framing options provide "16:9 Letterbox", "1:1 Rounded", and "Full 9:16 Crop".
+  - **Elevated 9:16 Live Preview & Unmistakable CTA**: Fixed sticky 9:16 phone mockup on desktop (`xl+`) with intentional empty preview state, live animated subtitles preview, platform safe-zone watermark, and dynamic framing visualization. Primary "Generate Clips" CTA provides a genuinely disabled visual state when idle with informative prompt, and high-contrast emerald action reflecting the active clip count when ready.
+  - **Fluid Animations & Skeleton Loaders**: Integrated smooth cubic-bezier transition curves (`--ease-smooth: cubic-bezier(0.16, 1, 0.3, 1)`), shimmer animations, and dedicated `DashboardProjectSkeleton` cards for recent projects loading state.
+  - **Unified Related Screens**: Aligned `/projects` and `/settings` with the new design system, consistent corner radii (`rounded-xl` / `rounded-2xl`), accessible `.focus-ring` utility, and clean section groupings.
+- **Tests**: Verified with 140 backend tests (`pytest`), 2 frontend tests (`node --test`), and 0 ESLint errors. All routes return HTTP 200.
 
 ---
 

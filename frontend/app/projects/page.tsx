@@ -259,7 +259,7 @@ export default function Projects() {
   };
 
   return (
-    <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
+    <main className="min-h-screen bg-[#09090b] text-white p-6 lg:p-10">
       <div className="mx-auto max-w-4xl">
         <header className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
@@ -381,7 +381,7 @@ export default function Projects() {
                                 }`}
                               >
                                 <span className="text-xs font-semibold">16:9</span>
-                                <span className="text-xs text-zinc-500 mt-0.5">Rounded</span>
+                                <span className="text-xs text-zinc-500 mt-0.5">Letterbox</span>
                               </button>
 
                               <button
@@ -400,7 +400,7 @@ export default function Projects() {
                                 }`}
                               >
                                 <span className="text-xs font-semibold">1:1</span>
-                                <span className="text-xs text-emerald-400 mt-0.5">Reels / TikTok</span>
+                                <span className="text-xs text-emerald-400 mt-0.5">1:1 Square</span>
                               </button>
 
                               <button
@@ -419,7 +419,7 @@ export default function Projects() {
                                 }`}
                               >
                                 <span className="text-xs font-semibold">9:16</span>
-                                <span className="text-xs text-purple-400 mt-0.5">AI Speaker</span>
+                                <span className="text-xs text-purple-400 mt-0.5">Full 9:16</span>
                               </button>
                             </div>
                           </div>
@@ -456,6 +456,7 @@ export default function Projects() {
                               <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-2 transition-all duration-150 hover:border-zinc-700">
                                 <div className="flex items-center gap-2.5 min-w-0">
                                   <div className="relative aspect-[9/16] w-6 h-10 shrink-0 overflow-hidden rounded border border-[#232326] bg-black">
+                                    /* eslint-disable-next-line @next/next/no-img-element */
                                     <img
                                       src={previewUrls.posterUrl}
                                       alt={`${activeStyleOption.name} caption preview`}
@@ -510,9 +511,7 @@ export default function Projects() {
                                     ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
                                     : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
                                 }`}
-                              >
-                                Random
-                              </button>
+                              >Fast Interval</button>
 
                               <div className={`relative group ${aiModeEnabled ? "" : "cursor-not-allowed"}`}>
                                 <button
