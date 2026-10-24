@@ -21,11 +21,14 @@ import {
   CAPTION_STYLE_OPTIONS,
   getPreviewUrls,
 } from "@/src/components/caption-style-picker";
+import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 
 const CLIP_DURATIONS = [12, 30, 60, 90] as const;
 type ClipDuration = (typeof CLIP_DURATIONS)[number];
 
 export default function Projects() {
+  const { status: aiDeveloperStatus } = useAIDeveloperStatus();
+  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -82,6 +85,19 @@ export default function Projects() {
       }
     } catch {}
   }, []);
+
+  useEffect(() => {
+    if (!aiDeveloperStatus || aiDeveloperStatus.ai_enabled) return;
+    setDefaultGenerationMode("random");
+    setGenerationModeOptions((current) => {
+      const next = { ...current };
+      for (const [projectId, mode] of Object.entries(next)) {
+        if (mode === "ai") next[projectId] = "random";
+      }
+      return next;
+    });
+    try { localStorage.setItem("cliprobin_generation_mode", "random"); } catch {}
+  }, [aiDeveloperStatus]);
 
   useEffect(() => {
     getProjects()
@@ -498,22 +514,32 @@ export default function Projects() {
                                 Random
                               </button>
 
-                              <div className="relative group cursor-not-allowed">
+                              <div className={`relative group ${aiModeEnabled ? "" : "cursor-not-allowed"}`}>
                                 <button
                                   type="button"
-                                  disabled
-                                  title="COMING SOON"
-                                  aria-label="AI mode coming soon"
-                                  className="w-full h-full rounded-[10px] border border-[#232326] bg-[#0a0a0a]/50 py-2 text-xs font-medium text-zinc-500 cursor-not-allowed flex items-center justify-center gap-1.5 group-hover:border-zinc-700 transition-all duration-150 pointer-events-none"
+                                  disabled={!aiModeEnabled || isGenerating || isTranscribing}
+                                  title={aiModeEnabled ? "AI clip selection is enabled in Developer Mode" : aiDeveloperStatus?.reason || "Connect YouTube and enable AI Developer Mode to unlock AI clip selection"}
+                                  aria-label={aiModeEnabled ? "Select AI generation mode" : "AI mode is available after YouTube sign-in and Developer Mode setup"}
+                                  onClick={() => {
+                                    setGenerationModeOptions((prev) => ({ ...prev, [project.project_id]: "ai" }));
+                                    try { localStorage.setItem("cliprobin_generation_mode", "ai"); } catch {}
+                                  }}
+                                  className={`w-full h-full rounded-[10px] border py-2 text-xs font-medium transition-all duration-150 flex items-center justify-center gap-1.5 ${
+                                    currentGenMode === "ai" && aiModeEnabled
+                                      ? "border-violet-500/60 bg-violet-500/10 text-white"
+                                      : aiModeEnabled
+                                        ? "border-[#232326] bg-[#0a0a0a] text-zinc-300 hover:border-violet-500/50 hover:text-white"
+                                        : "border-[#232326] bg-[#0a0a0a]/50 text-zinc-500 cursor-not-allowed"
+                                  }`}
                                 >
                                   <span className="font-semibold text-zinc-400">AI</span>
-                                  <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-amber-400/90 border border-amber-400/20">
-                                    Soon
+                                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wider border ${aiModeEnabled ? "bg-violet-500/10 text-violet-300 border-violet-400/20" : "bg-zinc-800/80 text-amber-400/90 border-amber-400/20"}`}>
+                                    {aiModeEnabled ? "Developer" : "Soon"}
                                   </span>
                                 </button>
                                 {/* Hover tooltip */}
                                 <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
-                                  COMING SOON
+                                  {aiModeEnabled ? "AI DEVELOPER MODE" : aiDeveloperStatus?.reason || "COMING SOON"}
                                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
                                 </div>
                               </div>

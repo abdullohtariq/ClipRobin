@@ -22,3 +22,4 @@ def test_safe_av_open_handles_metadata_errors_type_error(monkeypatch):
     assert "metadata_errors" in called_with[0][1]
     # Second attempt had metadata_errors stripped
     assert "metadata_errors" not in called_with[1][1]
+

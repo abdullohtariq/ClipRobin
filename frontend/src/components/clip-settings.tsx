@@ -32,6 +32,8 @@ export interface ClipSettingsProps {
   onCaptionStyleChange: (style: CaptionStyle) => void;
   showWatermark: boolean;
   onShowWatermarkChange: (show: boolean) => void;
+  aiModeEnabled: boolean;
+  aiModeDisabledReason?: string | null;
   disabled?: boolean;
   className?: string;
 }
@@ -53,6 +55,8 @@ export function ClipSettings({
   onCaptionStyleChange,
   showWatermark,
   onShowWatermarkChange,
+  aiModeEnabled,
+  aiModeDisabledReason,
   disabled = false,
   className = "",
 }: ClipSettingsProps) {
@@ -74,9 +78,11 @@ export function ClipSettings({
     {
       value: "ai" as const,
       label: "AI",
-      badge: <Badge variant="purple" size="sm">Soon</Badge>,
-      disabled: true,
-      tooltip: "AI mode is in development and coming soon",
+      badge: <Badge variant="purple" size="sm">{aiModeEnabled ? "Developer" : "Soon"}</Badge>,
+      disabled: !aiModeEnabled,
+      tooltip: aiModeEnabled
+        ? "AI Developer Mode uses Gemini to find clip moments"
+        : aiModeDisabledReason || "Connect YouTube and enable AI Developer Mode to unlock this option",
     },
   ];
 

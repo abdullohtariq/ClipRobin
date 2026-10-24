@@ -6,8 +6,11 @@ import {
   saveYouTubeConfig,
   getYouTubeAuthUrl,
   disconnectYouTube,
+  saveGeminiApiKey,
+  setAIDeveloperMode,
   YouTubeStatusResponse,
 } from "@/src/lib/api";
+import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 
 const SETTINGS_STORAGE_KEY = "cliprobin.settings";
 
@@ -32,6 +35,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 export default function SettingsPage() {
+  const { status: aiDevStatus, refresh: refreshAiStatus } = useAIDeveloperStatus();
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSaved, setIsSaved] = useState(false);
 
@@ -44,6 +48,40 @@ export default function SettingsPage() {
   const [ytConnecting, setYtConnecting] = useState(false);
   const [ytError, setYtError] = useState<string | null>(null);
   const ytPollRef = useRef<NodeJS.Timeout | null>(null);
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [geminiSaving, setGeminiSaving] = useState(false);
+  const [developerModeSaving, setDeveloperModeSaving] = useState(false);
+  const [aiSettingsError, setAiSettingsError] = useState<string | null>(null);
+
+  const handleSaveGeminiKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!geminiApiKey.trim()) return;
+    setGeminiSaving(true);
+    setAiSettingsError(null);
+    try {
+      await saveGeminiApiKey(geminiApiKey.trim());
+      setGeminiApiKey("");
+      await refreshAiStatus();
+    } catch (err) {
+      setAiSettingsError(err instanceof Error ? err.message : "Could not save the Gemini key.");
+    } finally {
+      setGeminiSaving(false);
+    }
+  };
+
+  const handleDeveloperModeToggle = async () => {
+    if (!aiDevStatus) return;
+    setDeveloperModeSaving(true);
+    setAiSettingsError(null);
+    try {
+      await setAIDeveloperMode(!aiDevStatus.developer_mode);
+      await refreshAiStatus();
+    } catch (err) {
+      setAiSettingsError(err instanceof Error ? err.message : "Could not update Developer Mode.");
+    } finally {
+      setDeveloperModeSaving(false);
+    }
+  };
 
   const loadYtStatus = useCallback(async () => {
     try {
@@ -303,6 +341,73 @@ export default function SettingsPage() {
                 <option value="karaoke">Karaoke (Smooth sweep fill)</option>
               </select>
             </div>
+          </section>
+
+          {/* AI Developer Mode */}
+          <section className="rounded-[12px] border border-[#232326] bg-[#111113] p-6 shadow-sm transition-all duration-150 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="size-6 rounded-md bg-violet-500/15 flex items-center justify-center text-violet-300 border border-violet-400/30 text-sm">✦</div>
+                <h2 className="text-base font-semibold text-white">AI Developer Mode</h2>
+              </div>
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${aiDevStatus?.ai_enabled ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-zinc-800/60 border-zinc-700 text-zinc-400"}`}>
+                {aiDevStatus?.ai_enabled ? "Enabled" : "Locked"}
+              </span>
+            </div>
+
+            <p className="text-xs text-zinc-400">
+              Gemini finds clip moments from your transcript. Developer Mode unlocks AI clip generation only while YouTube is connected. The Gemini key stays on this computer and is used by the backend.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="text-zinc-500">Gemini API key</div>
+                <div className={aiDevStatus?.gemini_configured ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-zinc-300"}>
+                  {aiDevStatus?.gemini_configured ? "Saved locally" : "Not configured"}
+                </div>
+              </div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="text-zinc-500">YouTube account</div>
+                <div className={aiDevStatus?.youtube_authenticated ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-zinc-300"}>
+                  {aiDevStatus?.youtube_authenticated ? "Connected" : "Sign in required"}
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleSaveGeminiKey} className="space-y-3">
+              <div>
+                <label htmlFor="gemini-api-key" className="block text-xs font-medium text-zinc-400 mb-1.5">Gemini API key</label>
+                <input
+                  id="gemini-api-key"
+                  type="password"
+                  autoComplete="new-password"
+                  value={geminiApiKey}
+                  onChange={(e) => setGeminiApiKey(e.target.value)}
+                  placeholder={aiDevStatus?.gemini_configured ? "Key saved; enter a new key to replace it" : "Paste your free-tier Gemini API key"}
+                  className="w-full rounded-[10px] border border-[#232326] bg-[#0a0a0a] px-3 py-2 text-xs text-white focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                />
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="mt-1.5 inline-block text-xs text-violet-300 hover:text-violet-200 hover:underline">
+                  Get a Gemini API key in Google AI Studio
+                </a>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="submit" disabled={geminiSaving || !geminiApiKey.trim()} className="px-4 py-2 rounded-xl bg-violet-500 hover:bg-violet-400 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-bold text-white transition-colors">
+                  {geminiSaving ? "Saving..." : aiDevStatus?.gemini_configured ? "Replace Gemini key" : "Save Gemini key"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeveloperModeToggle}
+                  disabled={developerModeSaving || (!aiDevStatus?.developer_mode && (!aiDevStatus?.gemini_configured || !aiDevStatus?.youtube_authenticated))}
+                  className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${aiDevStatus?.developer_mode ? "border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200" : "border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300"}`}
+                >
+                  {developerModeSaving ? "Updating..." : aiDevStatus?.developer_mode ? "Disable Developer Mode" : "Enable Developer Mode"}
+                </button>
+              </div>
+            </form>
+
+            {aiSettingsError && <p role="alert" className="text-xs text-rose-400">{aiSettingsError}</p>}
+            {!aiSettingsError && !aiDevStatus?.ai_enabled && <p className="text-xs text-amber-300/90">{aiDevStatus?.reason || "Checking Gemini and YouTube status..."}</p>}
+            {aiDevStatus?.ai_enabled && <p className="text-xs text-emerald-300">AI generation is unlocked. The AI option will be available in clip settings.</p>}
           </section>
 
           {/* YouTube Integration Section */}

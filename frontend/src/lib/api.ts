@@ -709,6 +709,54 @@ export interface YouTubeUploadResult {
   privacy_status: string;
 }
 
+export interface AIDeveloperStatus {
+  gemini_configured: boolean;
+  youtube_authenticated: boolean;
+  developer_mode: boolean;
+  ai_enabled: boolean;
+  reason: string | null;
+}
+
+export async function getAIDeveloperStatus(): Promise<AIDeveloperStatus> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/ai/status`, { cache: "no-store" });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to get AI Developer Mode status"));
+  }
+  return response.json();
+}
+
+export async function saveGeminiApiKey(apiKey: string): Promise<AIDeveloperStatus> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/ai/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to save Gemini API key"));
+  }
+  const payload = await response.json();
+  return payload.status as AIDeveloperStatus;
+}
+
+export async function setAIDeveloperMode(enabled: boolean): Promise<AIDeveloperStatus> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/ai/developer-mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to update AI Developer Mode"));
+  }
+  const payload = await response.json();
+  return payload.status as AIDeveloperStatus;
+}
+
 export async function getYouTubeStatus(): Promise<YouTubeStatusResponse> {
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/youtube/status`, {

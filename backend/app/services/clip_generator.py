@@ -98,6 +98,8 @@ def generate_clips(
                 for clip in clips
             )
             loaded_options = loaded.get("generation_options", {}) if isinstance(loaded.get("generation_options"), dict) else {}
+            saved_mode = loaded_options.get("generation_mode", "random")
+            mode_mismatch = saved_mode != generation_mode
             saved_duration = loaded_options.get("clip_duration_seconds")
             duration_mismatch = (
                 saved_duration is not None and int(saved_duration) != int(max_clip_seconds)
@@ -107,7 +109,7 @@ def generate_clips(
                 and loaded_options.get("clip_count") is not None
                 and len(clips) < requested_clip_count
             )
-            if clips and not is_old_mock_analysis and not duration_mismatch and not count_insufficient:
+            if clips and not is_old_mock_analysis and not duration_mismatch and not count_insufficient and not mode_mismatch:
                 analysis = loaded
             else:
                 analysis = None
@@ -175,11 +177,27 @@ def generate_clips(
 
         if progress_callback:
             progress_callback("Analyzing transcript", 0, 0)
-        analysis = create_mock_analysis(
-            project_directory,
-            max_clip_seconds=max_clip_seconds,
-            max_clips=requested_clip_count,
-        )
+        if generation_mode == "ai":
+            from app.services.ai_analyzer import analyze_transcript
+
+            transcript_path = project_directory / "transcription" / "transcript.json"
+            if not transcript_path.is_file():
+                transcript_path = project_directory / "transcript.json"
+            if not transcript_path.is_file():
+                raise FileNotFoundError("Transcript not found for AI analysis")
+            transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+            analysis = analyze_transcript(
+                transcript,
+                provider="gemini",
+                max_clip_seconds=int(max_clip_seconds),
+                max_clips=requested_clip_count,
+            )
+        else:
+            analysis = create_mock_analysis(
+                project_directory,
+                max_clip_seconds=max_clip_seconds,
+                max_clips=requested_clip_count,
+            )
 
     saved_options = analysis.get("generation_options", {}) if isinstance(analysis, dict) else {}
     if framing_mode is not None:
@@ -204,6 +222,7 @@ def generate_clips(
         use_caption_animation = None
 
     analysis["generation_options"] = {
+        "generation_mode": generation_mode,
         "show_subtitles": show_subtitles,
         "show_watermark": show_watermark,
         "framing_mode": use_framing_mode,

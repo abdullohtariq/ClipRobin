@@ -27,7 +27,7 @@ PROVIDER_CONFIG = {
         "base_url_env": "GEMINI_BASE_URL",
         "default_base_url": "https://generativelanguage.googleapis.com/v1beta/models",
         "model_env": "GEMINI_MODEL",
-        "default_model": "gemini-2.0-flash",
+        "default_model": "gemini-3.5-flash-lite",
     },
 }
 
@@ -54,13 +54,18 @@ class AIAnalyzerError(Exception):
     """Raised when a provider cannot produce valid clip analysis."""
 
 
-def analyze_transcript(transcript: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
+def analyze_transcript(
+    transcript: dict[str, Any],
+    provider: str | None = None,
+    max_clip_seconds: int | None = None,
+    max_clips: int | None = None,
+) -> dict[str, Any]:
     segments = validate_transcript(transcript)
     selected_provider = (provider or os.getenv("AI_PROVIDER") or PROVIDER_DEFAULT).lower()
     if selected_provider not in PROVIDER_CONFIG:
         raise AIAnalyzerError(f"Unsupported AI provider: {selected_provider}")
 
-    prompt = build_user_prompt(segments)
+    prompt = build_user_prompt(segments, max_clip_seconds=max_clip_seconds, max_clips=max_clips)
     raw_response = request_provider(selected_provider, prompt)
     analysis = parse_analysis(raw_response)
     return validate_analysis(analysis, segments)
@@ -99,17 +104,32 @@ def validate_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
     return segments
 
 
-def build_user_prompt(segments: list[dict[str, Any]]) -> str:
+def build_user_prompt(
+    segments: list[dict[str, Any]],
+    max_clip_seconds: int | None = None,
+    max_clips: int | None = None,
+) -> str:
     transcript_text = "\n".join(
         f"[{segment['start']:.3f} - {segment['end']:.3f}] {segment['text']}"
         for segment in segments
     )
-    return f"Transcript:\n{transcript_text}"
+    constraints = []
+    if max_clip_seconds is not None:
+        constraints.append(f"Each clip must be no longer than {max_clip_seconds} seconds.")
+    if max_clips is not None:
+        constraints.append(f"Return no more than {max_clips} clips.")
+    constraint_text = "\n".join(constraints)
+    return f"Transcript:\n{transcript_text}\n\n{constraint_text}" if constraint_text else f"Transcript:\n{transcript_text}"
 
 
 def request_provider(provider: str, user_prompt: str) -> str:
     config = PROVIDER_CONFIG[provider]
-    api_key = os.getenv(config["api_key_env"])
+    if provider == "gemini":
+        from app.services.ai_developer_mode import get_gemini_api_key
+
+        api_key = get_gemini_api_key()
+    else:
+        api_key = os.getenv(config["api_key_env"])
     if not api_key:
         raise AIAnalyzerError(f"Missing {config['api_key_env']} environment variable")
 

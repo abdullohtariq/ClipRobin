@@ -56,6 +56,11 @@ frontend/src-tauri/gen/schemas/
 *.webm
 /clips/
 exports/
+# Local OAuth tokens and API credentials
+/backend/data/youtube_config.json
+/backend/data/youtube_auth.json
+/backend/data/gemini_config.json
 backend/data/projects/*
 !backend/data/projects/.gitkeep
-backend/dist/
+backend/dist/
+million-deep-motion/

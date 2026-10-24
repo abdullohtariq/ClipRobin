@@ -27,6 +27,7 @@ import { Badge } from "@/src/components/ui/badge";
 import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
 import { YouTubeUploadModal } from "@/src/components/youtube-upload-modal";
+import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 
 interface AppliedProjectSettings {
   framingMode: FramingMode;
@@ -623,6 +624,8 @@ function ClipModalViewer({
 
 // Main Clips Studio Component
 function ProjectClipsContent({ projectId }: { projectId: string }) {
+  const { status: aiDeveloperStatus } = useAIDeveloperStatus();
+  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
   const router = useRouter();
   const [clips, setClips] = useState<Clip[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
@@ -650,6 +653,13 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       setClipCount(maxClips);
     }
   }, [maxClips, clipCount]);
+
+  useEffect(() => {
+    if (aiDeveloperStatus && !aiDeveloperStatus.ai_enabled && generationMode === "ai") {
+      setGenerationMode("random");
+      try { localStorage.setItem("cliprobin_generation_mode", "random"); } catch {}
+    }
+  }, [aiDeveloperStatus, generationMode]);
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
 
@@ -1147,6 +1157,8 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
             <div className="pt-3 border-t border-zinc-800/80 max-h-[60vh] overflow-y-auto pr-1 animate-in fade-in-0 duration-150">
               <ClipSettings
                 variant="compact"
+                aiModeEnabled={aiModeEnabled}
+                aiModeDisabledReason={aiDeveloperStatus?.reason}
                 generationMode={generationMode}
                 onGenerationModeChange={(mode) => {
                   setGenerationMode(mode);

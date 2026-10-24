@@ -25,6 +25,7 @@ import { LiveMovingCaptions } from "@/src/components/live-moving-captions";
 import { Badge } from "@/src/components/ui/badge";
 import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
+import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 
 type VideoProcessingProgress = {
   kind: "transcription" | "generation" | "complete" | "failed";
@@ -74,6 +75,8 @@ const getFileDuration = (file: File): Promise<number | null> => {
 };
 
 export default function Home() {
+  const { status: aiDeveloperStatus } = useAIDeveloperStatus();
+  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadStatus, setDownloadStatus] = useState("");
   const [youtubeDownloadError, setYoutubeDownloadError] = useState<string | null>(null);
@@ -136,6 +139,13 @@ export default function Home() {
   useEffect(() => {
     generationModeRef.current = generationMode;
   }, [generationMode]);
+
+  useEffect(() => {
+    if (aiDeveloperStatus && !aiDeveloperStatus.ai_enabled && generationMode === "ai") {
+      setGenerationMode("random");
+      try { localStorage.setItem("cliprobin_generation_mode", "random"); } catch {}
+    }
+  }, [aiDeveloperStatus, generationMode]);
   useEffect(() => {
     showCaptionsRef.current = showCaptions;
   }, [showCaptions]);
@@ -1005,6 +1015,8 @@ export default function Home() {
               {/* Single Source of Truth ClipSettings */}
               <ClipSettings
                 variant="full"
+                aiModeEnabled={aiModeEnabled}
+                aiModeDisabledReason={aiDeveloperStatus?.reason}
                 generationMode={generationMode}
                 onGenerationModeChange={handleGenerationModeChange}
                 clipDurationSeconds={clipDurationSeconds}

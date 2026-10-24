@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from app.services.caption_styles import ANIMATIONS, CAPTION_STYLES, STYLE_ALIASES
+from app.services.ai_developer_mode import get_ai_developer_status
 from app.services.clip_generator import generate_clips, render_single_clip
 from app.services.project_manager import get_clips_directory, get_project_directory
 from app.services.process_utils import get_no_window_subprocess_kwargs
@@ -143,6 +144,12 @@ def generate_project_clips(
     caption_style: str | None = None,
     caption_animation: str | None = None,
 ) -> dict[str, str]:
+    if generation_mode not in {"random", "ai"}:
+        raise HTTPException(status_code=422, detail="Generation mode must be 'random' or 'ai'.")
+    if generation_mode == "ai":
+        ai_status = get_ai_developer_status()
+        if not ai_status["ai_enabled"]:
+            raise HTTPException(status_code=403, detail=ai_status["reason"] or "AI Developer Mode is disabled.")
     if clip_duration_seconds not in {12, 15, 30, 60, 90}:
         raise HTTPException(
             status_code=422,
