@@ -26,6 +26,7 @@ import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
 import { Badge } from "@/src/components/ui/badge";
 import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
+import { YouTubeUploadModal } from "@/src/components/youtube-upload-modal";
 
 interface AppliedProjectSettings {
   framingMode: FramingMode;
@@ -498,6 +499,7 @@ function ClipModalViewer({
   onClose: () => void;
 }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isYouTubeModalOpen, setIsYouTubeModalOpen] = useState(false);
   const modalVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -582,17 +584,39 @@ function ClipModalViewer({
             </div>
           )}
 
-          <div className="pt-2">
+          <div className="pt-2 flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => void saveClipWithExplorer(projectId, clip.file, `${clip.id}.mp4`)}
-              className="px-4 py-2.5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-xs font-bold text-zinc-950 transition-colors focus-ring"
+              className="px-4 py-2.5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-xs font-bold text-zinc-950 transition-colors focus-ring inline-flex items-center gap-2"
             >
-              Export with Save As Dialog
+              <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+              <span>Export with Save As Dialog</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsYouTubeModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl bg-[#FF0000] hover:bg-[#E50914] text-xs font-bold text-white transition-colors focus-ring inline-flex items-center gap-2 shadow-lg shadow-red-950/40"
+            >
+              <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+              </svg>
+              <span>Upload to YouTube</span>
             </button>
           </div>
         </div>
       </div>
+
+      {isYouTubeModalOpen && (
+        <YouTubeUploadModal
+          clip={clip}
+          projectId={projectId}
+          onClose={() => setIsYouTubeModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

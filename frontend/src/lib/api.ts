@@ -670,3 +670,125 @@ export async function saveAllClipsWithExplorer(
   }
   return response.json();
 }
+
+
+// ---------------------------------------------------------------------------
+// YouTube Data API v3 OAuth & Direct Upload Integration
+// ---------------------------------------------------------------------------
+
+export interface YouTubeChannelInfo {
+  id: string;
+  title: string;
+  handle?: string;
+  thumbnail?: string;
+}
+
+export interface YouTubeStatusResponse {
+  configured: boolean;
+  client_id_preview?: string;
+  authenticated: boolean;
+  channel?: YouTubeChannelInfo | null;
+}
+
+export interface YouTubeUploadPayload {
+  project_id: string;
+  clip_id: string;
+  title: string;
+  description?: string;
+  tags?: string[];
+  privacy_status?: "public" | "private" | "unlisted";
+  made_for_kids?: boolean;
+}
+
+export interface YouTubeUploadResult {
+  success: boolean;
+  video_id: string;
+  youtube_url: string;
+  shorts_url: string;
+  title: string;
+  privacy_status: string;
+}
+
+export async function getYouTubeStatus(): Promise<YouTubeStatusResponse> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/youtube/status`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to get YouTube status"));
+  }
+  return response.json();
+}
+
+export async function saveYouTubeConfig(
+  clientId: string,
+  clientSecret: string,
+): Promise<{ success: boolean; status: YouTubeStatusResponse }> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/youtube/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret }),
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to save YouTube configuration"));
+  }
+  return response.json();
+}
+
+export async function saveYouTubeJsonConfig(
+  rawJson: string,
+): Promise<{ success: boolean; status: YouTubeStatusResponse }> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/youtube/config/paste-json`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ raw_json: rawJson }),
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to parse Google credentials JSON"));
+  }
+  return response.json();
+}
+
+export async function getYouTubeAuthUrl(redirectUri?: string): Promise<{ auth_url: string; redirect_uri: string }> {
+  const apiUrl = await getApiUrl();
+  const query = redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : "";
+  const response = await fetch(`${apiUrl}/api/youtube/auth-url${query}`, {
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to generate YouTube authorization URL"));
+  }
+  return response.json();
+}
+
+export async function disconnectYouTube(): Promise<{ success: boolean; status: YouTubeStatusResponse }> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/youtube/disconnect`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to disconnect YouTube"));
+  }
+  return response.json();
+}
+
+export async function uploadClipToYouTube(payload: YouTubeUploadPayload): Promise<YouTubeUploadResult> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/youtube/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const resPayload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(resPayload, "YouTube video upload failed"));
+  }
+  return response.json();
+}

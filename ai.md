@@ -580,6 +580,17 @@ projects/
   - **Exclusive Video Playback Coordination (`docs/reports/playback-bug.md`)**: Added a document-level `play` capture listener that pauses any other active non-decorative `<video>` element, attached native `onPlay`/`onPause` handlers on `ProClipCard`, removed the racy `&& isPlaying` guard in `ProClipCard`'s pause effect, cleared `activePlayingClipId` when pausing or opening `ClipModalViewer` or switching projects, and synced `globalVolume` / `globalMuted` into `ClipModalViewer`.
 - **Tests**: Added 4 new backend regression tests in `backend/tests/test_routes_clips.py` and `backend/tests/test_clip_generator.py`. All **133 backend tests** pass in < 7s.
 
+#### 34. YouTube Data API v3 OAuth & Direct Uploads to YouTube Shorts (Branch: `youtube`) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/routes/youtube.py`, `backend/app/services/youtube_uploader.py`, `backend/tests/test_youtube.py`, `frontend/src/lib/api.ts`, `frontend/src/components/youtube-upload-modal.tsx`, `frontend/app/clips/page.tsx`, `frontend/app/settings/page.tsx`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Features Implemented**:
+  - **Direct "Upload to YouTube" on Clip Modal**: Added a prominent "Upload to YouTube" button in `ClipModalViewer` (`frontend/app/clips/page.tsx`) right alongside "Export with Save As Dialog", enabling one-click publishing of clips directly to YouTube.
+  - **Google OAuth2 Authentication with Offline Refresh**: Built a complete OAuth2 authorization flow with Google (`youtube.upload` and `youtube.readonly` scopes). Users can connect their Google account, view channel information (name, avatar, handle), and automatically refresh expired access tokens without interruption.
+  - **Google Cloud Console Credentials Setup**: Allows users to configure Client ID and Secret in settings or modal, or paste their downloaded `client_secret_*.json` file directly with step-by-step guidance.
+  - **Shorts Upload Dialog**: Pre-fills clip title (with `#shorts` tag), description, custom tags, privacy setting (`Public`, `Unlisted`, `Private`), and COPPA "Made for Kids" compliance, uploading via YouTube Data API v3 resumable protocol with direct links to the published Short (`https://youtube.com/shorts/{id}`).
+  - **Settings Integration**: Dedicated YouTube section in `/settings` to inspect connection state, switch accounts, or update credentials.
+- **Tests**: `backend/tests/test_youtube.py` (6 unit and API integration tests). All 139 backend tests passing.
+
 ---
 
 ### ✅ Audit Reports & Resolved Issue Archives (v0.1.21)
@@ -604,17 +615,18 @@ Detailed deep-dive audit reports with exact `file:line` root causes, reproductio
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **133 tests** across 17 test suites in `backend/tests/` (All 133 passing via `pytest`).
+- **Active Backend Automated Tests**: **139 tests** across 18 test suites in `backend/tests/` (All 139 passing via `pytest`).
 - **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner (`frontend/scripts/__tests__/version-scripts.test.mjs`).
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (133 Implemented & Passing)
+### Backend Test Inventory (139 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
+| **`app.services.youtube_uploader` / `app.routes.youtube`** | `tests/test_youtube.py` | ✅ Passed | • Saves & loads Google OAuth client_id & client_secret.<br>• Parses Google Cloud Console client_secret_*.json formats (installed, web).<br>• Generates standard Google OAuth2 consent URL with offline access.<br>• Exchanges authorization code for tokens and fetches channel details.<br>• Resumable video upload flow with chunked transfer.<br>• Status, auth-url, config, and disconnect API routes. |
 | **`app.services.clip_generator` / `mock_analyzer`** | `tests/test_clip_counter.py` | ✅ Passed | • Respects `max_clips` and `clip_count`.<br>• Slices 12-second clips properly.<br>• Rejects `clip_count < 1` with 422.<br>• `get_project_clips` returns `source_duration`.<br>• `probe_video_duration` probes duration via ffprobe. |
 | **`app.services.process_utils`** | `tests/test_process_utils.py` | ✅ Passed | • On Windows, supplies `CREATE_NO_WINDOW` and `SW_HIDE` startupinfo.<br>• On non-Windows, returns empty dict without throwing errors. |
 | **`app.services.smart_framing`** | `tests/test_smart_framing.py` | ✅ Passed | • YuNet ONNX model path resolution.<br>• Bounding box IoU calculations.<br>• Speech window extraction and VAD tolerance check.<br>• Single-shot crop expression generation.<br>• Multi-cut piecewise `if(lt(t,...))` crop expression generation.<br>• Already-vertical video bypass.<br>• 14 edge-case failure modes (low-light, velocity clamping, 2.0s hold, rotation metadata, B-roll center fallback, even dimension alignment). |
