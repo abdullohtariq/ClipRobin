@@ -3,6 +3,31 @@ import threading
 from pathlib import Path
 from typing import Any, Callable
 
+try:
+    import av
+    import faster_whisper.audio
+
+    # PyAV 19.0.0+ removed the 'metadata_errors' parameter from av.open().
+    # faster-whisper <= 1.2.1 still passes metadata_errors="ignore", which causes
+    # TypeError: open() got an unexpected keyword argument 'metadata_errors'.
+    # This shim ensures complete forward compatibility with all PyAV versions.
+    _orig_av_open = av.open
+
+    def _safe_av_open(*args, **kwargs):
+        try:
+            return _orig_av_open(*args, **kwargs)
+        except TypeError as exc:
+            if "metadata_errors" in str(exc):
+                kwargs.pop("metadata_errors", None)
+                return _orig_av_open(*args, **kwargs)
+            raise
+
+    av.open = _safe_av_open
+    if hasattr(faster_whisper, "audio") and hasattr(faster_whisper.audio, "av"):
+        faster_whisper.audio.av.open = _safe_av_open
+except Exception:
+    pass
+
 from faster_whisper import WhisperModel
 
 
