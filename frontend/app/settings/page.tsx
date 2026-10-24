@@ -31,9 +31,13 @@ export default function SettingsPage() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      if (stored) {
-        setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(stored) });
-      }
+      const parsed = stored ? JSON.parse(stored) : {};
+      const activeStyle = localStorage.getItem("cliprobin_caption_style");
+      setSettings({
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        defaultCaptionStyle: parsed.defaultCaptionStyle || activeStyle || DEFAULT_SETTINGS.defaultCaptionStyle,
+      });
     } catch {
       // Ignore JSON parse errors
     }
@@ -44,6 +48,9 @@ export default function SettingsPage() {
       const next = { ...prev, [key]: value };
       try {
         localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(next));
+        if (key === "defaultCaptionStyle") {
+          localStorage.setItem("cliprobin_caption_style", String(value));
+        }
         setIsSaved(true);
         setTimeout(() => setIsSaved(false), 2000);
       } catch {
@@ -58,7 +65,7 @@ export default function SettingsPage() {
   return (
     <main className="min-h-screen bg-[#0a0a0a] text-white p-6 lg:p-10">
       <div className="mx-auto max-w-2xl">
-        <header className="mb-8 flex items-center justify-between">
+        <header className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">Settings</h1>
             <p className="mt-1.5 text-sm text-zinc-400">Local defaults for Clip Robin.</p>

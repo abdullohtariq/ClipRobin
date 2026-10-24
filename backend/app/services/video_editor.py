@@ -319,6 +319,7 @@ def _build_subtitle_filters(
     subtitle_filters = []
 
     style = (caption_style or "classic").lower().strip()
+    uppercase = style in {"robin", "punch"}
     if style == "bold_emerald":
         font_size = 36
         pop_font_delta = 8
@@ -327,6 +328,24 @@ def _build_subtitle_filters(
             "borderw=4:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=3:shadowy=3"
         )
         highlight_color = "0x10b981"
+        highlight_borderw = 4
+    elif style == "robin":
+        font_size = 36
+        pop_font_delta = 8
+        base_style_fragment = (
+            "fontsize=36:fontcolor=white:"
+            "borderw=4:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=3:shadowy=3"
+        )
+        highlight_color = "0x34d399"
+        highlight_borderw = 4
+    elif style == "punch":
+        font_size = 38
+        pop_font_delta = 8
+        base_style_fragment = (
+            "fontsize=38:fontcolor=white:"
+            "borderw=4:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=3:shadowy=3"
+        )
+        highlight_color = "0xf7c204"
         highlight_borderw = 4
     elif style == "clean_gold":
         font_size = 33
@@ -337,6 +356,34 @@ def _build_subtitle_filters(
         )
         highlight_color = "0xfbbf24"
         highlight_borderw = 2
+    elif style == "clean":
+        font_size = 33
+        pop_font_delta = 4
+        base_style_fragment = (
+            "fontsize=33:fontcolor=0xcccccc:"
+            "borderw=2:bordercolor=black@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2"
+        )
+        highlight_color = "white"
+        highlight_borderw = 2
+    elif style == "pill":
+        font_size = 34
+        pop_font_delta = 6
+        base_style_fragment = (
+            "fontsize=34:fontcolor=white:"
+            "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=2:shadowy=2:"
+            "box=1:boxcolor=black@0.65:boxborderw=10"
+        )
+        highlight_color = "0x34d399"
+        highlight_borderw = 3
+    elif style == "karaoke":
+        font_size = 35
+        pop_font_delta = 6
+        base_style_fragment = (
+            "fontsize=35:fontcolor=0x999999:"
+            "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=2:shadowy=2"
+        )
+        highlight_color = "0x34d399"
+        highlight_borderw = 3
     else:  # "classic"
         font_size = 34
         pop_font_delta = 7
@@ -361,7 +408,21 @@ def _build_subtitle_filters(
     for segment in subtitle_segments:
         if not isinstance(segment, dict):
             continue
-        lines = _layout_subtitle_words(segment, start_time, end_time, font, max_width=640)
+        if uppercase:
+            segment_for_layout: dict[str, object] = {
+                **segment,
+                "text": str(segment.get("text", "")).upper(),
+            }
+            raw_words = segment.get("words")
+            if isinstance(raw_words, list):
+                segment_for_layout["words"] = [
+                    {**w, "text": str(w.get("text", "")).upper()}
+                    for w in raw_words
+                    if isinstance(w, dict)
+                ]
+        else:
+            segment_for_layout = segment
+        lines = _layout_subtitle_words(segment_for_layout, start_time, end_time, font, max_width=640)
         if not lines:
             continue
 

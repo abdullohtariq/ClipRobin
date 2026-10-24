@@ -67,7 +67,7 @@ export function SegmentedControl<T extends string | number>({
               {option.badge}
             </span>
             {option.sublabel && (
-              <span className="mt-0.5 text-[11px] text-zinc-500 font-normal leading-none">
+              <span className="mt-0.5 text-xs text-zinc-500 font-normal leading-none">
                 {option.sublabel}
               </span>
             )}

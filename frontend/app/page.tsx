@@ -121,6 +121,7 @@ export default function Home() {
   const transcriptionProgressRef = useRef(transcriptionProgress);
   const generatingProjectsRef = useRef<Set<string>>(new Set());
   const clipDurationSecondsRef = useRef(clipDurationSeconds);
+  const generationModeRef = useRef(generationMode);
   const showCaptionsRef = useRef(showCaptions);
   const showWatermarkRef = useRef(showWatermark);
   const framingModeRef = useRef(framingMode);
@@ -132,6 +133,9 @@ export default function Home() {
   useEffect(() => {
     clipDurationSecondsRef.current = clipDurationSeconds;
   }, [clipDurationSeconds]);
+  useEffect(() => {
+    generationModeRef.current = generationMode;
+  }, [generationMode]);
   useEffect(() => {
     showCaptionsRef.current = showCaptions;
   }, [showCaptions]);
@@ -175,6 +179,14 @@ export default function Home() {
       const savedMode = localStorage.getItem("cliprobin_generation_mode");
       if (savedMode && ["random", "ai"].includes(savedMode)) {
         setGenerationMode(savedMode as "random" | "ai");
+      }
+      const savedSubs = localStorage.getItem("cliprobin_show_captions");
+      if (savedSubs !== null) {
+        setShowCaptions(savedSubs === "true");
+      }
+      const savedWm = localStorage.getItem("cliprobin_show_watermark");
+      if (savedWm !== null) {
+        setShowWatermark(savedWm === "true");
       }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
       if (
@@ -227,6 +239,20 @@ export default function Home() {
     setCaptionStyle(styleId);
     try {
       localStorage.setItem("cliprobin_caption_style", styleId);
+    } catch {}
+  };
+
+  const handleShowCaptionsChange = (show: boolean) => {
+    setShowCaptions(show);
+    try {
+      localStorage.setItem("cliprobin_show_captions", String(show));
+    } catch {}
+  };
+
+  const handleShowWatermarkChange = (show: boolean) => {
+    setShowWatermark(show);
+    try {
+      localStorage.setItem("cliprobin_show_watermark", String(show));
     } catch {}
   };
 
@@ -295,7 +321,7 @@ export default function Home() {
         cs,
         undefined,
         clipCountRef.current,
-        generationMode,
+        generationModeRef.current,
       );
 
       if (generation.cancelled) {
@@ -659,6 +685,9 @@ export default function Home() {
         setDownloadStatus("Please drop a valid video file (MP4, MOV, MKV, WebM, AVI).");
         return;
       }
+      void getFileDuration(video).then((dur) => {
+        if (dur) setSourceDuration(dur);
+      });
       setActiveVideo({
         kind: "file",
         file: video,
@@ -695,7 +724,7 @@ export default function Home() {
         </header>
 
         {/* 2-Column Responsive Layout: Left Inputs + Right Sticky Live Preview Aside */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] xl:grid-cols-[1fr_420px] gap-8 items-start">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] 2xl:grid-cols-[1fr_400px] gap-6 xl:gap-8 items-start">
           {/* Left Column: 1. Add video & 2. Clip settings */}
           <div className="space-y-6 min-w-0">
             {/* Step 1: Add a video */}
@@ -776,7 +805,7 @@ export default function Home() {
                     <label htmlFor="youtube-url-input" className="block text-xs font-medium text-zinc-400 mb-1.5">
                       YouTube URL
                     </label>
-                    <div className="flex gap-2.5">
+                    <div className="flex flex-col sm:flex-row gap-2.5">
                       <input
                         id="youtube-url-input"
                         type="url"
@@ -793,7 +822,7 @@ export default function Home() {
                         }}
                         placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
                         disabled={isDownloading || isProcessingVideo}
-                        className="flex-1 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 focus-ring disabled:opacity-50"
+                        className="flex-1 min-w-0 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 focus-ring disabled:opacity-50"
                       />
                       <button
                         type="button"
@@ -843,7 +872,7 @@ export default function Home() {
                         </svg>
                         <div className="flex-1 space-y-1">
                           <p className="font-medium text-amber-200">{youtubeDownloadError}</p>
-                          <p className="text-[11px] text-amber-300/80">
+                          <p className="text-xs text-amber-300/80">
                             YouTube may be restricting automated downloads or the video might be private/geo-blocked. Choose or drop your file below to proceed immediately.
                           </p>
                         </div>
@@ -896,7 +925,7 @@ export default function Home() {
                           />
                         </div>
 
-                        <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                        <div className="flex items-center justify-between text-xs text-zinc-400">
                           <span className="truncate">{downloadProgress.step}</span>
                           <span className="font-mono text-zinc-500 shrink-0">yt-dlp engine</span>
                         </div>
@@ -986,11 +1015,11 @@ export default function Home() {
                 framingMode={framingMode}
                 onFramingModeChange={handleFramingModeChange}
                 showCaptions={showCaptions}
-                onShowCaptionsChange={setShowCaptions}
+                onShowCaptionsChange={handleShowCaptionsChange}
                 captionStyle={captionStyle}
                 onCaptionStyleChange={handleCaptionStyleChange}
                 showWatermark={showWatermark}
-                onShowWatermarkChange={setShowWatermark}
+                onShowWatermarkChange={handleShowWatermarkChange}
                 disabled={isProcessingVideo}
               />
             </section>
@@ -1106,7 +1135,7 @@ export default function Home() {
                                 : "text-zinc-500"
                             }`}
                           >
-                            <span className={`flex size-4 items-center justify-center rounded-full text-[10px] ${
+                            <span className={`flex size-4 items-center justify-center rounded-full text-xs ${
                               done ? "bg-[#10b981]/15 text-[#10b981]" : activeStep ? "bg-emerald-400/20 text-emerald-300 font-bold" : "text-zinc-600"
                             }`}>
                               {done ? "✓" : activeStep ? "●" : "○"}
@@ -1137,7 +1166,7 @@ export default function Home() {
               <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="flex size-5 items-center justify-center rounded-full bg-[#10b981]/15 text-[10px] text-[#10b981]">✓</span>
+                    <span className="flex size-5 items-center justify-center rounded-full bg-[#10b981]/15 text-xs text-[#10b981]">✓</span>
                     <h3 className="text-sm font-semibold text-white">
                       Generated Clips ({generatedClips.length})
                     </h3>
@@ -1162,14 +1191,14 @@ export default function Home() {
                         <span className="font-mono text-xs font-semibold text-white truncate">
                           {clip.id}
                         </span>
-                        <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-mono text-zinc-300">
+                        <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-xs font-mono text-zinc-300">
                           {clip.duration.toFixed(1)}s
                         </span>
                       </div>
                       <p className="mt-1.5 text-xs text-zinc-300 line-clamp-2" title={clip.title}>
                         {clip.title}
                       </p>
-                      <div className="mt-2.5 flex items-center justify-between border-t border-zinc-800/80 pt-2 text-[11px]">
+                      <div className="mt-2.5 flex items-center justify-between border-t border-zinc-800/80 pt-2 text-xs">
                         <span className="text-zinc-400 font-mono">
                           {Math.floor(clip.start / 60)}:{String(Math.floor(clip.start % 60)).padStart(2, "0")} - {Math.floor(clip.end / 60)}:{String(Math.floor(clip.end % 60)).padStart(2, "0")}
                         </span>
@@ -1210,6 +1239,7 @@ export default function Home() {
                     videoPreviewUrl ? (
                       <video
                         src={videoPreviewUrl}
+                        data-decorative-loop="true"
                         muted
                         autoPlay
                         loop
@@ -1235,6 +1265,7 @@ export default function Home() {
                         {videoPreviewUrl ? (
                           <video
                             src={videoPreviewUrl}
+                            data-decorative-loop="true"
                             muted
                             autoPlay
                             loop
@@ -1256,6 +1287,7 @@ export default function Home() {
                         {videoPreviewUrl ? (
                           <video
                             src={videoPreviewUrl}
+                            data-decorative-loop="true"
                             muted
                             autoPlay
                             loop
@@ -1291,7 +1323,7 @@ export default function Home() {
 
               {/* Summary Chips */}
               <div className="pt-2 border-t border-zinc-800 space-y-2">
-                <span className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider block">
+                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider block">
                   Configured options
                 </span>
                 <div className="flex flex-wrap gap-1.5">
@@ -1326,7 +1358,7 @@ export default function Home() {
                         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
                         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                       </svg>
-                      Transcribing audio...
+                      Transcribing {activeVideoJob.projectId ? `${activeVideoJob.projectId}...` : "audio..."}
                     </span>
                   ) : activeVideoJob?.kind === "generation" ? (
                     <span className="flex items-center gap-2">
@@ -1334,7 +1366,7 @@ export default function Home() {
                         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
                         <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
                       </svg>
-                      Rendering clips ({transcriptionProgress?.progress ?? 0}%)...
+                      Rendering {activeVideoJob.projectId ? `${activeVideoJob.projectId} ` : ""}clips ({transcriptionProgress?.progress ?? 0}%)...
                     </span>
                   ) : transcriptionProgress?.kind === "failed" && transcriptionProgress?.projectId ? (
                     <>
@@ -1353,7 +1385,7 @@ export default function Home() {
                   )}
                 </button>
 
-                {!activeVideo && !transcriptionProgress?.projectId && (
+                {!activeVideo && !isProcessingVideo && !transcriptionProgress?.projectId && (
                   <p className="mt-2 text-center text-xs text-zinc-500">
                     Select a local file or YouTube link to start.
                   </p>
@@ -1413,7 +1445,7 @@ export default function Home() {
                     </div>
 
                     <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between">
-                      <span className="text-[11px] text-zinc-500">
+                      <span className="text-xs text-zinc-500">
                         {new Date(project.created_at).toLocaleDateString()}
                       </span>
                       <Link

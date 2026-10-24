@@ -183,12 +183,12 @@ function CaptionCard({ styleOption, isSelected, onSelect }: CaptionCardProps) {
       <div className="mt-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-white tracking-tight">{styleOption.name}</span>
-          <Badge variant="neutral" className="text-[10px] px-1.5 py-0 font-medium">
+          <Badge variant="neutral" className="text-xs px-1.5 py-0 font-medium">
             {styleOption.animationName}
           </Badge>
         </div>
         {isSelected && (
-          <span className="text-[11px] font-semibold text-[#10b981]">Selected</span>
+          <span className="text-xs font-semibold text-[#10b981]">Selected</span>
         )}
       </div>
       <p className="mt-1 text-xs text-zinc-400 line-clamp-1 leading-snug">
@@ -377,7 +377,7 @@ export function CaptionStylePicker({
         className="relative flex flex-col w-[min(1100px,94vw)] max-h-[min(88vh,900px)] h-[88vh] rounded-2xl border border-zinc-800 bg-[#0e0e11] shadow-2xl overflow-hidden"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-800 px-6 py-4 bg-[#121215] flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-6 py-4 bg-[#121215] flex-shrink-0">
           <div>
             <h2
               id="caption-style-picker-title"
@@ -409,9 +409,9 @@ export function CaptionStylePicker({
         </div>
 
         {/* 2-Pane Content Area */}
-        <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden divide-y md:divide-y-0 md:divide-x divide-zinc-800">
+        <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-y-auto md:overflow-hidden divide-y md:divide-y-0 md:divide-x divide-zinc-800">
           {/* Left Pane: Search, Category Chips, and Style Cards */}
-          <div className="flex-1 flex flex-col min-h-0 p-4 sm:p-5 lg:p-6 overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 p-4 sm:p-5 lg:p-6 md:overflow-hidden">
             {/* Search and Category Filters */}
             <div className="space-y-3.5 mb-5 flex-shrink-0">
               {/* Search Bar */}
@@ -506,22 +506,23 @@ export function CaptionStylePicker({
           </div>
 
           {/* Right Pane: Sticky 9:16 Video Preview with Safe Zones & Style Meta */}
-          <div className="w-full md:w-[280px] lg:w-[320px] bg-[#0b0b0e] p-4 sm:p-5 flex flex-col justify-between overflow-y-auto flex-shrink-0">
+          <div className="w-full md:w-[280px] lg:w-[320px] bg-[#0b0b0e] p-4 sm:p-5 flex flex-col justify-between md:overflow-y-auto flex-shrink-0">
             <div className="space-y-3.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-zinc-300">Live 9:16 Preview</span>
-                <Badge variant="emerald" className="text-[10px]">
+                <Badge variant="emerald" className="text-xs">
                   {activeStyleDef.animationName}
                 </Badge>
               </div>
 
               {/* 9:16 Looping Preview Video Container */}
-              <div className="relative aspect-[9/16] w-full max-w-[190px] sm:max-w-[220px] mx-auto rounded-xl overflow-hidden bg-black border border-zinc-800 shadow-xl select-none">
+              <div className="relative aspect-[9/16] max-h-[38vh] md:max-h-[46vh] w-auto max-w-[190px] sm:max-w-[220px] mx-auto rounded-xl overflow-hidden bg-black border border-zinc-800 shadow-xl select-none">
                 {!videoError ? (
                   <video
                     ref={videoRef}
                     src={videoUrl}
                     poster={posterUrl}
+                    data-decorative-loop="true"
                     loop
                     muted
                     playsInline
@@ -584,12 +585,12 @@ export function CaptionStylePicker({
               <div className="rounded-xl border border-zinc-800 bg-[#121215] p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold text-white tracking-tight">{activeStyleDef.name}</h4>
-                  <span className="text-[11px] font-mono text-zinc-400">{activeStyleDef.fontFamily}</span>
+                  <span className="text-xs font-mono text-zinc-400">{activeStyleDef.fontFamily}</span>
                 </div>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
+                <p className="text-xs text-zinc-400 leading-relaxed">
                   {activeStyleDef.description}
                 </p>
-                <div className="pt-1 border-t border-zinc-800/80 flex items-center justify-between text-[10px] text-zinc-500 font-medium">
+                <div className="pt-1 border-t border-zinc-800/80 flex items-center justify-between text-xs text-zinc-500 font-medium">
                   <span>ASS Subtitle Pipeline</span>
                   <span className="capitalize">{activeStyleDef.category} Category</span>
                 </div>
@@ -599,7 +600,7 @@ export function CaptionStylePicker({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-zinc-800 px-6 py-4 bg-[#121215] flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-800 px-6 py-4 bg-[#121215] flex-shrink-0">
           <div className="text-xs text-zinc-400">
             Selected style: <span className="text-white font-semibold">{activeStyleDef.name}</span>
             <span className="text-zinc-500 ml-2">({activeStyleDef.animationName})</span>

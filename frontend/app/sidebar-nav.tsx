@@ -50,7 +50,7 @@ export default function SidebarNav() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Main navigation" className="space-y-1.5">
+    <nav aria-label="Main navigation" className="flex md:block items-center gap-1 md:space-y-1.5">
       {navigationItems.map(({ href, label, icon }) => {
         const isActive = href === "/"
           ? pathname === "/"
@@ -60,8 +60,10 @@ export default function SidebarNav() {
           <Link
             key={href}
             href={href}
+            title={label}
+            aria-label={label}
             aria-current={isActive ? "page" : undefined}
-            className={`flex items-center gap-3 rounded-[10px] px-3 py-2.5 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981]/50 ${
+            className={`flex items-center justify-center xl:justify-start gap-2.5 xl:gap-3 rounded-[10px] px-2.5 xl:px-3 py-2.5 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981]/50 ${
               isActive
                 ? "bg-[#10b981]/10 text-emerald-400 font-semibold"
                 : "text-zinc-400 hover:bg-[#111113] hover:text-white"
@@ -70,7 +72,7 @@ export default function SidebarNav() {
             <span className={isActive ? "text-emerald-400" : "text-zinc-400"}>
               {icon}
             </span>
-            <span>{label}</span>
+            <span className="hidden sm:inline md:hidden xl:inline">{label}</span>
           </Link>
         );
       })}

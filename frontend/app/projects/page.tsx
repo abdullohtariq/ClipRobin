@@ -45,6 +45,8 @@ export default function Projects() {
   const [defaultCaptionStyle, setDefaultCaptionStyle] = useState<CaptionStyle>("classic");
   const [defaultDuration, setDefaultDuration] = useState<ClipDuration>(30);
   const [defaultGenerationMode, setDefaultGenerationMode] = useState<"random" | "ai">("random");
+  const [defaultSubtitles, setDefaultSubtitles] = useState<boolean>(true);
+  const [defaultWatermark, setDefaultWatermark] = useState<boolean>(true);
 
   useEffect(() => {
     try {
@@ -59,6 +61,14 @@ export default function Projects() {
       const savedMode = localStorage.getItem("cliprobin_generation_mode");
       if (savedMode && ["random", "ai"].includes(savedMode)) {
         setDefaultGenerationMode(savedMode as "random" | "ai");
+      }
+      const savedSubs = localStorage.getItem("cliprobin_show_captions");
+      if (savedSubs !== null) {
+        setDefaultSubtitles(savedSubs === "true");
+      }
+      const savedWm = localStorage.getItem("cliprobin_show_watermark");
+      if (savedWm !== null) {
+        setDefaultWatermark(savedWm === "true");
       }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
       if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
@@ -124,7 +134,15 @@ export default function Projects() {
   }, []);
 
   const handleDelete = async (projectId: string) => {
-    if (!window.confirm(`Delete ${projectId} and all of its files? This cannot be undone.`)) {
+    let shouldConfirm = true;
+    try {
+      const stored = localStorage.getItem("cliprobin.settings");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.confirmDelete === false) shouldConfirm = false;
+      }
+    } catch {}
+    if (shouldConfirm && !window.confirm(`Delete ${projectId} and all of its files? This cannot be undone.`)) {
       return;
     }
 
@@ -160,7 +178,7 @@ export default function Projects() {
     try {
       const result = await generateClips(
         projectId,
-        subtitleOptions[projectId] ?? true,
+        subtitleOptions[projectId] ?? defaultSubtitles,
         (job) => {
           setGenerationProgress(job);
           if (job.ready_clips && job.ready_clips.length > 0) {
@@ -170,9 +188,12 @@ export default function Projects() {
           }
         },
         durationOptions[projectId] ?? defaultDuration,
-        watermarkOptions[projectId] ?? true,
+        watermarkOptions[projectId] ?? defaultWatermark,
         framingOptions[projectId] ?? defaultFraming,
         captionStyleOptions[projectId] ?? defaultCaptionStyle,
+        undefined,
+        undefined,
+        generationModeOptions[projectId] ?? defaultGenerationMode,
       );
       setProjects((current) => current.map((project) => project.project_id === projectId
         ? { ...project, clips: result.clips.length }
@@ -287,7 +308,7 @@ export default function Projects() {
                     <div>
                       <div className="flex items-center gap-2.5">
                         <h2 className="text-lg font-semibold font-mono text-white">{project.project_id}</h2>
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium ${
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                           project.status === "Ready" ? "bg-[#10b981]/15 text-[#10b981]" : "bg-amber-400/15 text-amber-300"
                         }`}>
                           {project.status}
@@ -315,8 +336,8 @@ export default function Projects() {
                     const activeStyleOption =
                       CAPTION_STYLE_OPTIONS.find((s) => s.id === currentCaptionStyle) || CAPTION_STYLE_OPTIONS[0];
                     const previewUrls = getPreviewUrls(currentCaptionStyle);
-                    const showSubs = subtitleOptions[project.project_id] ?? true;
-                    const showWm = watermarkOptions[project.project_id] ?? true;
+                    const showSubs = subtitleOptions[project.project_id] ?? defaultSubtitles;
+                    const showWm = watermarkOptions[project.project_id] ?? defaultWatermark;
 
                     return (
                       <>
@@ -333,7 +354,10 @@ export default function Projects() {
                                 role="radio"
                                 aria-checked={currentFraming === "standard"}
                                 disabled={isGenerating || isTranscribing}
-                                onClick={() => setFramingOptions((prev) => ({ ...prev, [project.project_id]: "standard" }))}
+                                onClick={() => {
+                                  setFramingOptions((prev) => ({ ...prev, [project.project_id]: "standard" }));
+                                  try { localStorage.setItem("cliprobin_framing_mode", "standard"); } catch {}
+                                }}
                                 className={`flex flex-col items-center justify-center rounded-[10px] border p-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
                                   currentFraming === "standard"
                                     ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
@@ -341,7 +365,7 @@ export default function Projects() {
                                 }`}
                               >
                                 <span className="text-xs font-semibold">16:9</span>
-                                <span className="text-[10px] text-zinc-500 mt-0.5">Rounded</span>
+                                <span className="text-xs text-zinc-500 mt-0.5">Rounded</span>
                               </button>
 
                               <button
@@ -349,7 +373,10 @@ export default function Projects() {
                                 role="radio"
                                 aria-checked={currentFraming === "square_rounded"}
                                 disabled={isGenerating || isTranscribing}
-                                onClick={() => setFramingOptions((prev) => ({ ...prev, [project.project_id]: "square_rounded" }))}
+                                onClick={() => {
+                                  setFramingOptions((prev) => ({ ...prev, [project.project_id]: "square_rounded" }));
+                                  try { localStorage.setItem("cliprobin_framing_mode", "square_rounded"); } catch {}
+                                }}
                                 className={`flex flex-col items-center justify-center rounded-[10px] border p-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
                                   currentFraming === "square_rounded"
                                     ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
@@ -357,7 +384,7 @@ export default function Projects() {
                                 }`}
                               >
                                 <span className="text-xs font-semibold">1:1</span>
-                                <span className="text-[10px] text-emerald-400 mt-0.5">Reels / TikTok</span>
+                                <span className="text-xs text-emerald-400 mt-0.5">Reels / TikTok</span>
                               </button>
 
                               <button
@@ -365,7 +392,10 @@ export default function Projects() {
                                 role="radio"
                                 aria-checked={currentFraming === "true_9_16"}
                                 disabled={isGenerating || isTranscribing}
-                                onClick={() => setFramingOptions((prev) => ({ ...prev, [project.project_id]: "true_9_16" }))}
+                                onClick={() => {
+                                  setFramingOptions((prev) => ({ ...prev, [project.project_id]: "true_9_16" }));
+                                  try { localStorage.setItem("cliprobin_framing_mode", "true_9_16"); } catch {}
+                                }}
                                 className={`flex flex-col items-center justify-center rounded-[10px] border p-2 text-center transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
                                   currentFraming === "true_9_16"
                                     ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]"
@@ -373,7 +403,7 @@ export default function Projects() {
                                 }`}
                               >
                                 <span className="text-xs font-semibold">9:16</span>
-                                <span className="text-[10px] text-purple-400 mt-0.5">AI Speaker</span>
+                                <span className="text-xs text-purple-400 mt-0.5">AI Speaker</span>
                               </button>
                             </div>
                           </div>
@@ -389,7 +419,11 @@ export default function Projects() {
                                 role="switch"
                                 aria-checked={showSubs}
                                 disabled={isGenerating || isTranscribing}
-                                onClick={() => setSubtitleOptions((prev) => ({ ...prev, [project.project_id]: !showSubs }))}
+                                onClick={() => {
+                                  const nextVal = !showSubs;
+                                  setSubtitleOptions((prev) => ({ ...prev, [project.project_id]: nextVal }));
+                                  try { localStorage.setItem("cliprobin_show_captions", String(nextVal)); } catch {}
+                                }}
                                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
                                   showSubs ? "bg-[#10b981]" : "bg-zinc-800"
                                 }`}
@@ -416,7 +450,7 @@ export default function Projects() {
                                     <p className="text-xs font-semibold text-white truncate">
                                       Style: {activeStyleOption.name}
                                     </p>
-                                    <p className="text-[11px] text-zinc-400 line-clamp-1">
+                                    <p className="text-xs text-zinc-400 line-clamp-1">
                                       {activeStyleOption.description}
                                     </p>
                                   </div>
@@ -473,12 +507,12 @@ export default function Projects() {
                                   className="w-full h-full rounded-[10px] border border-[#232326] bg-[#0a0a0a]/50 py-2 text-xs font-medium text-zinc-500 cursor-not-allowed flex items-center justify-center gap-1.5 group-hover:border-zinc-700 transition-all duration-150 pointer-events-none"
                                 >
                                   <span className="font-semibold text-zinc-400">AI</span>
-                                  <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/90 border border-amber-400/20">
+                                  <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wider text-amber-400/90 border border-amber-400/20">
                                     Soon
                                   </span>
                                 </button>
                                 {/* Hover tooltip */}
-                                <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-[10px] font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
+                                <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
                                   COMING SOON
                                   <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
                                 </div>
@@ -527,10 +561,14 @@ export default function Projects() {
                             role="switch"
                             aria-checked={showWm}
                             disabled={isGenerating || isTranscribing}
-                            onClick={() => setWatermarkOptions((prev) => ({
-                              ...prev,
-                              [project.project_id]: !showWm,
-                            }))}
+                            onClick={() => {
+                              const nextWm = !showWm;
+                              setWatermarkOptions((prev) => ({
+                                ...prev,
+                                [project.project_id]: nextWm,
+                              }));
+                              try { localStorage.setItem("cliprobin_show_watermark", String(nextWm)); } catch {}
+                            }}
                             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] disabled:opacity-50 ${
                               showWm ? "bg-[#10b981]" : "bg-zinc-800"
                             }`}
@@ -595,7 +633,7 @@ export default function Projects() {
                           style={{ width: `${activeTranscription.progress}%` }}
                         />
                       </div>
-                      <p className="mt-2 text-[11px] text-zinc-500">Clip generation will start automatically when transcription finishes.</p>
+                      <p className="mt-2 text-xs text-zinc-500">Clip generation will start automatically when transcription finishes.</p>
                     </section>
                   )}
 
@@ -618,7 +656,7 @@ export default function Projects() {
                           style={{ width: `${projectProgress.progress}%` }}
                         />
                       </div>
-                      <div className="mt-2.5 flex flex-wrap justify-between gap-2 text-[11px] text-zinc-500">
+                      <div className="mt-2.5 flex flex-wrap justify-between gap-2 text-xs text-zinc-500">
                         <span>Preparing analysis</span>
                         <span>
                           Rendering clips
@@ -641,7 +679,7 @@ export default function Projects() {
                             </p>
                             <Link
                               href={`/clips?project=${encodeURIComponent(project.project_id)}`}
-                              className="text-[11px] text-zinc-400 hover:text-white underline underline-offset-2"
+                              className="text-xs text-zinc-400 hover:text-white underline underline-offset-2"
                             >
                               Open clips studio &rarr;
                             </Link>
@@ -651,11 +689,11 @@ export default function Projects() {
                               <div key={clip.id} className="rounded-[8px] border border-[#232326] bg-[#111113] p-2.5 flex items-center justify-between text-xs">
                                 <div className="min-w-0 pr-2">
                                   <p className="font-semibold text-white truncate">{clip.title}</p>
-                                  <p className="text-[10px] text-zinc-400 font-mono">{clip.duration.toFixed(1)}s · {clip.status}</p>
+                                  <p className="text-xs text-zinc-400 font-mono">{clip.duration.toFixed(1)}s · {clip.status}</p>
                                 </div>
                                 <Link
                                   href={`/clips?project=${encodeURIComponent(project.project_id)}`}
-                                  className="shrink-0 rounded bg-zinc-800 px-2 py-1 text-[10px] text-emerald-400 hover:bg-zinc-700 font-medium"
+                                  className="shrink-0 rounded bg-zinc-800 px-2 py-1 text-xs text-emerald-400 hover:bg-zinc-700 font-medium"
                                 >
                                   Watch
                                 </Link>

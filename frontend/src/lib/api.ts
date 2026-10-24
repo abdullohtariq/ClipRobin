@@ -399,7 +399,21 @@ export async function getLatestClipGenerationJob(
   return result.job;
 }
 
-export async function getClips(projectId: string): Promise<{ clips: Clip[]; source_duration?: number }> {
+export type ProjectGenerationOptions = {
+  show_subtitles?: boolean;
+  show_watermark?: boolean;
+  framing_mode?: FramingMode;
+  caption_style?: CaptionStyle;
+  caption_animation?: CaptionAnimation | null;
+  clip_duration_seconds?: number;
+  clip_count?: number | null;
+};
+
+export async function getClips(projectId: string): Promise<{
+  clips: Clip[];
+  source_duration?: number;
+  generation_options?: ProjectGenerationOptions;
+}> {
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/projects/${projectId}/clips`);
   if (!response.ok) {

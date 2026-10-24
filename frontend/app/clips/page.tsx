@@ -56,7 +56,7 @@ const ProClipCard = memo(function ProClipCard({
   globalVolume: number;
   globalMuted: boolean;
   activePlayingClipId: string | null;
-  onPlay: (clipId: string) => void;
+  onPlay: (clipId: string | null) => void;
   onOpenModal: (clip: Clip) => void;
   showWatermark?: boolean;
   showSubtitles?: boolean;
@@ -64,6 +64,7 @@ const ProClipCard = memo(function ProClipCard({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const activePlayingClipIdRef = useRef<string | null>(activePlayingClipId);
   const [isInView, setIsInView] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -77,6 +78,10 @@ const ProClipCard = memo(function ProClipCard({
   const [topLineError, setTopLineError] = useState("");
   const [hasVideoError, setHasVideoError] = useState(false);
   const hasStartedRef = useRef(false);
+
+  useEffect(() => {
+    activePlayingClipIdRef.current = activePlayingClipId;
+  }, [activePlayingClipId]);
 
   const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
 
@@ -120,30 +125,44 @@ const ProClipCard = memo(function ProClipCard({
     video.muted = globalMuted;
   }, [globalVolume, globalMuted]);
 
-  // Pause if another clip started playing
+  // Pause if another clip started playing or activePlayingClipId was cleared
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (activePlayingClipId !== clip.id && isPlaying) {
-      video.pause();
+    if (activePlayingClipId !== clip.id) {
+      if (!video.paused) {
+        video.pause();
+      }
       setIsPlaying(false);
     }
-  }, [activePlayingClipId, clip.id, isPlaying]);
+  }, [activePlayingClipId, clip.id]);
 
   const togglePlayPause = (e: React.MouseEvent) => {
     e.stopPropagation();
     const video = videoRef.current;
     if (!video) return;
-    if (isPlaying) {
+    if (!video.paused || isPlaying) {
       video.pause();
       setIsPlaying(false);
+      if (activePlayingClipId === clip.id) {
+        onPlay(null);
+      }
     } else {
       onPlay(clip.id);
       if (!hasStartedRef.current) {
         video.currentTime = 0;
         hasStartedRef.current = true;
       }
-      video.play().then(() => setIsPlaying(true)).catch(() => {});
+      video.play().then(() => {
+        if (activePlayingClipIdRef.current && activePlayingClipIdRef.current !== clip.id) {
+          video.pause();
+          setIsPlaying(false);
+        } else {
+          setIsPlaying(true);
+        }
+      }).catch(() => {
+        setIsPlaying(false);
+      });
     }
   };
 
@@ -261,7 +280,7 @@ const ProClipCard = memo(function ProClipCard({
             rows={2}
             className="w-full rounded-lg border border-zinc-700 bg-black/70 p-2 text-xs text-white placeholder:text-zinc-500 focus-ring resize-none"
           />
-          {topLineError && <p className="text-[11px] text-red-400">{topLineError}</p>}
+          {topLineError && <p className="text-xs text-red-400">{topLineError}</p>}
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
@@ -304,7 +323,7 @@ const ProClipCard = memo(function ProClipCard({
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
-            <span className="text-[11px] text-zinc-400 font-medium">Clip unavailable</span>
+            <span className="text-xs text-zinc-400 font-medium">Clip unavailable</span>
           </div>
         ) : mediaUrls && isInView ? (
           <video
@@ -312,6 +331,13 @@ const ProClipCard = memo(function ProClipCard({
             src={mediaUrls.clip}
             playsInline
             preload="metadata"
+            onPlay={() => {
+              setIsPlaying(true);
+              onPlay(clip.id);
+            }}
+            onPause={() => {
+              setIsPlaying(false);
+            }}
             onTimeUpdate={() => {
               if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
             }}
@@ -329,6 +355,9 @@ const ProClipCard = memo(function ProClipCard({
             onEnded={() => {
               setIsPlaying(false);
               hasStartedRef.current = false;
+              if (activePlayingClipId === clip.id) {
+                onPlay(null);
+              }
             }}
             className="size-full object-cover"
           />
@@ -348,13 +377,13 @@ const ProClipCard = memo(function ProClipCard({
         )}
 
         {/* Minimal Player Controls Overlay */}
-        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/player:opacity-100 transition-opacity duration-150 flex flex-col justify-between p-2.5">
+        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/player:opacity-100 focus-within:opacity-100 transition-opacity duration-150 flex flex-col justify-between p-2.5">
           {/* Top Badges */}
           <div className="flex items-center justify-between">
-            <span className="px-2 py-0.5 rounded-md bg-black/75 text-[11px] font-mono font-bold text-white border border-white/10">
+            <span className="px-2 py-0.5 rounded-md bg-black/75 text-xs font-mono font-bold text-white border border-white/10">
               #{String(index + 1).padStart(2, "0")}
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-black/75 text-[11px] font-mono font-medium text-emerald-400 border border-white/10">
+            <span className="px-2 py-0.5 rounded-md bg-black/75 text-xs font-mono font-medium text-emerald-400 border border-white/10">
               {clip.duration.toFixed(1)}s
             </span>
           </div>
@@ -380,7 +409,7 @@ const ProClipCard = memo(function ProClipCard({
 
           {/* Bottom Scrubber & Time */}
           <div className="space-y-1">
-            <div className="flex items-center justify-between text-[10px] font-mono text-zinc-300">
+            <div className="flex items-center justify-between text-xs font-mono text-zinc-300">
               <span>{formatTime(currentTime)}</span>
               <span>{formatTime(duration)}</span>
             </div>
@@ -418,17 +447,17 @@ const ProClipCard = memo(function ProClipCard({
         )}
 
         {/* Timecode badge & Hook indicator */}
-        <div className="flex items-center justify-between gap-2 pt-1 text-[11px] font-mono text-zinc-500">
+        <div className="flex items-center justify-between gap-2 pt-1 text-xs font-mono text-zinc-500">
           <span>{formatTime(clip.start)} — {formatTime(clip.end)}</span>
           {clip.top_line && (
-            <span className="text-[10px] font-sans font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={clip.top_line}>
+            <span className="text-xs font-sans font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={clip.top_line}>
               Hook active
             </span>
           )}
         </div>
 
         {/* Two actions: Download & Add/Edit Top Line */}
-        <div className="mt-2.5 pt-2.5 border-t border-zinc-800/80 flex items-center justify-between gap-2">
+        <div className="mt-2.5 pt-2.5 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             disabled={isDownloading}
@@ -458,13 +487,18 @@ const ProClipCard = memo(function ProClipCard({
 function ClipModalViewer({
   clip,
   projectId,
+  globalVolume,
+  globalMuted,
   onClose,
 }: {
   clip: Clip | null;
   projectId: string;
+  globalVolume: number;
+  globalMuted: boolean;
   onClose: () => void;
 }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const modalVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (!clip) return;
@@ -477,6 +511,13 @@ function ClipModalViewer({
     };
   }, [clip, projectId]);
 
+  useEffect(() => {
+    const v = modalVideoRef.current;
+    if (!v) return;
+    v.volume = globalVolume;
+    v.muted = globalMuted;
+  }, [globalVolume, globalMuted, videoUrl]);
+
   if (!clip) return null;
 
   return (
@@ -486,7 +527,7 @@ function ClipModalViewer({
       aria-label={clip.title}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
     >
-      <div className="relative flex flex-col md:flex-row items-center max-w-4xl w-full rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-2xl gap-6 overflow-hidden max-h-[90vh]">
+      <div className="relative flex flex-col md:flex-row items-center max-w-4xl w-full rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-2xl gap-6 overflow-y-auto md:overflow-hidden max-h-[90vh]">
         {/* Close Button */}
         <button
           type="button"
@@ -498,9 +539,10 @@ function ClipModalViewer({
         </button>
 
         {/* 9:16 Video Player */}
-        <div className="relative aspect-[9/16] w-full max-w-[280px] shrink-0 rounded-xl overflow-hidden bg-black border border-zinc-800 shadow-xl">
+        <div className="relative aspect-[9/16] max-h-[55vh] md:max-h-[75vh] w-auto max-w-[280px] shrink-0 rounded-xl overflow-hidden bg-black border border-zinc-800 shadow-xl">
           {videoUrl && (
             <video
+              ref={modalVideoRef}
               src={videoUrl}
               controls
               autoPlay
@@ -598,6 +640,24 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   const [globalMuted, setGlobalMuted] = useState<boolean>(false);
   const [activePlayingClipId, setActivePlayingClipId] = useState<string | null>(null);
   const [selectedClipForModal, setSelectedClipForModal] = useState<Clip | null>(null);
+  const hydratedProjectRef = useRef<string | null>(null);
+
+  // Global document-level capture listener so at most one non-decorative video plays at a time
+  useEffect(() => {
+    const handleGlobalPlay = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLVideoElement)) return;
+      if (target.dataset.decorativeLoop === "true") return;
+      const allVideos = document.querySelectorAll("video");
+      allVideos.forEach((v) => {
+        if (v !== target && v.dataset.decorativeLoop !== "true" && !v.paused) {
+          v.pause();
+        }
+      });
+    };
+    document.addEventListener("play", handleGlobalPlay, true);
+    return () => document.removeEventListener("play", handleGlobalPlay, true);
+  }, []);
 
   // Fetch available projects for dropdown switcher
   useEffect(() => {
@@ -606,18 +666,43 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
 
   // Restore preferences & applied settings
   useEffect(() => {
+    setActivePlayingClipId(null);
+    setSelectedClipForModal(null);
+    hydratedProjectRef.current = null;
     try {
       const savedFraming = localStorage.getItem("cliprobin_framing_mode");
       if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
         setFramingMode(savedFraming as FramingMode);
       }
       const savedDuration = localStorage.getItem("cliprobin_clip_duration");
-      if (savedDuration && [15, 30, 60, 90].includes(Number(savedDuration))) {
+      if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
         setClipDurationSeconds(Number(savedDuration) as ClipDuration);
       }
+      const savedCount = localStorage.getItem("cliprobin_clip_count");
+      if (savedCount && Number(savedCount) >= 1) {
+        setClipCount(Number(savedCount));
+      }
+      const savedMode = localStorage.getItem("cliprobin_generation_mode");
+      if (savedMode && ["random", "ai"].includes(savedMode)) {
+        setGenerationMode(savedMode as "random" | "ai");
+      }
+      const savedSubs = localStorage.getItem("cliprobin_show_captions");
+      if (savedSubs !== null) {
+        setShowCaptions(savedSubs === "true");
+      }
+      const savedWm = localStorage.getItem("cliprobin_show_watermark");
+      if (savedWm !== null) {
+        setShowWatermark(savedWm === "true");
+      }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
-      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(savedStyle)) {
+      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
         setCaptionStyle(savedStyle as CaptionStyle);
+      } else {
+        const storedSettings = localStorage.getItem("cliprobin.settings");
+        if (storedSettings) {
+          const parsed = JSON.parse(storedSettings);
+          if (parsed.defaultCaptionStyle) setCaptionStyle(parsed.defaultCaptionStyle);
+        }
       }
       const savedVol = localStorage.getItem("cliprobin_volume");
       if (savedVol) setGlobalVolume(parseFloat(savedVol));
@@ -626,7 +711,12 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
 
       if (projectId) {
         const stored = localStorage.getItem(`cliprobin_applied_${projectId}`);
-        if (stored) setAppliedSettings(JSON.parse(stored));
+        if (stored) {
+          const parsedApplied = JSON.parse(stored) as AppliedProjectSettings;
+          setAppliedSettings(parsedApplied);
+        } else {
+          setAppliedSettings(null);
+        }
       }
     } catch {}
   }, [projectId]);
@@ -672,6 +762,45 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
             : result.clips;
         setClips(currentClips);
         setGenerationProgress(job);
+
+        // Hydrate appliedSettings and toolbar state from backend generation_options once per project
+        if (hydratedProjectRef.current !== projectId && (result.generation_options || currentClips.length > 0)) {
+          const opts = result.generation_options || {};
+          const hasServerOpts = Object.keys(opts).length > 0;
+          if (hasServerOpts || currentClips.length > 0) {
+            hydratedProjectRef.current = projectId;
+            const firstClip = currentClips[0];
+            const appliedFraming: FramingMode =
+              (opts.framing_mode as FramingMode) || firstClip?.framing_mode || "standard";
+            const appliedStyle: CaptionStyle =
+              (opts.caption_style as CaptionStyle) || firstClip?.caption_style || "classic";
+            const rawDur = opts.clip_duration_seconds || (firstClip ? Math.round(firstClip.duration) : 30);
+            const appliedDur: ClipDuration = ([12, 30, 60, 90].includes(rawDur) ? rawDur : 30) as ClipDuration;
+            const appliedWm = typeof opts.show_watermark === "boolean" ? opts.show_watermark : false;
+            const appliedSubs = typeof opts.show_subtitles === "boolean" ? opts.show_subtitles : true;
+
+            const hydrated: AppliedProjectSettings = {
+              framingMode: appliedFraming,
+              clipDurationSeconds: appliedDur,
+              clipCount: opts.clip_count ?? undefined,
+              captionStyle: appliedStyle,
+              showWatermark: appliedWm,
+              showCaptions: appliedSubs,
+            };
+            setAppliedSettings(hydrated);
+            setFramingMode(appliedFraming);
+            setCaptionStyle(appliedStyle);
+            setClipDurationSeconds(appliedDur);
+            setShowWatermark(appliedWm);
+            setShowCaptions(appliedSubs);
+            if (typeof opts.clip_count === "number" && opts.clip_count >= 1) {
+              setClipCount(opts.clip_count);
+            }
+            try {
+              localStorage.setItem(`cliprobin_applied_${projectId}`, JSON.stringify(hydrated));
+            } catch {}
+          }
+        }
 
         const isRunning =
           job?.status === "queued" || job?.status === "processing" || job?.status === "cancelling";
@@ -991,24 +1120,45 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
 
           {/* Collapsible ClipSettings drawer */}
           {isSettingsOpen && (
-            <div className="pt-3 border-t border-zinc-800/80 animate-in fade-in-0 duration-150">
+            <div className="pt-3 border-t border-zinc-800/80 max-h-[60vh] overflow-y-auto pr-1 animate-in fade-in-0 duration-150">
               <ClipSettings
                 variant="compact"
                 generationMode={generationMode}
-                onGenerationModeChange={setGenerationMode}
+                onGenerationModeChange={(mode) => {
+                  setGenerationMode(mode);
+                  try { localStorage.setItem("cliprobin_generation_mode", mode); } catch {}
+                }}
                 clipDurationSeconds={clipDurationSeconds}
-                onClipDurationChange={setClipDurationSeconds}
+                onClipDurationChange={(dur) => {
+                  setClipDurationSeconds(dur);
+                  try { localStorage.setItem("cliprobin_clip_duration", String(dur)); } catch {}
+                }}
                 clipCount={clipCount}
-                onClipCountChange={setClipCount}
+                onClipCountChange={(cnt) => {
+                  setClipCount(cnt);
+                  try { localStorage.setItem("cliprobin_clip_count", String(cnt)); } catch {}
+                }}
                 maxClips={maxClips}
                 framingMode={framingMode}
-                onFramingModeChange={setFramingMode}
+                onFramingModeChange={(fm) => {
+                  setFramingMode(fm);
+                  try { localStorage.setItem("cliprobin_framing_mode", fm); } catch {}
+                }}
                 showCaptions={showCaptions}
-                onShowCaptionsChange={setShowCaptions}
+                onShowCaptionsChange={(subs) => {
+                  setShowCaptions(subs);
+                  try { localStorage.setItem("cliprobin_show_captions", String(subs)); } catch {}
+                }}
                 captionStyle={captionStyle}
-                onCaptionStyleChange={setCaptionStyle}
+                onCaptionStyleChange={(st) => {
+                  setCaptionStyle(st);
+                  try { localStorage.setItem("cliprobin_caption_style", st); } catch {}
+                }}
                 showWatermark={showWatermark}
-                onShowWatermarkChange={setShowWatermark}
+                onShowWatermarkChange={(wm) => {
+                  setShowWatermark(wm);
+                  try { localStorage.setItem("cliprobin_show_watermark", String(wm)); } catch {}
+                }}
                 disabled={generating}
               />
             </div>
@@ -1038,7 +1188,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 style={{ width: `${generationProgress.progress}%` }}
               />
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-400">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
               <span>Smart framing &amp; speaker analysis</span>
               <span>
                 Rendering clips
@@ -1103,7 +1253,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
 
         {/* Main Clips Studio Grid: Responsive 220px auto-fill (up to 6+ columns on 2560px screen) */}
         {isLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
             {Array.from({ length: 6 }).map((_, i) => (
               <ClipSkeletonCard key={`skel-${i}`} index={i + 1} total={6} />
             ))}
@@ -1134,7 +1284,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
             {filteredClips.map((clip, idx) => (
               <ProClipCard
                 key={clip.id}
@@ -1145,9 +1295,12 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 globalMuted={globalMuted}
                 activePlayingClipId={activePlayingClipId}
                 onPlay={(id) => setActivePlayingClipId(id)}
-                onOpenModal={(c) => setSelectedClipForModal(c)}
-                showWatermark={showWatermark}
-                showSubtitles={showCaptions}
+                onOpenModal={(c) => {
+                  setActivePlayingClipId(null);
+                  setSelectedClipForModal(c);
+                }}
+                showWatermark={appliedSettings?.showWatermark ?? showWatermark}
+                showSubtitles={appliedSettings?.showCaptions ?? showCaptions}
                 onClipUpdated={(updated) => {
                   setClips((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
                 }}
@@ -1182,6 +1335,8 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         <ClipModalViewer
           clip={selectedClipForModal}
           projectId={projectId}
+          globalVolume={globalVolume}
+          globalMuted={globalMuted}
           onClose={() => setSelectedClipForModal(null)}
         />
       </div>
@@ -1200,7 +1355,7 @@ export default function ClipsPage() {
               <div className="h-8 w-36 rounded-xl bg-zinc-800/60 skeleton-shimmer" />
             </div>
             <div className="h-16 rounded-2xl border border-zinc-800 bg-[#121215] p-3.5 skeleton-shimmer" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
                 <ClipSkeletonCard key={`skel-suspense-${i}`} index={i + 1} total={6} />
               ))}

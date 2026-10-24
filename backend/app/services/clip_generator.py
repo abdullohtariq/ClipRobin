@@ -97,7 +97,17 @@ def generate_clips(
                 isinstance(clip, dict) and clip.get("reason", "").startswith("Mock analysis:")
                 for clip in clips
             )
-            if clips and not is_old_mock_analysis:
+            loaded_options = loaded.get("generation_options", {}) if isinstance(loaded.get("generation_options"), dict) else {}
+            saved_duration = loaded_options.get("clip_duration_seconds")
+            duration_mismatch = (
+                saved_duration is not None and int(saved_duration) != int(max_clip_seconds)
+            )
+            count_insufficient = (
+                requested_clip_count is not None
+                and loaded_options.get("clip_count") is not None
+                and len(clips) < requested_clip_count
+            )
+            if clips and not is_old_mock_analysis and not duration_mismatch and not count_insufficient:
                 analysis = loaded
             else:
                 analysis = None
@@ -199,6 +209,8 @@ def generate_clips(
         "framing_mode": use_framing_mode,
         "caption_style": use_caption_style,
         "caption_animation": use_caption_animation,
+        "clip_duration_seconds": int(max_clip_seconds),
+        "clip_count": requested_clip_count,
     }
     analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
 

@@ -63,7 +63,7 @@ export default function JobProgress() {
     <div className="group fixed bottom-5 right-5 z-50">
       <section
         aria-label="Active job progress"
-        className={`absolute bottom-[52px] right-0 w-84 rounded-[12px] border border-[#232326] bg-[#111113] p-4 shadow-2xl transition-all duration-150 ${
+        className={`absolute bottom-[52px] right-0 w-84 max-w-[calc(100vw-2.5rem)] rounded-[12px] border border-[#232326] bg-[#111113] p-4 shadow-2xl transition-all duration-150 ${
           isOpen ? "block" : "hidden group-hover:block group-focus-within:block"
         }`}
       >
@@ -72,7 +72,7 @@ export default function JobProgress() {
             {jobs.length > 0 ? "Active Jobs" : "Status unavailable"}
           </h2>
           {hasDownloadJob && (
-            <span className="inline-flex items-center gap-1 rounded bg-[#10b981]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[#10b981]">
+            <span className="inline-flex items-center gap-1 rounded bg-[#10b981]/15 px-1.5 py-0.5 text-xs font-semibold text-[#10b981]">
               <span className="size-1.5 rounded-full bg-[#10b981] animate-ping" />
               Downloading
             </span>
@@ -97,7 +97,7 @@ export default function JobProgress() {
                       ? "Transcribing audio"
                       : "Generating clips"}
                   </p>
-                  <p className="mt-0.5 truncate text-[11px] text-zinc-400" title={job.title || job.step}>
+                  <p className="mt-0.5 truncate text-xs text-zinc-400" title={job.title || job.step}>
                     <span className="font-mono text-zinc-300">
                       {job.title ? `${job.title.slice(0, 24)}...` : job.project_id}
                     </span>{" "}
@@ -130,7 +130,7 @@ export default function JobProgress() {
               </div>
 
               {job.kind === "generation" && (job.total_clips ?? 0) > 0 && (
-                <p className="mt-1.5 text-right text-[11px] text-zinc-500">
+                <p className="mt-1.5 text-right text-xs text-zinc-500">
                   {job.completed_clips ?? 0} of {job.total_clips} clips rendered
                 </p>
               )}
@@ -138,7 +138,7 @@ export default function JobProgress() {
               {job.kind === "generation" && (
                 <Link
                   href="/projects"
-                  className="mt-1.5 inline-block text-[11px] text-emerald-400 underline hover:text-emerald-300"
+                  className="mt-1.5 inline-block text-xs text-emerald-400 underline hover:text-emerald-300"
                 >
                   Go to Projects &rarr;
                 </Link>
@@ -208,7 +208,7 @@ export default function JobProgress() {
         )}
 
         {jobs.length > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#10b981] px-1 text-[9px] font-bold text-zinc-950 ring-2 ring-[#0a0a0a]">
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#10b981] px-1 text-xs font-bold text-zinc-950 ring-2 ring-[#0a0a0a]">
             {jobs.length}
           </span>
         )}

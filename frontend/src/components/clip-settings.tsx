@@ -81,9 +81,9 @@ export function ClipSettings({
   ];
 
   return (
-    <div className={`space-y-5 ${className}`}>
+    <div className={`@container space-y-5 ${className}`}>
       {/* 1. Generation Mode, Clip Length & Clip Count Row */}
-      <div className={onClipCountChange ? "grid grid-cols-1 sm:grid-cols-3 gap-3.5" : (variant === "full" ? "grid grid-cols-1 sm:grid-cols-2 gap-4" : "grid grid-cols-1 sm:grid-cols-2 gap-3")}>
+      <div className={onClipCountChange ? "grid grid-cols-1 @lg:grid-cols-3 gap-3.5" : (variant === "full" ? "grid grid-cols-1 @md:grid-cols-2 gap-4" : "grid grid-cols-1 @md:grid-cols-2 gap-3")}>
         {/* Generation Mode */}
         <div>
           <label className="block text-[13px] font-medium text-zinc-300 mb-2">
@@ -119,7 +119,7 @@ export function ClipSettings({
               <label className="block text-[13px] font-medium text-zinc-300">
                 Number of clips
               </label>
-              <span className="text-[11px] text-zinc-400 font-medium">
+              <span className="text-xs text-zinc-400 font-medium">
                 Max: {maxClips}
               </span>
             </div>
@@ -161,7 +161,7 @@ export function ClipSettings({
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" role="radiogroup" aria-label="Video framing layout">
+        <div className="grid grid-cols-1 @md:grid-cols-3 gap-3" role="radiogroup" aria-label="Video framing layout">
           {/* Option 1: 16:9 Rounded */}
           <OptionCard
             title="16:9 Rounded"
@@ -250,12 +250,12 @@ export function ClipSettings({
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />
               <CaptionVisualSample styleId={captionStyle} />
               <div className="absolute top-2 left-2.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/60 border border-white/10 backdrop-blur-xs">
-                <span className="text-[10px] font-mono text-zinc-400">Preview</span>
+                <span className="text-xs font-mono text-zinc-400">Preview</span>
               </div>
             </div>
 
             {/* Style Details & Change Button */}
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-semibold text-white tracking-tight">

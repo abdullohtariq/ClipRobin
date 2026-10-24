@@ -7,9 +7,13 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 export default function WindowInit() {
   useEffect(() => {
     if (isTauri()) {
-      void getCurrentWindow().maximize().catch((error) => {
-        console.warn("Could not maximize window on startup", error);
-      });
+      const alreadyInitialized = sessionStorage.getItem("cliprobin_window_maximized");
+      if (!alreadyInitialized) {
+        sessionStorage.setItem("cliprobin_window_maximized", "true");
+        void getCurrentWindow().maximize().catch((error) => {
+          console.warn("Could not maximize window on startup", error);
+        });
+      }
     }
   }, []);
 

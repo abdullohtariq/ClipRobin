@@ -349,5 +349,45 @@ def test_update_clip_top_line_with_caption_style_and_animation(tmp_path: Path, m
     assert captured_kwargs.get("caption_animation") == "pop"
 
 
+def test_get_project_clips_returns_generation_options(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import json
+
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_id, project_dir = create_project()
+    clips_dir = project_dir / "clips"
+    clips_dir.mkdir(exist_ok=True)
+    (clips_dir / "clip_001.mp4").write_bytes(b"clip data")
+    (project_dir / "analysis.json").write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 12.0}
+            ],
+            "generation_options": {
+                "show_subtitles": True,
+                "show_watermark": False,
+                "framing_mode": "true_9_16",
+                "caption_style": "robin",
+                "caption_animation": "grow",
+                "clip_duration_seconds": 12,
+                "clip_count": 3,
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    response = client.get(f"/api/projects/{project_id}/clips")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "generation_options" in payload
+    opts = payload["generation_options"]
+    assert opts["show_watermark"] is False
+    assert opts["show_subtitles"] is True
+    assert opts["framing_mode"] == "true_9_16"
+    assert opts["caption_style"] == "robin"
+    assert opts["clip_duration_seconds"] == 12
+    assert opts["clip_count"] == 3
+
+
+
 
 

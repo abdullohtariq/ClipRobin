@@ -14,9 +14,9 @@
 1. **Local by Default**: Media extraction, audio ripping, transcription, clip slicing, and subtitle burn-in execute entirely on the user's local machine via FFmpeg, CTranslate2 (`faster-whisper`), and Python.
 2. **AI Where It Matters (Opt-in Intelligence)**: Cloud LLM services (OpenAI, DeepSeek, Google Gemini) are reserved strictly for semantic analysis (identifying viral hooks, compelling arguments, punchlines, and summaries). The user provides their own API keys; raw video never leaves the machine.
 3. **Explicit Desktop Boundaries**: Built as a three-tier hybrid desktop architecture:
-   - **Frontend**: Next.js 16 (React 19, Tailwind CSS v4, TypeScript 5).
-   - **Desktop Shell**: Tauri v2 (Rust, NSIS Windows bundle, custom IPC).
-   - **Local Backend**: FastAPI (Python 3.12, Uvicorn, faster-whisper, yt-dlp, FFmpeg).
+   - **Frontend**: Next.js 16 (`16.1.6`, React `19.2.3`, Tailwind CSS v4, TypeScript 5).
+   - **Desktop Shell**: Tauri v2 (`2.10.3` Rust crate / `2.10.1` JS API, NSIS Windows bundle, custom IPC).
+   - **Local Backend**: FastAPI (Python 3.12+, Uvicorn, `faster-whisper`, `yt-dlp`, OpenCV YuNet ONNX, FFmpeg 9.0+).
 
 ---
 
@@ -32,6 +32,7 @@ flowchart TD
 
     subgraph Frontend["Frontend (Next.js 16 / React 19)"]
         UI["App Router Pages (/ , /projects, /clips, /settings)"]
+        ClipSettings["Unified ClipSettings & CaptionStylePicker"]
         ApiClient["API Client (src/lib/api.ts)"]
         JobPoller["Job Progress Component (job-progress.tsx)"]
         UpdateNotice["Update Notice (update-notice.tsx)"]
@@ -39,14 +40,15 @@ flowchart TD
 
     subgraph Backend["Python Backend (FastAPI / Uvicorn)"]
         Main["FastAPI Gateway (app/main.py)"]
-        Routes["API Routers (clips, download, jobs, local_video, projects, transcription, analysis)"]
+        Routes["API Routers (clips, download, jobs, local_video, projects, transcription, analysis, caption_styles)"]
         ProjMgr["Project Manager (services/project_manager.py)"]
         Downloader["Downloader (services/downloader.py via yt-dlp)"]
         Transcriber["Transcriber (services/transcriber.py via faster-whisper)"]
         MockAnalyzer["Mock Analyzer (services/mock_analyzer.py)"]
         AIAnalyzer["AI Analyzer (services/ai_analyzer.py)"]
+        SmartFraming["Smart Framing (services/smart_framing.py via YuNet ONNX)"]
         ClipGen["Clip Generator (services/clip_generator.py)"]
-        VideoEditor["Video Editor (services/video_editor.py via FFmpeg)"]
+        VideoEditor["Video Editor (services/video_editor.py & ass_captions.py)"]
     end
 
     subgraph External["External Services & Runtimes"]
@@ -56,7 +58,7 @@ flowchart TD
         YouTube["YouTube CDN"]
     end
 
-    UI --> ApiClient
+    UI --> ClipSettings --> ApiClient
     ApiClient -- "HTTP localhost:{port}" --> Main
     TauriPortFinder -- "Allocates port & spawns" --> Main
     ApiClient -- "Tauri IPC (backend_port)" --> Tauri
@@ -66,7 +68,8 @@ flowchart TD
     Routes --> Transcriber --> LocalModels
     Routes --> MockAnalyzer
     Routes --> AIAnalyzer -. opt-in request .-> CloudLLM
-    Routes --> ClipGen --> VideoEditor --> FFmpegProc
+    Routes --> ClipGen --> SmartFraming
+    ClipGen --> VideoEditor --> FFmpegProc
 ```
 
 ---
@@ -84,40 +87,44 @@ ClipRobin/
 │   │   │   ├── __init__.py
 │   │   │   ├── analysis.py       # POST /api/analyze (LLM transcript evaluation)
 │   │   │   ├── caption_styles.py # GET /api/caption-styles (Caption styles and animations registry)
-│   │   │   ├── clips.py          # Generate clips, poll job, cancel, serve clips, download ZIP
+│   │   │   ├── clips.py          # Generate clips, poll job, cancel, serve clips, top-line, Save As dialog & ZIP
 │   │   │   ├── download.py       # POST /api/download (YouTube downloader via yt-dlp)
 │   │   │   ├── health.py         # GET /api/health
 │   │   │   ├── jobs.py           # GET /api/jobs/active (Combined job queue status)
-│   │   │   ├── local_video.py    # POST /api/local-video/transcribe, poll status
+│   │   │   ├── local_video.py    # POST /api/local-video/transcribe, /from-path, poll status
 │   │   │   ├── projects.py       # GET /api/projects, DELETE /api/projects/{id}
 │   │   │   └── transcription.py  # POST /api/projects/{id}/transcribe
 │   │   ├── services/
 │   │   │   ├── __init__.py
 │   │   │   ├── ai_analyzer.py    # OpenAI, DeepSeek, and Gemini REST integrations
-│   │   │   ├── ass_captions.py   # High-performance ASS subtitle compiler & animations
-│   │   │   ├── caption_styles.py # 5 Styles x 5 Animations registry & font loader
-│   │   │   ├── clip_generator.py # Coordinates analysis & video slicing lifecycle
-│   │   │   ├── downloader.py     # yt-dlp wrapper
+│   │   │   ├── ass_captions.py   # High-performance ASS subtitle compiler & word-by-word highlights
+│   │   │   ├── caption_styles.py # 6 Styles x 5 Animations registry & font loader
+│   │   │   ├── clip_generator.py # Coordinates incremental analysis & video slicing lifecycle
+│   │   │   ├── downloader.py     # yt-dlp wrapper with Windows console hiding
 │   │   │   ├── mock_analyzer.py  # Deterministic duration-based transcript chunker
+│   │   │   ├── process_utils.py  # Win32 CREATE_NO_WINDOW & SW_HIDE subprocess helper
 │   │   │   ├── project_manager.py# Disk layout, project IDs, clips directory resolution
-│   │   │   ├── smart_framing.py  # True 9:16 speaker-tracking framing
-│   │   │   ├── transcriber.py    # faster-whisper CTranslate2 transcription
+│   │   │   ├── smart_framing.py  # True 9:16 speaker-tracking framing (YuNet ONNX + VAD)
+│   │   │   ├── transcriber.py    # faster-whisper CTranslate2 transcription with early-exit support
 │   │   │   └── video_editor.py   # FFmpeg command builder, filtergraph, libass subtitles & watermark
 │   │   ├── __init__.py
 │   │   └── main.py               # FastAPI app definition, CORS, router mounting
 │   ├── assets/
 │   │   ├── caption_preview/      # Fixed word-timing fixture for preview renders
-│   │   └── fonts/                # Bundled OFL fonts (Montserrat, Anton, Poppins, Noto Sans)
+│   │   ├── fonts/                # Bundled OFL fonts (Montserrat, Anton, Poppins, Noto Sans)
+│   │   └── models/               # Bundled YuNet ONNX face detector model (face_detection_yunet_2023mar.onnx)
 │   ├── scripts/
 │   │   └── build_caption_previews.py # Build-time 360x640 moving preview & poster generator
-│   ├── tests/                    # Automated pytest suite (97 unit & integration tests)
+│   ├── tests/                    # Automated pytest suite (129 unit & integration tests across 17 files)
 │   │   ├── __init__.py
 │   │   ├── test_ai_analyzer.py
 │   │   ├── test_ass_captions.py
 │   │   ├── test_caption_previews.py
 │   │   ├── test_caption_styles.py
+│   │   ├── test_clip_counter.py
 │   │   ├── test_clip_generator.py
 │   │   ├── test_mock_analyzer.py
+│   │   ├── test_process_utils.py
 │   │   ├── test_project_manager.py
 │   │   ├── test_routes_analysis.py
 │   │   ├── test_routes_clips.py
@@ -133,30 +140,40 @@ ClipRobin/
 │   ├── requirements.txt          # References requirements/backend.txt
 │   ├── run.py                    # Uvicorn bootstrapper reading CLIPROBIN_API_PORT
 │   └── test_transcript.json      # Mock transcript data fixture
+├── docs/
+│   └── reports/
+│       ├── playback-bug.md       # Audit report: multi-clip simultaneous playback & modal sync
+│       ├── responsive-ui.md      # Audit report: viewport, DPI scaling, and Tauri window layout
+│       └── settings-mismatch.md  # Audit report: watermark & caption style persistence/render drift
 ├── frontend/
 │   ├── app/
-│   │   ├── clips/page.tsx        # Clip preview player, volume/sound toggles, ZIP download, watermark toggle
+│   │   ├── clips/page.tsx        # Clips Studio player grid, modal viewer, top-line editor, ZIP export
 │   │   ├── projects/page.tsx     # Project list, status badges, deletion, manual regenerate, watermark toggle
 │   │   ├── settings/page.tsx     # Persisted configuration form (localStorage & defaults)
 │   │   ├── favicon.ico
-│   │   ├── globals.css           # Tailwind v4 import & custom scrollbar styles
+│   │   ├── globals.css           # Tailwind v4 import, @theme design tokens & custom scrollbar styles
 │   │   ├── job-progress.tsx      # Floating bottom-right active job status widget
 │   │   ├── layout.tsx            # Root HTML, fixed sidebar, update notice, job widget
-│   │   ├── page.tsx              # Dashboard (YouTube URL input, local video drag-and-drop, watermark toggle)
+│   │   ├── page.tsx              # Dashboard (YouTube URL input, local video drag-and-drop, 9:16 live preview)
 │   │   ├── sidebar-nav.tsx       # Sidebar navigation links
-│   │   └── update-notice.tsx     # Tauri in-app auto-update banner
+│   │   ├── update-notice.tsx     # Tauri in-app auto-update banner
+│   │   └── window-init.tsx       # Tauri startup window maximization helper
 │   ├── public/                   # Static icons and assets
 │   │   ├── caption-previews/     # Pre-rendered 360x640 MP4 moving previews, posters, manifest.json
+│   │   ├── logo-mark.svg         # Brand bird logo mark
 │   │   └── watermark.png         # Public fallback watermark asset
 │   ├── scripts/
 │   │   ├── __tests__/
-│   │   │   └── version-scripts.test.mjs # Manifest synchronization tests
+│   │   │   └── version-scripts.test.mjs # Manifest synchronization tests (2 passing tests)
 │   │   ├── check-version.mjs     # Asserts version synchronization across manifests
 │   │   ├── set-version.mjs       # Sets version across package.json, Cargo.toml, tauri.conf
 │   │   └── take_screenshots.mjs  # Playwright visual snapshot capture utility
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── caption-style-picker.tsx # Spacious responsive modal dialog for caption styles
+│   │   │   ├── ui/               # Primitives (badge, checkbox, icon-button, option-card, segmented-control, status-pill, toggle-row, tooltip)
+│   │   │   ├── caption-style-picker.tsx # Spacious responsive 2-pane modal dialog for caption styles
+│   │   │   ├── clip-settings.tsx # Unified clip settings component (mode, duration, count, framing, captions, watermark)
+│   │   │   ├── live-moving-captions.tsx # Animated caption simulation in Dashboard 9:16 phone preview
 │   │   │   └── skeletons.tsx     # Loading skeletons for UI
 │   │   └── lib/
 │   │       └── api.ts            # Typed HTTP client & Tauri IPC bridge
@@ -179,7 +196,7 @@ ClipRobin/
 ├── watermark.png                 # Root watermark image used by video editor
 ├── .gitignore                    # Git ignore file
 ├── README.md                     # High-level product overview & instructions
-└── setup.ps1                     # Windows environment boostrap script
+└── setup.ps1                     # Windows environment bootstrap script
 ```
 
 ---
@@ -192,7 +209,8 @@ All projects adhere to an incremental filesystem contract under `$PROJECTS_DIR` 
 projects/
 └── project_001/
     ├── source.mp4                  # Primary media (or source.mov, source.mkv, etc.)
-    ├── analysis.json               # Clip candidate definitions and timestamps
+    ├── analysis.json               # Clip candidate definitions, timestamps, and generation_options
+    ├── tracking_analysis.json      # Cached YuNet + VAD active speaker crop timeline (for True 9:16)
     ├── transcription/
     │   ├── transcript.txt          # Plain-text timestamped lines
     │   └── transcript.json         # Structured segments with word-level timestamps
@@ -232,9 +250,17 @@ projects/
       "title": "The Golden Rule of Debugging",
       "start": 12.4,
       "end": 42.8,
-      "reason": "Clear problem statement followed by a surprising solution."
+      "reason": "Clear problem statement followed by a surprising solution.",
+      "top_line": ""
     }
-  ]
+  ],
+  "generation_options": {
+    "show_subtitles": true,
+    "show_watermark": false,
+    "framing_mode": "standard",
+    "caption_style": "classic",
+    "caption_animation": null
+  }
 }
 ```
 
@@ -242,7 +268,7 @@ projects/
 
 ## 5. Codebase Bugs, Vulnerabilities & Implementation Status
 
-> **Audit Status as of v0.1.16**: The Bug Bounty and feature hardening cycles resolved all critical, high, and medium-priority flaws across the backend and frontend, and established a 55-test automated test suite in `backend/tests/`.
+> **Audit Status as of v0.1.21**: All 32 historical feature & hardening items are implemented and verified across a **129-test backend `pytest` suite** (17 test files) and **2-test frontend version sync suite**. See the **Known Issues & Active Audit Reports (v0.1.21)** section at the end of Section 5 for newly audited UI responsiveness, settings persistence, and video playback findings.
 
 ### 🔴 Critical Severity (Showstoppers)
 
@@ -343,7 +369,7 @@ projects/
 #### 14. Static / Non-Functional Settings Page `[RESOLVED]`
 - **File**: `frontend/app/settings/page.tsx`.
 - **Status**: **RESOLVED & VERIFIED**.
-- **Fix**: Settings now persist automatically to browser `localStorage` with a fallback to sensible defaults (9:16 vertical, High 1080p, MP4, confirm delete enabled), live visual confirmation badges, and a "Reset to defaults" action.
+- **Fix**: Settings now persist automatically to browser `localStorage` with a fallback to sensible defaults (9:16 vertical, High 1080p, MP4, confirm delete enabled), live visual confirmation badges, and default caption style selection.
 
 #### 15. Inaccurate Video MIME Type Check on Windows `[RESOLVED]`
 - **File**: `frontend/app/page.tsx`.
@@ -352,7 +378,7 @@ projects/
 
 ---
 
-### 🟢 UI/UX Enhancements & New Features (v0.1.16)
+### 🟢 UI/UX Enhancements & New Features (v0.1.16 – v0.1.21)
 
 #### 16. Fixed Sticky Sidebar Navigation `[RESOLVED]`
 - **Files**: `frontend/app/layout.tsx`, `frontend/app/globals.css`.
@@ -379,7 +405,7 @@ projects/
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**: Users can add and burn custom headline context hooks (e.g., "POV: When the code works on the first try", "MrBeast reacted this way") into generated vertical clips:
   - **In-App Clip Editor**: "Add top line" / "Edit top line" button alongside "Download clip", opening a dedicated top line editor with a 15-word limit counter and live safe-zone preview overlay.
-  - **Geometry & Collision Prevention**: In the 720×1280 vertical canvas, the top line is rendered at Y=260–306. When present, the watermark is automatically shifted higher to Y=90 (`round(H*0.07)`), leaving ~91px clearance below the watermark and ~100px clearance above the video content.
+  - **Geometry & Collision Prevention**: In the 720×1280 vertical canvas, the top line is rendered at Y=240–306 (standard), Y=190–205 (square_rounded), and Y=150–175 (true_9_16).
   - **Social Safe Margins**: Automatic text wrapping (max 28 characters per line) and centered alignment (`x=(w-text_w)/2`) ensures text never extends to the edge or gets cropped by TikTok, Reels, or Shorts UI icons.
   - **Single-Clip Re-render API**: `POST /api/projects/{id}/clips/{clip_id}/top-line` and `DELETE /api/projects/{id}/clips/{clip_id}/top-line` re-render clips with FFmpeg atomically without affecting other clips and persist metadata to `analysis.json`.
 - **Tests**: `backend/tests/test_clip_generator.py::test_render_single_clip_updates_analysis_and_creates_clip`, `test_render_single_clip_enforces_word_limit`, `test_render_single_clip_preserves_passed_show_watermark`, and `backend/tests/test_routes_clips.py::test_update_and_delete_clip_top_line`.
@@ -397,7 +423,7 @@ projects/
 #### 21. 1:1 Rounded Square Framing for Vertical Canvas (v0.1.17) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `backend/app/services/video_editor.py`, `backend/app/services/clip_generator.py`, `backend/app/routes/clips.py`, `frontend/app/page.tsx`, `frontend/src/lib/api.ts`.
 - **Status**: **RESOLVED & VERIFIED**.
-- **Feature**: Centered square video (660×660) with anti-aliased rounded corners (`radius=36`) placed inside a vertical 720×1280 canvas, popular on TikTok, Reels, and YouTube Shorts. Subtitles position below the square at `y=1010` and headline top line renders cleanly at `y=190-205`.
+- **Feature**: Centered square video (660×660) with anti-aliased rounded corners (`radius=36`) placed inside a vertical 720×1280 canvas, popular on TikTok, Reels, and YouTube Shorts. Subtitles position below the square at `y=1010` (`drawtext`) / `y=1050` (`ASS`) and headline top line renders cleanly at `y=190-205`.
 
 #### 22. True 9:16 AI Smart Framing & Active Speaker Tracking (v0.1.17) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `backend/app/services/smart_framing.py`, `backend/app/services/video_editor.py`, `backend/app/services/clip_generator.py`, `backend/app/routes/clips.py`, `frontend/app/page.tsx`, `frontend/app/clips/page.tsx`, `frontend/src/lib/api.ts`.
@@ -407,10 +433,10 @@ projects/
   - **Cheap VFR/Rotation Sampling**: FFmpeg streams `fps=5,scale=640:-2` raw frames into Python once per source video and caches results in `project_directory/tracking_analysis.json`.
   - **Active Speaker Correlation**: Extracts mouth patches across tracked faces and correlates normalized inter-frame mouth motion with speech intervals from Whisper VAD (`±200ms` tolerance).
   - **Fallback Hierarchy**: Active speaker with visible mouth motion -> Hold last speaker -> Most prominent face (area × centrality) -> Pair framing (both faces fit in 88% of 9:16 crop) -> Center crop.
-  - **Cinematic Director Rules**: Hard cuts when switching speakers, 1.6s minimum shot duration (ping-pong hysteresis), and 8% dead zone to eliminate camera micro-jitter.
+  - **Cinematic Director Rules**: Hard cuts when switching speakers, 1.6s–2.0s minimum shot duration (ping-pong hysteresis), and 8% dead zone to eliminate camera micro-jitter.
   - **Single-Pass Rendering**: Dynamic crop expressions (`crop=w:h:x='if(...)':y=0`) rendered in one pass via FFmpeg filter scripts.
-  - **Top Line Safety**: "Add top line" button is disabled for True 9:16 clips with a tooltip: *"Top line generally doesn't go with 9:16. Try 1:1 or 16:9 for that"*.
-- **Tests**: `backend/tests/test_smart_framing.py` (6 tests) and `backend/tests/test_clip_generator.py::test_generate_clips_with_true_9_16_framing`, `test_render_single_clip_true_9_16_framing`, and `backend/tests/test_routes_clips.py::test_generate_clips_route_true_9_16`.
+  - **Top Line Support**: Initially disabled on True 9:16 in v0.1.17; enabled in v0.1.19+ (Item 30) with transparent outline/shadow typography at `Y=150–175`.
+- **Tests**: `backend/tests/test_smart_framing.py` (26 tests) and `backend/tests/test_clip_generator.py::test_generate_clips_with_true_9_16_framing`, `test_render_single_clip_true_9_16_framing`, and `backend/tests/test_routes_clips.py::test_generate_clips_route_true_9_16`.
 
 #### 23. 16:9 Rounded Corners Framing (v0.1.18) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `backend/app/services/video_editor.py`, `backend/tests/test_clip_generator.py`, `frontend/app/page.tsx`.
@@ -427,11 +453,10 @@ projects/
 - **Files**: `backend/app/services/caption_styles.py`, `backend/app/services/video_editor.py`, `backend/scripts/build_caption_previews.py`, `backend/assets/caption_preview/demo_words.json`, `backend/tests/test_caption_previews.py`, `frontend/public/caption-previews/`, `frontend/src/components/caption-style-picker.tsx`, `frontend/app/page.tsx`, `frontend/app/settings/page.tsx`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Feature**:
-  - **Restored "Classic" Look**: Reinstated original word-by-word highlighted captions with yellow active word and semi-transparent black background box (`box=1:boxcolor=black@0.55:boxborderw=10`, `fontcolor=yellow`, `fontsize=34`). Built on the legacy `drawtext` pipeline with identical output (bypasses ASS filter). Animation chips are disabled for Classic with tooltip: *"Classic uses its own highlight"*. Default caption style across app and settings defaults to `"classic"`.
+  - **Restored "Classic" Look**: Reinstated original word-by-word highlighted captions with yellow active word and semi-transparent black background box (`box=1:boxcolor=black@0.55:boxborderw=10`, `fontcolor=yellow`, `fontsize=34`). Built on the legacy `drawtext` pipeline with identical output (bypasses ASS filter). Default caption style across app and settings defaults to `"classic"`.
   - **Pre-rendered Moving Previews**: Developer/build-time generator (`backend/scripts/build_caption_previews.py`) renders 26 style x animation combinations at 720x1280 using production video editor, downscales to 360x640 MP4 (CRF 28, faststart, no audio) + JPG posters (quality 80) + `manifest.json`. Total size for all 26 previews is only 0.42 MB (well within 10 MB limit). Stored statically in `frontend/public/caption-previews/` and bundled into desktop distribution without runtime rendering overhead on app launch.
   - **Manifest Freshness Test**: `test_caption_previews_manifest_matches_registry` in `backend/tests/test_caption_previews.py` validates SHA256 hashes of all style definitions and allowed animations, enforcing build-time generation.
-  - **Compact Summary Dashboard Row**: Replaced cramped cards with a compact summary row featuring a small 9:16 poster thumbnail, "Caption style: <Name> · <Animation>", and a "Change" button.
-  - **Spacious Caption Style Picker Modal**: Accessible modal (`CaptionStylePicker`) with responsive 3-column (>=1100px) and 2-column (<1100px) grid, looping `<video>` previews with poster fallback, IntersectionObserver pause on scroll-out, `prefers-reduced-motion` play/pause toggle, interactive Safe Zones overlay toggle (7-24% top reserved, 20% bottom platform UI), keyboard navigation (`ArrowLeft`/`ArrowRight`/`Escape`), brand palette only, and zero "AI" wording.
+  - **Spacious Caption Style Picker Modal**: Accessible modal (`CaptionStylePicker`) with search, category filter chips, looping `<video>` previews with poster fallback, `prefers-reduced-motion` play/pause toggle, interactive Safe Zones overlay toggle, and keyboard navigation (`ArrowLeft`/`ArrowRight`/`Escape`).
 - **Tests**: `backend/tests/test_caption_previews.py`, `backend/tests/test_caption_styles.py`, `backend/tests/test_clip_generator.py::test_create_clip_classic_drawtext_regression`, and Playwright screenshots captured at 1280x800 and 960x640.
 
 #### 26. Streamlined Caption System: 2 Words Per Line, Extended Hold, Clean Highlights (v0.1.18+) `[RESOLVED / IMPLEMENTED]`
@@ -443,7 +468,7 @@ projects/
   - **2 Words in One Line**: Enforced a strict maximum of 2 words per chunk/line across both ASS (`_chunk_words`) and legacy drawtext (`_layout_subtitle_words`) pipelines, and increased ASS font size from 44px to 52px for punchy, bold readability on 9:16 mobile screens.
   - **Hold Duration & Gap Bridging**: Eliminated subtitle flickering and brief disappearances (<1 second) during natural speech pauses by increasing the gap bridge threshold from 400ms to 1.20s and extending chunk display duration until the next chunk begins (+0.80s / +1.0s on pauses and clip boundaries).
   - **Preview Assets Regenerated**: Rebuilt moving preview videos and posters for all 6 styles with the 2-words-per-line layout and clean highlights, updating `manifest.json` and generating direct `{style_id}.mp4` and `{style_id}.jpg` files for direct preview rendering.
-- **Tests**: `backend/tests/test_caption_previews.py` (all styles + aliases verified), `backend/tests/test_ass_captions.py`, `backend/tests/test_clip_generator.py` (all 97 backend tests passing), and Next.js production build passing with 0 errors.
+- **Tests**: `backend/tests/test_caption_previews.py` (all styles + aliases verified), `backend/tests/test_ass_captions.py`, `backend/tests/test_clip_generator.py`, and Next.js production build passing with 0 errors.
 
 #### 27. Aspect Ratio, Duration, Generation Mode & Caption Style Controls on Projects and Clips Pages (v0.1.18+) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/page.tsx`, `frontend/scripts/take_screenshots.mjs`.
@@ -451,10 +476,10 @@ projects/
 - **Feature**:
   - **Removed Raw Checkbox Tick Marks**: Replaced browser-native `<input type="checkbox">` elements across clip and project regeneration forms with styled accessible switches and interactive picker cards.
   - **Aspect Ratio Selectors**: Added full aspect ratio selection buttons (16:9 Rounded, 1:1 Rounded, True 9:16) matching the dashboard controls on both `/clips` and `/projects` views before running clip regeneration.
-  - **Clip Duration Selectors**: Added selectable clip duration chips (`15s`, `30s`, `60s`, `90s`) with live highlight and persistence across `/clips`, `/projects`, and dashboard.
+  - **Clip Duration Selectors**: Added selectable clip duration chips (`12s`, `30s`, `60s`, `90s` as of v0.1.21; `15s` retained for API backward compatibility) with live highlight and persistence across `/clips`, `/projects`, and dashboard.
   - **Generation Mode Selectors**: Added Generation Mode toggle switch (`Random` active, `AI` with `Soon` badge and COMING SOON tooltip) aligned with dashboard UX.
   - **Integrated Caption Style Picker**: Added caption style preview cards showing current style thumbnail, label, description, and "Change" button opening the full `<CaptionStylePicker>` modal dialog.
-  - **Preferences & API Synchronization**: Selected framing mode, clip duration, generation mode, and caption style persist across sessions via `localStorage` (`cliprobin_framing_mode`, `cliprobin_clip_duration`, `cliprobin_generation_mode`, `cliprobin_caption_style`) and are passed explicitly to `generateClips({ clipDurationSeconds, framingMode, captionStyle, ... })`.
+  - **Preferences & API Synchronization**: Selected framing mode, clip duration, generation mode, and caption style persist across sessions via `localStorage` (`cliprobin_framing_mode`, `cliprobin_clip_duration`, `cliprobin_generation_mode`, `cliprobin_caption_style`) and are passed explicitly to `generateClips(...)`.
 - **Tests**: Playwright visual regression snapshots (`clips_page_controls.png`, `projects_page.png`), frontend unit tests, and production build verification.
 
 #### 28. Comprehensive Desktop UI/UX Polish Pass — Phases A–D (v0.1.19+) `[RESOLVED / IMPLEMENTED]`
@@ -464,9 +489,9 @@ projects/
 - **Features Implemented Across 4 Phases**:
   - **Phase A — Foundations & Tokens**: Tailwind v4 `@theme` design tokens (near-black background, surface `#121215`, emerald `#10b981`, amber highlight `#f59e0b`, purple AI `#a855f7`). WCAG AA compliant muted text contrast (>=4.5:1), custom dark scrollbars, reduced motion queries, and accessible focus rings. Shared primitive library (`Badge`, `Tooltip`, `SegmentedControl`, `ToggleRow`, `OptionCard`, `StatusPill`, `IconButton`, `Checkbox`). Built unified `ClipSettings` single source of truth supporting `variant="full" | "compact"`.
   - **Phase B — Dashboard**: Fluid responsive 2-column layout (`max-w-[1560px]`) eliminating ultrawide dead margins. Step 1 file card with metadata, replace/remove actions, and inline YouTube URL regex validation. Step 2 unified `ClipSettings`. Sticky right aside with live 9:16 canvas preview (Standard 16:9 rounded, 1:1 rounded, True 9:16 speaker simulation, watermark badge, caption highlight simulation), configured summary pills, and primary "Generate Clips" CTA immediately visible above the fold.
-  - **Phase C — Clips Studio**: Auto-fill 9:16 responsive grid (`repeat(auto-fill, minmax(220px, 1fr))`) rendering 6+ columns on 2560px displays. Sticky toolbar with primary Regenerate CTA, Download all ZIP, and collapsible settings summary. Client-side dirty state detection (`cliprobin_applied_{projectId}`) highlighting when settings have changed. Global toolbar volume/mute controls removing heavy per-card sliders. Minimal video overlay with centered play/pause and full modal viewer. Search and timeline/duration sorting.
+  - **Phase C — Clips Studio**: Responsive 9:16 grid rendering up to 6 columns on 2560px displays. Sticky toolbar with primary Regenerate CTA, Download all ZIP, and collapsible settings summary. Client-side dirty state detection (`cliprobin_applied_{projectId}`) highlighting when settings have changed. Global toolbar volume/mute controls removing heavy per-card sliders. Minimal video overlay with centered play/pause and full modal viewer. Search and timeline/duration sorting.
   - **Phase D — Caption Style Modal**: 2-pane modal dialog (`w-[min(1100px,94vw)] max-h-[min(88vh,900px)]`). Left pane with search input, category filter chips (`All`, `Bold`, `Minimal`, `Boxed`), and 16–18px typography sample cards on subtle checkered dark canvas. Right pane with sticky 9:16 looping video preview, subtle dashed platform safe zones (10% top, 20% bottom, 6% side guides without occluding text), safe zones remembered toggle via emerald `<Checkbox>`, and keyboard navigation (Arrow keys move selection, Enter confirms, Escape closes).
-- **Verification**: Next.js production build passing with 0 errors, all 97 backend pytest suites passing, Playwright visual captures verified at 2560×1080, 1280×800, and 960×640.
+- **Verification**: Next.js production build passing with 0 errors, backend pytest suites passing, Playwright visual captures verified at 2560×1080, 1280×800, and 960×640.
 
 #### 29. Full End-to-End Verification Report — Zero to Finish (2026-10-17) `[VERIFIED / 2 OPEN ITEMS]`
 - **Branch / commit**: `best-ui` = `ui-polish` @ `d076475`.
@@ -476,7 +501,7 @@ projects/
 
 | Check | Result |
 | :--- | :--- |
-| `pytest backend/tests` | ✅ 103 / 103 passed (3.6s) |
+| `pytest backend/tests` | ✅ 129 / 129 passed (as of v0.1.21; 103 / 103 at v0.1.19) |
 | `npm run lint` | ✅ 0 errors, 2 warnings (`<img>` in `projects/page.tsx`, `caption-style-picker.tsx`; intentional for local thumbnails) |
 | `npm run build` (incl. TypeScript) | ✅ Compiled, 5 static routes |
 | `npm test` (node --test) | ✅ 2 / 2 passed |
@@ -505,7 +530,7 @@ projects/
 
 | Check | Result |
 | :--- | :--- |
-| Horizontal scroll | ✅ None at any size |
+| Horizontal scroll | ✅ None at >= 960px (see `docs/reports/responsive-ui.md` for < 960px and grid density issues) |
 | Console errors / uncaught exceptions / HTTP ≥ 400 | ✅ None |
 | `<video>` elements in error state | ✅ 0 (3–12 lazy-loaded per viewport on the 57-clip project, never all 57) |
 | Clip thumbnails | ✅ Real frames (seek to `min(1s, duration/3)`), no black voids |
@@ -535,7 +560,7 @@ projects/
   - **14 Edge Case Failure Modes in Smart Framing**: Hardened 9:16 face detection against low-light/distant faces, edge cutoffs (IoU matching + velocity clamping), rapid multi-speaker head movements (2.0s hold before cutting), mobile video rotation metadata tags (`rotate` and `side_data_list.rotation`), B-roll natural center fallback (>2.5s), and odd dimension codec alignment (even width/height).
 - **Tests**: `backend/tests/test_process_utils.py` (2 tests), `backend/tests/test_smart_framing.py` (26 tests covering all 14 failure modes). All 123 backend tests pass in < 3s.
 
-#### 32. Dynamic Clip Counter & Incremental Clip Generation Pipeline (Branch: `clip_counter`) `[RESOLVED / IMPLEMENTED]`
+#### 32. Dynamic Clip Counter & Incremental Clip Generation Pipeline (v0.1.21) `[RESOLVED / IMPLEMENTED]`
 - **Files**: `backend/app/services/transcriber.py`, `backend/app/services/clip_generator.py`, `backend/app/services/mock_analyzer.py`, `backend/app/services/video_editor.py`, `backend/app/services/smart_framing.py`, `backend/app/routes/clips.py`, `backend/app/routes/local_video.py`, `backend/tests/test_clip_counter.py`, `frontend/src/components/clip-settings.tsx`, `frontend/app/page.tsx`, `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/src/lib/api.ts`.
 - **Status**: **RESOLVED & VERIFIED**.
 - **Features Implemented**:
@@ -546,25 +571,53 @@ projects/
   - **Requested Count Limit**: Enforces user-selected clip counts (`max_clips` / `clip_count`), terminating processing once the requested quota has been fulfilled.
 - **Tests**: `backend/tests/test_clip_counter.py` (6 new unit & integration tests). All 129 backend tests pass in < 5s.
 
+#### 33. Responsive UI Overhaul, End-to-End Settings Synchronization & Exclusive Video Playback Coordination (v0.1.21) `[RESOLVED / IMPLEMENTED]`
+- **Files**: `backend/app/routes/clips.py`, `backend/app/services/clip_generator.py`, `backend/app/services/video_editor.py`, `backend/tests/test_routes_clips.py`, `backend/tests/test_clip_generator.py`, `frontend/src/lib/api.ts`, `frontend/app/layout.tsx`, `frontend/app/sidebar-nav.tsx`, `frontend/app/window-init.tsx`, `frontend/app/job-progress.tsx`, `frontend/src/components/clip-settings.tsx`, `frontend/src/components/caption-style-picker.tsx`, `frontend/src/components/ui/badge.tsx`, `frontend/src/components/ui/segmented-control.tsx`, `frontend/src/components/skeletons.tsx`, `frontend/app/page.tsx`, `frontend/app/clips/page.tsx`, `frontend/app/projects/page.tsx`, `frontend/app/settings/page.tsx`.
+- **Status**: **RESOLVED & VERIFIED**.
+- **Features & Fixes Implemented**:
+  - **Responsive 3-Tier Navigation & Container-Query Grids (`docs/reports/responsive-ui.md`)**: Replaced the fixed `w-64` sidebar with a responsive navigation shell (`flex-col md:flex-row`: mobile top bar `<768px`, `w-16` icon rail `768px–1279px`, `w-64` sidebar `>=1280px`). Deferred Dashboard 2-column split to `xl:grid-cols-[1fr_340px] 2xl:grid-cols-[1fr_400px]`, converted `ClipSettings` to `@container` queries (`@lg:grid-cols-3`, `@md:grid-cols-2`), switched Clips Studio to `grid-cols-[repeat(auto-fill,minmax(220px,1fr))]`, constrained 9:16 modal players on `768px`-tall viewports, guarded `WindowInit` maximize with `sessionStorage`, and promoted sub-12px micro-text to `text-xs`.
+  - **End-to-End Settings Persistence & Cache Invalidation (`docs/reports/settings-mismatch.md`)**: `GET /api/projects/{id}/clips` now returns `generation_options` from `analysis.json` so `/clips` hydrates `appliedSettings`, `showWatermark`, `showCaptions`, `captionStyle`, `framingMode`, `clipDurationSeconds` (including `12s`), and `clipCount` from the project's actual render settings. Prevented Top-Line edits from overriding saved watermark settings, persisted `cliprobin_show_watermark` and `cliprobin_show_captions` across all pages, synchronized `cliprobin.settings.defaultCaptionStyle` with `cliprobin_caption_style`, fixed the `generationModeRef` closure and `handleDrop` duration probing on Dashboard, invalidated cached `analysis.json` when clip duration or requested count changes, and added all 6 caption styles (`robin`, `punch`, `clean`, `pill`, `karaoke`, `classic`) to `_build_subtitle_filters`.
+  - **Exclusive Video Playback Coordination (`docs/reports/playback-bug.md`)**: Added a document-level `play` capture listener that pauses any other active non-decorative `<video>` element, attached native `onPlay`/`onPause` handlers on `ProClipCard`, removed the racy `&& isPlaying` guard in `ProClipCard`'s pause effect, cleared `activePlayingClipId` when pausing or opening `ClipModalViewer` or switching projects, and synced `globalVolume` / `globalMuted` into `ClipModalViewer`.
+- **Tests**: Added 4 new backend regression tests in `backend/tests/test_routes_clips.py` and `backend/tests/test_clip_generator.py`. All **133 backend tests** pass in < 7s.
+
+---
+
+### ✅ Audit Reports & Resolved Issue Archives (v0.1.21)
+
+Detailed deep-dive audit reports with exact `file:line` root causes, reproduction steps, fix implementations, and regression test specifications are maintained in `docs/reports/` (all findings **RESOLVED & VERIFIED**):
+
+1. **[Responsive & Screen-Size Report](docs/reports/responsive-ui.md)** (`docs/reports/responsive-ui.md`) — `[RESOLVED & VERIFIED]`:
+   - **Responsive Sidebar Collapse (`frontend/app/layout.tsx`, `frontend/app/sidebar-nav.tsx`)**: Collapses to a `w-16` icon rail on `768px–1279px` and a compact top bar below `768px`.
+   - **Container-Query Breakpoints & Deferred Split (`frontend/app/page.tsx`, `frontend/src/components/clip-settings.tsx`)**: Uses `xl:grid-cols-[1fr_340px]` and `@container` queries so controls never crowd on `1024px–1280px` viewports.
+   - **Auto-Fill Grid & Short-Height Modal Scrolling (`frontend/app/clips/page.tsx`, `frontend/src/components/caption-style-picker.tsx`)**: Uses `grid-cols-[repeat(auto-fill,minmax(220px,1fr))]` and constrains 9:16 modal previews on `1366x768` screens.
+
+2. **[Settings Mismatch & Persistence Report](docs/reports/settings-mismatch.md)** (`docs/reports/settings-mismatch.md`) — `[RESOLVED & VERIFIED]`:
+   - **Watermark & Project Settings Hydration (`frontend/app/clips/page.tsx`, `backend/app/routes/clips.py`)**: Persists `cliprobin_show_watermark` globally, hydrates `/clips` state and `appliedSettings` from `GET /api/projects/{id}/clips` (`generation_options`), and preserves project watermark state during Top-Line edits.
+   - **Backend `analysis.json` Cache Invalidation & 6-Style `drawtext` Fallback (`backend/app/services/clip_generator.py`, `backend/app/services/video_editor.py`)**: Re-runs clip slicing when `clip_duration_seconds` or `clip_count` changes and supports all 6 caption styles in `_build_subtitle_filters`.
+   - **Unified `localStorage` Keys & Closure Fixes (`frontend/app/settings/page.tsx`, `frontend/app/page.tsx`, `frontend/app/projects/page.tsx`)**: Synchronizes `defaultCaptionStyle`, includes `12s` in `/clips` validation, fixes `generationModeRef` in `triggerClipGeneration`, and probes duration on `handleDrop`.
+
+3. **[Video Playback Coordination Report](docs/reports/playback-bug.md)** (`docs/reports/playback-bug.md`) — `[RESOLVED & VERIFIED]`:
+   - **Exclusive Card + Modal Audio Playback (`frontend/app/clips/page.tsx`)**: Document-level `play` capture listener + native `onPlay`/`onPause` handlers + unconditional pause effect guarantee only one clip plays at a time and keep Play/Pause buttons and modal volume/mute in sync.
+
 ---
 
 ## 6. Comprehensive Missing Tests Audit & Implementation Status
 
 ### Overview
-- **Active Backend Automated Tests**: **129 tests** across 17 test suites in `backend/tests/` (All 129 passing via `pytest`).
-- **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner.
+- **Active Backend Automated Tests**: **133 tests** across 17 test suites in `backend/tests/` (All 133 passing via `pytest`).
+- **Active Frontend Automated Tests**: **2 tests** validating version manifest synchronization via Node test runner (`frontend/scripts/__tests__/version-scripts.test.mjs`).
 - **Backend Test Framework**: `pytest 9.x`, `pytest-asyncio`, `httpx` (`TestClient`), `anyio`.
 - **Remaining Target Test Cases**: Frontend UI component interaction tests (Vitest / React Testing Library) and Tauri desktop shell E2E tests (Playwright).
 
 ---
 
-### Backend Test Inventory (129 Implemented & Passing)
+### Backend Test Inventory (133 Implemented & Passing)
 
 | Target Module | Active Test File | Status | Test Cases Implemented |
 | :--- | :--- | :--- | :--- |
 | **`app.services.clip_generator` / `mock_analyzer`** | `tests/test_clip_counter.py` | ✅ Passed | • Respects `max_clips` and `clip_count`.<br>• Slices 12-second clips properly.<br>• Rejects `clip_count < 1` with 422.<br>• `get_project_clips` returns `source_duration`.<br>• `probe_video_duration` probes duration via ffprobe. |
 | **`app.services.process_utils`** | `tests/test_process_utils.py` | ✅ Passed | • On Windows, supplies `CREATE_NO_WINDOW` and `SW_HIDE` startupinfo.<br>• On non-Windows, returns empty dict without throwing errors. |
-| **`app.services.smart_framing`** | `tests/test_smart_framing.py` | ✅ Passed | • YuNet ONNX model path resolution.<br>• Bounding box IoU calculations.<br>• Speech window extraction and VAD tolerance check.<br>• Single-shot crop expression generation.<br>• Multi-cut piecewise `if(lt(t,...))` crop expression generation.<br>• Already-vertical video bypass. |
+| **`app.services.smart_framing`** | `tests/test_smart_framing.py` | ✅ Passed | • YuNet ONNX model path resolution.<br>• Bounding box IoU calculations.<br>• Speech window extraction and VAD tolerance check.<br>• Single-shot crop expression generation.<br>• Multi-cut piecewise `if(lt(t,...))` crop expression generation.<br>• Already-vertical video bypass.<br>• 14 edge-case failure modes (low-light, velocity clamping, 2.0s hold, rotation metadata, B-roll center fallback, even dimension alignment). |
 | **`app.routes.health`** | `tests/test_routes_health.py` | ✅ Passed | • `GET /api/health` returns status 200 and `{"status": "healthy"}`. |
 | **`app.routes.jobs`** | `tests/test_routes_jobs.py` | ✅ Passed | • Empty job queue returns empty list.<br>• Active transcription & clip generation jobs reported with step progress.<br>• Thread safety and status segregation. |
 | **`app.services.project_manager`** | `tests/test_project_manager.py` | ✅ Passed | • `create_project()` generates sequential project IDs (`project_001`, `002`).<br>• `get_project_directory()` validates ID format regex.<br>• Path traversal attempts (`project_../etc`) raise `ValueError`.<br>• Missing project raises `FileNotFoundError`.<br>• `list_projects()` detects source type and clip count.<br>• `CLIPROBIN_PROJECTS_DIR` environment variable override is honored. |
@@ -573,25 +626,25 @@ projects/
 | **`app.services.clip_generator`** | `tests/test_clip_generator.py` | ✅ Passed | • Raises `FileNotFoundError` if source video is missing.<br>• Reuses existing valid `analysis.json`.<br>• Calls mock analyzer if no analysis exists.<br>• Renders clips progressively directly inside `clips_directory` using hidden `.rendering_{clip_id}.mp4` and renames to `{clip_id}.mp4` upon completion.<br>• Preserves existing clips on cancellation or error via `.clips-backup-*` recovery.<br>• Passes `show_watermark` configuration to `create_clip`.<br>• `render_single_clip` updates `analysis.json`, enforces 15-word limit, and preserves watermark options.<br>• Subtitle filter graph safely escapes quotes, colons, percent signs, and backslashes without FFmpeg parse failure.<br>• Unifies FFmpeg command construction across framing modes (`true_9_16`, `square_rounded`, `standard`) using standard `-c:a aac -b:a 192k` and unconditional `-map 0:a?` when audio is present.<br>• Guarantees audio retention across all 6 caption styles (`classic`, `clean`, `punch`, `robin`, `pill`, `karaoke`) with and without watermark.<br>• Emits `-an` and strips audio mapping when `has_audio` is False. |
 | **`app.routes.download`** | `tests/test_routes_download.py`, `tests/test_clip_generator.py` | ✅ Passed | • Rejects non-YouTube domains (e.g. `vimeo.com`, `malicious.com`).<br>• Accepts `youtube.com` and `youtu.be` URLs.<br>• Cleans up project folder if download fails.<br>• Emits user-friendly error guidance: `"This YouTube video was unavailable to download. You can choose or drop a local video file (MP4, MOV, MKV, WebM) to generate clips instead."` |
 | **`app.routes.local_video`** | `tests/test_routes_local_video.py` | ✅ Passed | • Rejects unsupported video extensions (`.exe`, `.txt`).<br>• Accepts `.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`.<br>• Queues background transcription task and reports progress.<br>• Rejects nonexistent file path on `/from-path`.<br>• Rejects unsupported extension on `/from-path`.<br>• Successfully creates project and queues transcription from local path.<br>• Evicts completed transcription jobs when capacity exceeds limit. |
-| **`app.routes.clips`** | `tests/test_routes_clips.py` | ✅ Passed | • Validates `clip_duration_seconds` in `{15, 30, 60, 90}`.<br>• Rejects duplicate concurrent clip generation for same project (409).<br>• Returns 404 for nonexistent projects and missing downloads.<br>• Accepts `show_watermark` query parameter for clip generation.<br>• `POST` and `DELETE /api/projects/{id}/clips/{clip_id}/top-line` endpoints burn and clear top lines.<br>• Evicts completed generation jobs when capacity exceeds limit.<br>• Returns 404 when saving nonexistent clip with dialog.<br>• Returns cancelled status when user cancels native save dialog.<br>• Exports clip to chosen location on save dialog confirmation.<br>• Exports all clips ZIP to chosen location on save dialog confirmation. |
+| **`app.routes.clips`** | `tests/test_routes_clips.py` | ✅ Passed | • Validates `clip_duration_seconds` in `{12, 15, 30, 60, 90}`.<br>• Rejects duplicate concurrent clip generation for same project (409).<br>• Returns 404 for nonexistent projects and missing downloads.<br>• Accepts `show_watermark` query parameter for clip generation.<br>• `POST` and `DELETE /api/projects/{id}/clips/{clip_id}/top-line` endpoints burn and clear top lines.<br>• Evicts completed generation jobs when capacity exceeds limit.<br>• Returns 404 when saving nonexistent clip with dialog.<br>• Returns cancelled status when user cancels native save dialog.<br>• Exports clip to chosen location on save dialog confirmation.<br>• Exports all clips ZIP to chosen location on save dialog confirmation. |
 | **`app.routes.projects`** | `tests/test_routes_projects.py` | ✅ Passed | • Lists all projects with source format metadata.<br>• Deletes project directories and cleans up locks.<br>• Aborts active background jobs before directory deletion. |
 | **`app.routes.analysis`** | `tests/test_routes_analysis.py` | ✅ Passed | • Validates analysis payload.<br>• Integrates mock and AI analyzers with transcript storage. |
 | **`app.services.caption_styles`** | `tests/test_caption_styles.py` | ✅ Passed | • Style registry contains 6 styles (classic, robin, clean, punch, pill, karaoke).<br>• Animation constraints, defaults, and fallback handling.<br>• Default style resolves to `classic`. |
-| **`app.services.ass_captions`** | `tests/test_ass_captions.py` | ✅ Passed | • Compiles ASS script with PlayResX/Y 720x1280.<br>• Word chunking and safe positioning.<br>• Karaoke centisecond timing tags and animation override tags. |
+| **`app.services.ass_captions`** | `tests/test_ass_captions.py` | ✅ Passed | • Compiles ASS script with PlayResX/Y 720x1280.<br>• Word chunking and safe positioning.<br>• Karaoke centisecond timing tags and highlight override tags. |
 | **`scripts.build_caption_previews`** | `tests/test_caption_previews.py` | ✅ Passed | • Validates manifest items match all styles & allowed animations.<br>• Asserts 26 MP4s and 26 JPG posters exist and are non-empty.<br>• Enforces SHA256 freshness against style definitions.<br>• Enforces total assets <= 10 MB ceiling (currently 0.42 MB). |
 
---- 
+---
 
-### Frontend Test Inventory (38 Missing Tests)
+### Frontend Test Inventory (38 Missing Tests + Audit Regression Targets)
 
 | Component / Module | Proposed Test File | Priority | Test Cases to Implement |
 | :--- | :--- | :--- | :--- |
 | **`src/lib/api.ts`** | `src/lib/__tests__/api.test.ts` | P0 | 1. Resolves `getApiUrl()` to `127.0.0.1:8000` in web mode.<br>2. Resolves `getApiUrl()` via `backend_port` Tauri IPC in desktop mode.<br>3. Handles IPC failure with retry instead of permanently cached rejection.<br>4. `getApiErrorMessage()` parses string details, array validation errors, and fallbacks.<br>5. `downloadVideo()` issues correct POST request.<br>6. `transcribeLocalVideo()` tracks upload progress via XHR.<br>7. `generateClips()` poll loop handles status transitions (`queued` -> `processing` -> `completed`).<br>8. `generateClips()` stops polling on `failed` or `cancelled`.<br>9. `cancelClipGeneration()` posts cancellation. |
-| **`app/page.tsx` (Dashboard)** | `app/__tests__/dashboard.test.tsx` | P0 | 10. Renders YouTube URL input and download button.<br>11. Disables download button while downloading or processing.<br>12. Validates video files on drag-and-drop.<br>13. Accepts `.mkv`/`.webm` files with empty MIME types.<br>14. Displays upload and transcription progress bars.<br>15. Transitions progress steps ("Uploading" -> "Loading model" -> "Transcribing" -> "Clips ready").<br>16. Navigates to project upon completion. |
-| **`app/clips/page.tsx`** | `app/clips/__tests__/clips.test.tsx` | P0 | 17. Displays empty state when no project selected.<br>18. Loads and renders clips for valid project ID.<br>19. ClipCard renders HTML5 video element with correct src.<br>20. Volume slider adjusts video volume.<br>21. Mute/unmute toggle changes audio state.<br>22. "Download clip" invokes native Windows Save As dialog picker; handles user cancel cleanly without unwanted file downloads.<br>23. "Download all" triggers ZIP download with Save As dialog.<br>24. Shows generation progress banner when job is running.<br>25. Cancel button prompts user confirmation before cancelling. |
-| **`app/projects/page.tsx`** | `app/projects/__tests__/projects.test.tsx` | P0 | 26. Renders list of projects with source type and clip count.<br>27. Delete project prompts confirmation.<br>28. Successful deletion removes project from list.<br>29. "Generate Clips" triggers clip generation for selected project.<br>30. Displays inline transcription progress bar for transcribing project.<br>31. Displays inline clip generation progress bar with clip counter. |
-| **`app/settings/page.tsx`** | `app/settings/__tests__/settings.test.tsx` | P1 | 32. Persists changes to local storage or backend API.<br>33. Form controls reflect loaded preferences.<br>34. Form validation for project directory path. |
-| **`app/job-progress.tsx`** | `app/__tests__/job-progress.test.tsx` | P1 | 35. Renders nothing when no active jobs.<br>36. Shows animated spinner and badge count when jobs are running.<br>37. Hover/focus expands flyout showing progress for all active jobs.<br>38. Displays connection error if backend is unreachable. |
+| **`app/page.tsx` (Dashboard)** | `app/__tests__/dashboard.test.tsx` | P0 | 10. Renders YouTube URL input and download button.<br>11. Disables download button while downloading or processing.<br>12. Validates video files on drag-and-drop and probes duration (`getFileDuration`).<br>13. Accepts `.mkv`/`.webm` files with empty MIME types.<br>14. Displays upload and transcription progress bars.<br>15. Transitions progress steps ("Uploading" -> "Loading model" -> "Transcribing" -> "Clips ready").<br>16. Navigates to project upon completion. |
+| **`app/clips/page.tsx`** | `app/clips/__tests__/clips.test.tsx` | P0 | 17. Displays empty state when no project selected.<br>18. Loads and renders clips for valid project ID.<br>19. ClipCard renders HTML5 video element with correct src.<br>20. Volume slider adjusts video volume and syncs to `ClipModalViewer`.<br>21. Mute/unmute toggle changes audio state.<br>22. "Download clip" invokes native Windows Save As dialog picker; handles user cancel cleanly without unwanted file downloads.<br>23. "Download all" triggers ZIP download with Save As dialog.<br>24. Shows generation progress banner when job is running.<br>25. Cancel button prompts user confirmation before cancelling.<br>26. Exclusive playback: playing Clip B pauses Clip A immediately and resets its button to Play; opening `ClipModalViewer` pauses active card (`docs/reports/playback-bug.md`).<br>27. Hydrates `appliedSettings` and `showWatermark` from project `generation_options` (`docs/reports/settings-mismatch.md`). |
+| **`app/projects/page.tsx`** | `app/projects/__tests__/projects.test.tsx` | P0 | 28. Renders list of projects with source type and clip count.<br>29. Delete project prompts confirmation.<br>30. Successful deletion removes project from list.<br>31. "Generate Clips" triggers clip generation for selected project.<br>32. Displays inline transcription progress bar for transcribing project.<br>33. Displays inline clip generation progress bar with clip counter. |
+| **`app/settings/page.tsx`** | `app/settings/__tests__/settings.test.tsx` | P1 | 34. Persists changes to local storage and synchronizes `defaultCaptionStyle` with Dashboard and Clips Studio.<br>35. Form controls reflect loaded preferences.<br>36. Form validation for project directory path. |
+| **`app/job-progress.tsx`** | `app/__tests__/job-progress.test.tsx` | P1 | 37. Renders nothing when no active jobs.<br>38. Shows animated spinner and badge count when jobs are running.<br>39. Hover/focus expands flyout showing progress for all active jobs.<br>40. Displays connection error if backend is unreachable. |
 
 ---
 
@@ -611,33 +664,33 @@ projects/
 - **Variable Frame Rate (VFR)**: Phone recordings (iPhone/Android) frequently use VFR. Slicing with FFmpeg `-ss` before `-i` causes audio/video desynchronization over time; requires `-vsync cfr` / `fps` filter normalization.
 - **HDR & 10-Bit Color**: 10-bit HEVC/HDR footage scaled with basic `format=yuv420p` renders washed-out colors without tonemapping filters (`zscale` / `tonemap`).
 - **Unusual Aspect Ratios**: Ultra-wide 21:9 or vertical 9:16 inputs padded to 720x1280 vertical can result in extreme letterboxing or unintended black bar padding.
-- **Rotated Videos**: Mobile videos with EXIF rotation metadata (`displaymatrix`) can lose rotation metadata during FFmpeg cutting, resulting in sideways video output; requires `-noautorotate` or explicit rotation filter transposition.
+- **Rotated Videos**: Mobile videos with EXIF rotation metadata (`displaymatrix` / `side_data_list.rotation`) are handled in `smart_framing.py` (Item 31), though standard/square modes still rely on FFmpeg default autorotation.
 - **Corrupted Keyframes / Missing MOOV Atom**: Incomplete MP4s without faststart MOOV atom at the beginning fail seeking during slicing.
 
 ### 2. Subtitle & Typography Edge Cases
 - **Punctuation & Word Wrap**: Long words (e.g. URLs or hyphenated technical terms) can exceed `max_width=640`, overflowing past the edge of the 720px video container.
-- **Word Timestamps with Zero Duration**: Whisper occasionally yields `word.start == word.end`, creating divide-by-zero or zero-duration highlight filters.
-- **RTL Languages (Arabic / Hebrew / Persian)**: Standard FFmpeg `drawtext` does not implement HarfBuzz bidirectional text shaping, rendering Arabic characters detached and reversed.
-- **Special Characters in Subtitles**: Subtitles, animated word highlights, and top lines are written to dedicated text files inside the temporary working directory and rendered with `drawtext=textfile='...':expansion=none`, safely preserving quotes (`'`), percent signs (`%`), colons (`:`), and backslashes (`\`) without FFmpeg syntax corruption (verified in `test_clip_generator.py`).
-- **Font Availability**: `_copy_font_file()` dynamically inspects multiple system font candidates (`segoeuib.ttf`, `arialbd.ttf`, `segoeui.ttf`, `arial.ttf`) and copies the resolved font to the local staging directory to ensure font availability across Windows N-editions and custom drives (Item 10).
+- **Word Timestamps with Zero Duration**: Whisper occasionally yields `word.start == word.end`, enforced to a minimum `80ms` duration in `ass_captions.py:140` and `video_editor.py:403`.
+- **RTL Languages (Arabic / Hebrew / Persian / Urdu)**: Standard FFmpeg `drawtext` does not implement HarfBuzz bidirectional text shaping, rendering Arabic/Urdu characters detached and reversed (whereas `libass` in the ASS pipeline supports RTL shaping when `NotoSansArabic-Bold.ttf` is resolved via `caption_styles.py:207`).
+- **Special Characters in Subtitles**: Subtitles, animated word highlights, and top lines are written to dedicated text files inside the temporary working directory and rendered with `drawtext=textfile='...':expansion=none` or `escape_ass_text()`, safely preserving quotes (`'`), percent signs (`%`), colons (`:`), braces (`{}`), and backslashes (`\`) without FFmpeg syntax corruption (verified in `test_clip_generator.py` and `test_ass_captions.py`).
+- **Font Availability**: `_copy_font_file()` dynamically inspects multiple system font candidates (`segoeuib.ttf`, `arialbd.ttf`, `segoeui.ttf`, `arial.ttf`) for `drawtext`, while `stage_caption_fonts()` stages bundled OFL fonts (`Montserrat`, `Anton`, `Poppins`) into `subtitle_directory / "fonts"` for `libass`.
 
 ### 3. Network & External API Edge Cases
 - **YouTube Anti-Bot & SABR Blocks**: YouTube aggressively blocks datacenter IPs and outdated `yt-dlp` instances with HTTP 403 or bot challenges (po-token requirements).
 - **YouTube Live Streams & Premieres**: Passing an active live stream URL causes `yt-dlp` to hang indefinitely waiting for the stream to end.
-- **Age-Gated & Private Videos**: YouTube downloads fail with unhandled 502 without informative error guidance.
+- **Age-Gated & Private Videos**: Handled with user-friendly fallback guidance to upload a local video file (`backend/app/routes/download.py:59-62`).
 - **LLM Rate Limits (HTTP 429)**: No exponential backoff or retry logic exists when cloud providers throttle API requests.
 - **Massive Transcripts Exceeding Token Limits**: A 3-hour podcast transcript exceeds LLM context windows or cost ceilings when dumped unchunked into a single prompt.
 
 ### 4. Concurrency, Storage & Windows Filesystem Edge Cases
 - **Windows Path Limits (`MAX_PATH`)**: Deeply nested directories (`%APPDATA%/.../cliprobin-subtitles-...`) can exceed 260 characters on Windows systems without LongPathsEnabled.
 - **Disk Space Exhaustion**: Generating multiple 60-second clips from a 4K 10GB video can easily fill the user's C: drive; no pre-flight disk space check exists.
-- **Concurrent Generation Conflict**: Concurrent generation runs for the same project are rejected at the route layer with HTTP 409 Conflict. In addition, single-clip top-line re-renders write atomically to `analysis.json` to guard against metadata race conditions.
+- **Concurrent Generation Conflict**: Concurrent generation runs for the same project are rejected at the route layer with HTTP 409 Conflict. In addition, single-clip top-line re-renders write to `analysis.json`.
 - **Project Number Overflow / Gaps**: Deleting `project_002` leaves a gap; `create_project()` uses linear probing from 1 upwards, causing $O(N)$ filesystem checks as projects grow.
 
 ### 5. Client Lifecycle & Network Resilience
-- **Offline Startup**: If launched with no internet connection, the app should function 100% locally for local videos, but update check errors and missing model downloads must fail gracefully.
+- **Offline Startup**: If launched with no internet connection, the app functions 100% locally for local videos, and update check errors fail gracefully.
 - **Orphan Backend Process**: Desktop builds allocate dynamic ephemeral loopback ports (`127.0.0.1:0`) passed via `CLIPROBIN_API_PORT`, eliminating fixed port 8000 collisions. On app exit, Tauri's exit handler sends `child.kill()` to cleanly terminate the backend process.
-- **Client Disconnection During Generation**: Navigating between pages should not cancel background tasks; polling must resume seamlessly.
+- **Client Disconnection During Generation**: Navigating between pages does not cancel background tasks; polling resumes seamlessly.
 
 ---
 

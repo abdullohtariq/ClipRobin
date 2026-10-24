@@ -381,8 +381,10 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
     clips_directory = get_clips_directory(project_id)
     analysis_path = project_directory / "analysis.json"
     analysis_clips = {}
+    generation_options: dict[str, Any] = {}
     framing_mode = "standard"
     caption_style = "classic"
+    caption_animation = None
     if analysis_path.is_file():
         try:
             analysis_data = json.loads(analysis_path.read_text(encoding="utf-8"))
@@ -421,7 +423,11 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
         except Exception:
             source_duration = 0.0
 
-    return {"clips": clips, "source_duration": round(source_duration, 2)}
+    return {
+        "clips": clips,
+        "source_duration": round(source_duration, 2),
+        "generation_options": generation_options,
+    }
 
 
 @router.post("/{project_id}/clips/{clip_id}/top-line")

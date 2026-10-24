@@ -979,6 +979,153 @@ def test_youtube_download_failure_message(tmp_path: Path, monkeypatch: pytest.Mo
     assert "local video file" in job["error"].lower()
 
 
+def test_build_subtitle_filters_all_six_styles(tmp_path: Path):
+    from app.services.video_editor import _build_subtitle_filters
+
+    segments = [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "text": "Hello world",
+            "words": [
+                {"start": 0.0, "end": 1.0, "text": "Hello"},
+                {"start": 1.0, "end": 2.0, "text": "world"},
+            ],
+        }
+    ]
+
+    robin_dir = tmp_path / "robin"
+    robin_dir.mkdir()
+    robin_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=robin_dir, caption_style="robin"
+    )
+    assert any("fontcolor=0x34d399" in f for f in robin_filters)
+    assert not any("box=1" in f for f in robin_filters)
+    assert (robin_dir / "subtitle-0.txt").read_text(encoding="utf-8") == "HELLO WORLD"
+
+    punch_dir = tmp_path / "punch"
+    punch_dir.mkdir()
+    punch_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=punch_dir, caption_style="punch"
+    )
+    assert any("fontcolor=0xf7c204" in f for f in punch_filters)
+    assert not any("box=1" in f for f in punch_filters)
+    assert (punch_dir / "subtitle-0.txt").read_text(encoding="utf-8") == "HELLO WORLD"
+
+    clean_dir = tmp_path / "clean"
+    clean_dir.mkdir()
+    clean_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=clean_dir, caption_style="clean"
+    )
+    assert any("fontcolor=white" in f for f in clean_filters)
+    assert any("fontcolor=0xcccccc" in f for f in clean_filters)
+    assert not any("box=1" in f for f in clean_filters)
+
+    pill_dir = tmp_path / "pill"
+    pill_dir.mkdir()
+    pill_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=pill_dir, caption_style="pill"
+    )
+    assert any("fontcolor=0x34d399" in f for f in pill_filters)
+    assert any("box=1:boxcolor=black@0.65" in f for f in pill_filters)
+
+    karaoke_dir = tmp_path / "karaoke"
+    karaoke_dir.mkdir()
+    karaoke_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=karaoke_dir, caption_style="karaoke"
+    )
+    assert any("fontcolor=0x34d399" in f for f in karaoke_filters)
+    assert any("fontcolor=0x999999" in f for f in karaoke_filters)
+    assert not any("box=1" in f for f in karaoke_filters)
+
+
+def test_render_single_clip_respects_saved_watermark_false_when_not_overridden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Clip 1", "start": 0.0, "end": 10.0, "reason": "Test"}
+            ],
+            "generation_options": {
+                "show_subtitles": True,
+                "show_watermark": False,
+                "framing_mode": "standard",
+                "caption_style": "robin",
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def mock_create_clip(source_path, output_path, start_time, end_time, **kwargs):
+        captured.update(kwargs)
+        output_path.write_bytes(b"single clip without watermark")
+
+    monkeypatch.setattr("app.services.clip_generator.create_clip", mock_create_clip)
+
+    result = render_single_clip(
+        tmp_path,
+        "clip_001",
+        top_line="POV: Watermark stays off",
+    )
+    assert result["top_line"] == "POV: Watermark stays off"
+    assert captured.get("show_watermark") is False
+
+
+def test_generate_clips_reanalyzes_when_duration_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    (tmp_path / "source.mp4").write_bytes(b"mock video")
+    (tmp_path / "transcript.json").write_text(
+        json.dumps({
+            "segments": [
+                {"start": 0.0, "end": 30.0, "text": "First thirty seconds"},
+                {"start": 30.0, "end": 60.0, "text": "Second thirty seconds"},
+            ]
+        }),
+        encoding="utf-8",
+    )
+    analysis_file = tmp_path / "analysis.json"
+    analysis_file.write_text(
+        json.dumps({
+            "clips": [
+                {"id": "clip_001", "title": "Old 30s Clip", "start": 0.0, "end": 30.0}
+            ],
+            "generation_options": {
+                "clip_duration_seconds": 30,
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    reanalyzed = {"called": False, "max_clip_seconds": None}
+
+    def mock_create_analysis(proj_dir, max_clip_seconds=30.0, max_clips=None):
+        reanalyzed["called"] = True
+        reanalyzed["max_clip_seconds"] = max_clip_seconds
+        return {
+            "clips": [
+                {"id": "clip_001", "title": "New 15s Clip", "start": 0.0, "end": 15.0}
+            ]
+        }
+
+    monkeypatch.setattr("app.services.clip_generator.create_mock_analysis", mock_create_analysis)
+    monkeypatch.setattr(
+        "app.services.clip_generator.create_clip",
+        lambda src, out, s, e, **kw: out.write_bytes(b"rendered"),
+    )
+
+    results = generate_clips(tmp_path, max_clip_seconds=15)
+    assert reanalyzed["called"] is True
+    assert reanalyzed["max_clip_seconds"] == 15
+    assert results[0]["duration"] == 15.0
+
+
+
 
 
 
