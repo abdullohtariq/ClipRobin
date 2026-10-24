@@ -16,7 +16,7 @@ import {
   FramingMode,
   CaptionStyle,
 } from "@/src/lib/api";
-import { RecentProjectSkeletonItem, DashboardProjectSkeleton } from "@/src/components/skeletons";
+import { DashboardProjectSkeleton } from "@/src/components/skeletons";
 import {
   CAPTION_STYLE_OPTIONS,
 } from "@/src/components/caption-style-picker";
@@ -1375,7 +1375,11 @@ export default function Home() {
 
                   {/* Live Moving Captions Overlay */}
                   {showCaptions && (
-                    <div className="absolute bottom-6 inset-x-2 z-20 text-center pointer-events-none">
+                    <div
+                      className={`absolute inset-x-2 z-20 text-center pointer-events-none transition-all duration-200 ${
+                        framingMode === "square_rounded" ? "bottom-[18%]" : "bottom-[26.5%]"
+                      }`}
+                    >
                       <LiveMovingCaptions captionStyle={captionStyle} />
                     </div>
                   )}

@@ -257,6 +257,11 @@ def generate_ass_subtitles(
     outline_ass = hex_to_ass_color("#000000", alpha_fraction=0.0)
     back_ass = hex_to_ass_color("#000000", alpha_fraction=1.0 - style_def.box_opacity if style_def.border_style == 3 else 0.5)
 
+    is_karaoke = (style_def.id == "karaoke") or (anim_id == "sweep")
+    # For Karaoke: PrimaryColour in ASS is the color AFTER sweep (accent_ass), SecondaryColour is BEFORE sweep (primary_ass)
+    style_primary = accent_ass if is_karaoke else primary_ass
+    style_secondary = primary_ass if is_karaoke else secondary_ass
+
     # Header and V4+ Styles definition (font size 52 for high visibility with 2 words per line)
     font_size = 52
     border_style = style_def.border_style
@@ -326,7 +331,7 @@ def generate_ass_subtitles(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{font_family},{font_size},{primary_ass},{secondary_ass},{outline_ass},{back_ass},"
+        f"Style: Default,{font_family},{font_size},{style_primary},{style_secondary},{outline_ass},{back_ass},"
         f"-1,0,0,0,100,100,0,0,{border_style},{outline_w},{shadow_d},2,24,24,{margin_v},1\n"
         f"{top_line_style_def}"
         "\n"
@@ -373,8 +378,8 @@ def generate_ass_subtitles(
             t = raw_t.upper() if style_def.text_case == "upper" else raw_t
             formatted_chunk.append({**w, "text": escape_ass_text(t)})
 
-        if style_def.id == "karaoke" or anim_id == "sweep":
-            # Karaoke sweep (\kf tag) across the 2-word phrase
+        if is_karaoke:
+            # Karaoke sweep (\kf tag) smoothly sweeping from white (\2c) to emerald highlight (\1c)
             phrase_parts = []
             for w in formatted_chunk:
                 w_duration_cs = max(8, int(round((w["end"] - w["start"]) * 100)))
@@ -383,10 +388,10 @@ def generate_ass_subtitles(
             start_str = format_ass_time(chunk_start)
             end_str = format_ass_time(chunk_end)
             events.append(
-                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{{{pos_tag}}}{phrase_text}"
+                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{{{pos_tag}\\1c{style_primary}\\2c{style_secondary}}}{phrase_text}"
             )
         else:
-            # Clean word-by-word active highlight without distracting animation effects (pop/grow/fade/glide bouncing)
+            # Animated word-by-word active highlight matching the lively preview
             for active_idx, active_word in enumerate(formatted_chunk):
                 w_start = active_word["start"]
                 if active_idx == 0:
@@ -403,9 +408,19 @@ def generate_ass_subtitles(
                 line_parts = []
                 for idx, w in enumerate(formatted_chunk):
                     if idx == active_idx:
-                        line_parts.append(f"{{\\1c{accent_ass}}}{w['text']}{{\\1c{primary_ass}}}")
+                        if anim_id == "grow":
+                            anim_tag = f"\\1c{accent_ass}\\fscx100\\fscy100\\t(0,100,\\fscx115\\fscy115)\\t(100,220,\\fscx106\\fscy106)"
+                        elif anim_id == "pop":
+                            anim_tag = f"\\1c{accent_ass}\\fscx116\\fscy116\\t(0,120,\\fscx106\\fscy106)"
+                        elif anim_id == "fade":
+                            anim_tag = f"\\1c{primary_ass}\\fscx105\\fscy105"
+                        elif anim_id == "glide":
+                            anim_tag = f"\\1c{accent_ass}\\fscx108\\fscy108"
+                        else:
+                            anim_tag = f"\\1c{accent_ass}\\fscx112\\fscy112"
+                        line_parts.append(f"{{{anim_tag}}}{w['text']}{{\\1c{primary_ass}\\fscx100\\fscy100}}")
                     else:
-                        line_parts.append(f"{{\\1c{secondary_ass}}}{w['text']}")
+                        line_parts.append(f"{{\\1c{secondary_ass}\\fscx100\\fscy100}}{w['text']}")
 
                 line_text = " ".join(line_parts)
                 start_str = format_ass_time(w_start)

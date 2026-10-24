@@ -170,3 +170,31 @@ def test_stage_caption_fonts(tmp_path: Path):
     assert (fonts_dir / "Anton-Regular.ttf").is_file()
     assert (fonts_dir / "Poppins-Bold.ttf").is_file()
 
+
+
+def test_karaoke_colors_and_animations():
+    segments = [
+        {
+            "start": 0.0,
+            "end": 2.0,
+            "words": [
+                {"start": 0.0, "end": 1.0, "text": "karaoke"},
+                {"start": 1.0, "end": 2.0, "text": "test"},
+            ],
+        }
+    ]
+    # Karaoke sweep must have accent color (&H0099D334& for emerald) as primary and white (&H00FFFFFF&) as secondary
+    ass_karaoke = generate_ass_subtitles(segments, 0.0, 2.0, style="karaoke")
+    assert r"\kf" in ass_karaoke
+    assert r"\1c&H0099D334&" in ass_karaoke
+    assert r"\2c&H00FFFFFF&" in ass_karaoke
+
+    # Robin style must have grow animation scale transform
+    ass_robin = generate_ass_subtitles(segments, 0.0, 2.0, style="robin")
+    assert r"\fscx115" in ass_robin
+    assert r"\1c&H0099D334&" in ass_robin
+
+    # Punch style must have pop animation scale transform
+    ass_punch = generate_ass_subtitles(segments, 0.0, 2.0, style="punch")
+    assert r"\fscx116" in ass_punch
+    assert r"\1c&H0004C2F7&" in ass_punch

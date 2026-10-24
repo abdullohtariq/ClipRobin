@@ -41,7 +41,7 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
   return (
     <div className="flex items-center justify-center select-none pointer-events-none transition-all duration-150">
       {captionStyle === "classic" && (
-        <div className="inline-block px-2.5 py-1 rounded bg-black/85 border border-black text-[11px] font-bold text-white shadow-lg">
+        <div className="inline-block px-3 py-1.5 rounded bg-black/85 border border-black text-[14px] font-bold text-white shadow-lg">
           {chunk.words.map((word, i) => {
             const isWordActive = chunk.baseIndex + i === currentStep;
             return (
@@ -59,7 +59,7 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
       )}
 
       {captionStyle === "robin" && (
-        <div className="inline-flex items-center justify-center px-1 text-[11px] font-black uppercase tracking-wide">
+        <div className="inline-flex items-center justify-center px-1 text-[15px] font-black uppercase tracking-wide">
           {chunk.words.map((word, i) => {
             const isWordActive = chunk.baseIndex + i === currentStep;
             return (
@@ -77,7 +77,7 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
       )}
 
       {captionStyle === "punch" && (
-        <div className="inline-flex items-center justify-center px-1 text-[12px] font-extrabold uppercase tracking-tight">
+        <div className="inline-flex items-center justify-center px-1 text-[16px] font-extrabold uppercase tracking-tight">
           {chunk.words.map((word, i) => {
             const isWordActive = chunk.baseIndex + i === currentStep;
             return (
@@ -95,7 +95,7 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
       )}
 
       {captionStyle === "pill" && (
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/85 border border-white/15 text-[10.5px] font-semibold text-white shadow-lg">
+        <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/85 border border-white/15 text-[14px] font-semibold text-white shadow-lg">
           {chunk.words.map((word, i) => {
             const isWordActive = chunk.baseIndex + i === currentStep;
             return (
@@ -113,14 +113,14 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
       )}
 
       {captionStyle === "clean" && (
-        <div className="inline-flex items-center justify-center px-1 text-[11px] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
+        <div className="inline-flex items-center justify-center px-1 text-[15px] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
           {chunk.words.map((word, i) => {
             const isWordActive = chunk.baseIndex + i === currentStep;
             return (
               <span
                 key={i}
                 className={`inline-block mx-1 transition-all duration-150 ${
-                  isWordActive ? "text-white scale-105" : "text-zinc-300"
+                  isWordActive ? "text-white scale-105" : "text-zinc-400"
                 }`}
               >
                 {word}
@@ -131,16 +131,22 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
       )}
 
       {captionStyle === "karaoke" && (
-        <div className="inline-flex items-center justify-center px-1 text-[11px] font-bold drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
+        <div className="inline-flex items-center justify-center px-1 text-[15px] font-bold drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
           {chunk.words.map((word, i) => {
-            const isWordActive = chunk.baseIndex + i === currentStep;
+            const wordGlobalIndex = chunk.baseIndex + i;
+            const isWordPassed = wordGlobalIndex < currentStep;
+            const isWordCurrent = wordGlobalIndex === currentStep;
+            const isWordSung = isWordPassed || isWordCurrent;
+
             return (
               <span
                 key={i}
-                className={`inline-block mx-1 transition-all duration-150 ${
-                  isWordActive
-                    ? "text-[#34D399] underline decoration-[#34D399]/70 underline-offset-4"
-                    : "text-white"
+                className={`inline-block mx-1 transition-all duration-200 ${
+                  isWordCurrent
+                    ? "text-[#34D399] underline decoration-[#34D399] underline-offset-4 scale-105 font-extrabold"
+                    : isWordSung
+                    ? "text-[#34D399] font-bold"
+                    : "text-white/90"
                 }`}
               >
                 {word}
@@ -152,4 +158,3 @@ export function LiveMovingCaptions({ captionStyle }: LiveMovingCaptionsProps) {
     </div>
   );
 }
-

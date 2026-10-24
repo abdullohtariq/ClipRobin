@@ -456,7 +456,7 @@ export default function Projects() {
                               <div className="flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-2 transition-all duration-150 hover:border-zinc-700">
                                 <div className="flex items-center gap-2.5 min-w-0">
                                   <div className="relative aspect-[9/16] w-6 h-10 shrink-0 overflow-hidden rounded border border-[#232326] bg-black">
-                                    /* eslint-disable-next-line @next/next/no-img-element */
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
                                       src={previewUrls.posterUrl}
                                       alt={`${activeStyleOption.name} caption preview`}
