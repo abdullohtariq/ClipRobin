@@ -63,9 +63,18 @@ def test_get_auth_url(temp_youtube_service: YouTubeService):
     temp_youtube_service.save_config("test-client-id", "test-secret")
     url = temp_youtube_service.get_auth_url("http://127.0.0.1:8000/api/youtube/oauth/callback")
     assert "https://accounts.google.com/o/oauth2/v2/auth" in url
-    assert "client_id=test-client-id" in url
-    assert "youtube.upload" in url
-    assert "access_type=offline" in url
+    assert "client_id=client_id=" not in url
+    assert "redirect_uri=redirect_uri=" not in url
+    
+    import urllib.parse
+    parsed = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(parsed.query)
+    assert qs["client_id"] == ["test-client-id"]
+    assert qs["redirect_uri"] == ["http://127.0.0.1:8000/api/youtube/oauth/callback"]
+    assert qs["response_type"] == ["code"]
+    assert "youtube.upload" in qs["scope"][0]
+    assert qs["access_type"] == ["offline"]
+    assert qs["prompt"] == ["consent"]
 
 
 def test_exchange_code(temp_youtube_service: YouTubeService):

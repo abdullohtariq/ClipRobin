@@ -184,8 +184,7 @@ class YouTubeService:
             "prompt": "consent",
             "state": state,
         }
-        query = "&".join(f"{k}={httpx.URL('', params={k: v}).query.decode()}" for k, v in params.items())
-        return f"{AUTH_URL_ENDPOINT}?{query}"
+        return str(httpx.URL(AUTH_URL_ENDPOINT, params=params))
 
     def exchange_code(self, code: str, redirect_uri: str) -> dict[str, Any]:
         config = self.get_config()
@@ -434,3 +433,4 @@ class YouTubeService:
 
 # Singleton service instance
 default_youtube_service = YouTubeService()
+

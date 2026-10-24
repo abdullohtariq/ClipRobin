@@ -500,7 +500,7 @@ export function YouTubeUploadModal({
                 <p className="text-xs text-rose-400">{statusError}</p>
               )}
 
-              <div>
+              <div className="space-y-3">
                 <button
                   type="button"
                   disabled={isConnecting}
@@ -527,6 +527,34 @@ export function YouTubeUploadModal({
                   </svg>
                   <span>{isConnecting ? "Waiting for authorization..." : "Sign in with Google"}</span>
                 </button>
+
+                {isConnecting && (
+                  <div className="pt-1 flex flex-col items-center gap-1 text-xs">
+                    <p className="text-zinc-400">Complete authorization in the Google sign-in window.</p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleConnect}
+                        className="text-emerald-400 hover:underline font-medium"
+                      >
+                        Reopen window
+                      </button>
+                      <span className="text-zinc-600">•</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsConnecting(false)}
+                        className="text-zinc-400 hover:text-zinc-200 underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-3 rounded-xl border border-zinc-800 bg-[#0d0d10] text-left text-xs text-zinc-400 max-w-md mx-auto space-y-1">
+                <span className="font-semibold text-zinc-300">Google Consent Screen Note:</span>
+                <p>If your OAuth app is in <strong>Testing</strong> mode in Google Cloud Console, ensure your Google email is added under <strong>OAuth consent screen &rarr; Test users</strong>.</p>
               </div>
 
               <div className="pt-2">

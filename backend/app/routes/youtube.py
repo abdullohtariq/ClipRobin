@@ -294,3 +294,4 @@ def upload_clip_to_youtube(payload: YouTubeUploadPayload) -> dict[str, Any]:
     except Exception as e:
         logger.exception(f"Unexpected error during YouTube upload for clip {payload.clip_id}")
         raise HTTPException(status_code=500, detail=str(e))
+
