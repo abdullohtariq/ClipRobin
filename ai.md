@@ -1,6 +1,6 @@
 # Clip Robin — AI Context, Codebase Audit & Engineering Handbook
 
-> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.21**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
+> **Notice for AI Models & Developers**: This document provides an exhaustive, authoritative reference for the Clip Robin codebase (Current Version: **v0.1.22**). It details the system architecture, component contracts, bug resolution tracking, automated test suite inventory, and edge-case handling across both backend and frontend.
 >
 > **Do NOT delete or overwrite this file.** Maintain and update this context as the project evolves.
 
@@ -268,7 +268,7 @@ projects/
 
 ## 5. Codebase Bugs, Vulnerabilities & Implementation Status
 
-> **Audit Status as of v0.1.21**: All 32 historical feature & hardening items are implemented and verified across a **129-test backend `pytest` suite** (17 test files) and **2-test frontend version sync suite**. See the **Known Issues & Active Audit Reports (v0.1.21)** section at the end of Section 5 for newly audited UI responsiveness, settings persistence, and video playback findings.
+> **Audit Status as of v0.1.21**: All 32 historical feature & hardening items are implemented and verified across a **129-test backend `pytest` suite** (17 test files) and **2-test frontend version sync suite**. See the **Known Issues & Active Audit Reports (v0.1.22)** section at the end of Section 5 for newly audited UI responsiveness, settings persistence, and video playback findings.
 
 ### 🔴 Critical Severity (Showstoppers)
 
