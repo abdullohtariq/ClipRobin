@@ -6,6 +6,7 @@ import JobProgress from "./job-progress";
 import SidebarNav from "./sidebar-nav";
 import WindowInit from "./window-init";
 import "./globals.css";
+import { QueueProvider } from "@/src/lib/queue-context";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -59,7 +60,9 @@ export default function RootLayout({
           <div className="flex-1 h-full md:h-screen overflow-y-auto bg-[#0a0a0a] min-w-0">
             <WindowInit />
             <UpdateNotice />
-            {children}
+            <QueueProvider>
+              {children}
+            </QueueProvider>
           </div>
         </div>
         <JobProgress />

@@ -116,6 +116,7 @@ export type DownloadJob = {
 
 export type Project = {
   project_id: string;
+  title?: string;
   created_at: string;
   source_type: string;
   clips: number;
@@ -440,6 +441,23 @@ export async function deleteProject(projectId: string): Promise<void> {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Could not delete project"));
   }
+}
+
+export async function updateProjectTitle(
+  projectId: string,
+  title: string
+): Promise<{ project_id: string; title: string }> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Could not update project title"));
+  }
+  return response.json();
 }
 
 export async function clipUrl(projectId: string, filename: string): Promise<string> {

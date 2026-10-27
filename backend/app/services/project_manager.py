@@ -56,8 +56,18 @@ def list_projects() -> list[dict[str, Any]]:
             continue
         source_files = list(directory.glob("source.*"))
         clips = list((directory / "clips").glob("*.mp4")) if (directory / "clips").is_dir() else []
+        meta_file = directory / "metadata.json"
+        title = None
+        if meta_file.is_file():
+            try:
+                import json
+                with open(meta_file, "r", encoding="utf-8") as f:
+                    title = json.load(f).get("title")
+            except Exception:
+                pass
         projects.append({
             "project_id": directory.name,
+            "title": title or directory.name,
             "created_at": datetime.fromtimestamp(
                 directory.stat().st_ctime, tz=timezone.utc
             ).isoformat(),

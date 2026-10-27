@@ -77,3 +77,33 @@ def delete_project(project_id: str) -> Response:
     _cancel_active_jobs(project_id)
     _safe_rmtree(project_directory)
     return Response(status_code=204)
+
+
+from pydantic import BaseModel
+import json
+
+class UpdateProjectPayload(BaseModel):
+    title: str
+
+
+@router.patch("/{project_id}")
+def update_project(project_id: str, payload: UpdateProjectPayload) -> dict[str, Any]:
+    try:
+        project_directory = get_project_directory(project_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+    meta_file = project_directory / "metadata.json"
+    meta = {}
+    if meta_file.is_file():
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            pass
+    meta["title"] = payload.title.strip()
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2)
+    return {"project_id": project_id, "title": payload.title.strip()}

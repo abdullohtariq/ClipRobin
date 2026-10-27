@@ -34,6 +34,7 @@ export interface ClipSettingsProps {
   onShowWatermarkChange: (show: boolean) => void;
   aiModeEnabled: boolean;
   aiModeDisabledReason?: string | null;
+  hideFraming?: boolean;
   disabled?: boolean;
   className?: string;
 }
@@ -57,6 +58,7 @@ export function ClipSettings({
   onShowWatermarkChange,
   aiModeEnabled,
   aiModeDisabledReason,
+  hideFraming = false,
   disabled = false,
   className = "",
 }: ClipSettingsProps) {
@@ -170,7 +172,8 @@ export function ClipSettings({
       </div>
 
       {/* 2. Video Layout & Framing in 9:16 Canvas */}
-      <div className="space-y-2.5">
+      {!hideFraming && (
+        <div className="space-y-2.5">
         <div className="flex items-center justify-between">
           <div>
             <label className="block text-[13px] font-semibold text-zinc-200">
@@ -238,6 +241,7 @@ export function ClipSettings({
           />
         </div>
       </div>
+      )}
 
       {/* 3. Secondary Section: Captions & Branding (Collapsible) */}
       <div className="rounded-xl border border-zinc-800 bg-[#121215] overflow-hidden transition-all duration-200">

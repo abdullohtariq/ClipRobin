@@ -1,48 +1,43 @@
 "use client";
 
-import React, { ChangeEvent, DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  ChangeEvent,
+  DragEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import {
-  downloadVideo,
-  generateClips,
-  getActiveJobs,
-  getLatestClipGenerationJob,
-  getLocalTranscriptionJob,
   getProjects,
-  transcribeLocalVideo,
-  transcribeVideo,
-  Clip,
   Project,
   FramingMode,
   CaptionStyle,
 } from "@/src/lib/api";
 import { DashboardProjectSkeleton } from "@/src/components/skeletons";
-import {
-  CAPTION_STYLE_OPTIONS,
-} from "@/src/components/caption-style-picker";
+import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
 import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
 import { LiveMovingCaptions } from "@/src/components/live-moving-captions";
 import { Badge } from "@/src/components/ui/badge";
 import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
+import { OptionCard } from "@/src/components/ui/option-card";
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
-
-type VideoProcessingProgress = {
-  kind: "transcription" | "generation" | "complete" | "failed";
-  step: string;
-  progress: number;
-  projectId?: string;
-};
+import { useVideoQueue, QueueSource } from "@/src/lib/queue-context";
+import { VideoQueueView } from "@/src/components/video-queue-view";
+import { sanitizeProjectName, validateProjectName } from "@/src/lib/project-name-utils";
 
 type ActiveVideo =
   | { kind: "file"; file: File; name: string; size: number }
-  | { kind: "downloaded"; projectId: string; fileName: string; name: string };
+  | { kind: "youtube"; url: string; name: string };
 
 const isValidYouTubeUrl = (url: string) => {
   const trimmed = url.trim();
   if (!trimmed) return false;
   return /^(https?:\/\/)?(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)[\w-]{11}(\S*)?$/i.test(
-    trimmed,
+    trimmed
   );
 };
 
@@ -77,25 +72,49 @@ const getFileDuration = (file: File): Promise<number | null> => {
 export default function Home() {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
   const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
-  const [youtubeUrl, setYoutubeUrl] = useState("");
-  const [importTab, setImportTab] = useState<"file" | "youtube">("file");
-  const [downloadStatus, setDownloadStatus] = useState("");
-  const [youtubeDownloadError, setYoutubeDownloadError] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<{
-    step: string;
-    progress: number;
-    title?: string;
-  } | null>(null);
+
+  // Global Video Queue
+  const {
+    queue,
+    queueCount,
+    maxQueueSize,
+    isAtLimit,
+    addToQueue,
+  } = useVideoQueue();
+
+  // Wizard Progressive Flow State
+  // Step 1 State: Source
   const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
+  const [importTab, setImportTab] = useState<"file" | "youtube">("file");
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [inlineSourceError, setInlineSourceError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [sourceDuration, setSourceDuration] = useState<number | null>(null);
+
+  // Step 2 State: Aspect Ratio
+  const [hasSelectedRatio, setHasSelectedRatio] = useState(false);
+  const [framingMode, setFramingMode] = useState<FramingMode>("standard");
+  const [compatibilityNotice, setCompatibilityNotice] = useState<string | null>(null);
+
+  // Step 3 State: Project Name & Remaining Options
+  const [projectName, setProjectName] = useState("");
+  const [projectNameError, setProjectNameError] = useState<string | null>(null);
+  const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
   const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
   const [clipCount, setClipCount] = useState<number>(3);
-  const [sourceDuration, setSourceDuration] = useState<number | null>(null);
-  const clipCountRef = useRef(clipCount);
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
+  const [showCaptions, setShowCaptions] = useState(true);
+  const [showWatermark, setShowWatermark] = useState(true);
 
-  useEffect(() => {
-    clipCountRef.current = clipCount;
-  }, [clipCount]);
+  // Recent Projects
+  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
 
+  // Video Preview URL
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Calculate dynamic max clips
   const maxClips = useMemo(() => {
     if (!sourceDuration || sourceDuration <= 0) return 10;
     return Math.max(1, Math.floor(sourceDuration / clipDurationSeconds));
@@ -106,61 +125,8 @@ export default function Home() {
       setClipCount(maxClips);
     }
   }, [maxClips, clipCount]);
-  const [generationMode, setGenerationMode] = useState<"random" | "ai">("random");
-  const [framingMode, setFramingMode] = useState<FramingMode>("standard");
-  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
-  const [showCaptions, setShowCaptions] = useState(true);
-  const [showWatermark, setShowWatermark] = useState(true);
-  const [transcriptionProgress, setTranscriptionProgress] =
-    useState<VideoProcessingProgress | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [recentProjects, setRecentProjects] = useState<Project[]>([]);
-  const [isLoadingProjects, setIsLoadingProjects] = useState(true);
-  const [generatedClips, setGeneratedClips] = useState<Clip[]>([]);
-  const [generatedProjectId, setGeneratedProjectId] = useState<string | null>(null);
-  const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const transcriptionProgressRef = useRef(transcriptionProgress);
-  const generatingProjectsRef = useRef<Set<string>>(new Set());
-  const clipDurationSecondsRef = useRef(clipDurationSeconds);
-  const generationModeRef = useRef(generationMode);
-  const showCaptionsRef = useRef(showCaptions);
-  const showWatermarkRef = useRef(showWatermark);
-  const framingModeRef = useRef(framingMode);
-  const captionStyleRef = useRef(captionStyle);
-
-  useEffect(() => {
-    transcriptionProgressRef.current = transcriptionProgress;
-  }, [transcriptionProgress]);
-  useEffect(() => {
-    clipDurationSecondsRef.current = clipDurationSeconds;
-  }, [clipDurationSeconds]);
-  useEffect(() => {
-    generationModeRef.current = generationMode;
-  }, [generationMode]);
-
-  useEffect(() => {
-    if (aiDeveloperStatus && !aiDeveloperStatus.ai_enabled && generationMode === "ai") {
-      setGenerationMode("random");
-      try { localStorage.setItem("cliprobin_generation_mode", "random"); } catch {}
-    }
-  }, [aiDeveloperStatus, generationMode]);
-  useEffect(() => {
-    showCaptionsRef.current = showCaptions;
-  }, [showCaptions]);
-  useEffect(() => {
-    showWatermarkRef.current = showWatermark;
-  }, [showWatermark]);
-  useEffect(() => {
-    framingModeRef.current = framingMode;
-  }, [framingMode]);
-  useEffect(() => {
-    captionStyleRef.current = captionStyle;
-  }, [captionStyle]);
-
-  // Manage video preview object URL
+  // Handle preview blob URL
   useEffect(() => {
     if (activeVideo?.kind === "file") {
       const url = URL.createObjectURL(activeVideo.file);
@@ -172,7 +138,7 @@ export default function Home() {
     setVideoPreviewUrl(null);
   }, [activeVideo]);
 
-  // Sync settings with localStorage on mount
+  // Load user preference defaults from localStorage
   useEffect(() => {
     try {
       const savedFraming = localStorage.getItem("cliprobin_framing_mode");
@@ -187,10 +153,6 @@ export default function Home() {
       if (savedCount && Number(savedCount) >= 1) {
         setClipCount(Number(savedCount));
       }
-      const savedMode = localStorage.getItem("cliprobin_generation_mode");
-      if (savedMode && ["random", "ai"].includes(savedMode)) {
-        setGenerationMode(savedMode as "random" | "ai");
-      }
       const savedSubs = localStorage.getItem("cliprobin_show_captions");
       if (savedSubs !== null) {
         setShowCaptions(savedSubs === "true");
@@ -203,78 +165,13 @@ export default function Home() {
       if (
         savedStyle &&
         ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(
-          savedStyle,
+          savedStyle
         )
       ) {
         setCaptionStyle(savedStyle as CaptionStyle);
-      } else {
-        const stored = localStorage.getItem("cliprobin.settings");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.defaultCaptionStyle) setCaptionStyle(parsed.defaultCaptionStyle);
-        }
       }
     } catch {}
   }, []);
-
-  const handleFramingModeChange = (mode: FramingMode) => {
-    setFramingMode(mode);
-    try {
-      localStorage.setItem("cliprobin_framing_mode", mode);
-    } catch {}
-  };
-
-  const handleClipDurationChange = (seconds: ClipDuration) => {
-    setClipDurationSeconds(seconds);
-    try {
-      localStorage.setItem("cliprobin_clip_duration", String(seconds));
-    } catch {}
-  };
-
-  const handleClipCountChange = (count: number) => {
-    const clamped = Math.max(1, Math.min(maxClips, count));
-    setClipCount(clamped);
-    try {
-      localStorage.setItem("cliprobin_clip_count", String(clamped));
-    } catch {}
-  };
-
-  const handleGenerationModeChange = (mode: "random" | "ai") => {
-    setGenerationMode(mode);
-    try {
-      localStorage.setItem("cliprobin_generation_mode", mode);
-    } catch {}
-  };
-
-  const handleCaptionStyleChange = (styleId: CaptionStyle) => {
-    setCaptionStyle(styleId);
-    try {
-      localStorage.setItem("cliprobin_caption_style", styleId);
-    } catch {}
-  };
-
-  const handleShowCaptionsChange = (show: boolean) => {
-    setShowCaptions(show);
-    try {
-      localStorage.setItem("cliprobin_show_captions", String(show));
-    } catch {}
-  };
-
-  const handleShowWatermarkChange = (show: boolean) => {
-    setShowWatermark(show);
-    try {
-      localStorage.setItem("cliprobin_show_watermark", String(show));
-    } catch {}
-  };
-
-  const isProcessingVideo = Boolean(
-    transcriptionProgress && ["transcription", "generation"].includes(transcriptionProgress.kind),
-  );
-  const activeVideoJob = isProcessingVideo ? transcriptionProgress : null;
-  const canStartOrRetry = Boolean(
-    (!isProcessingVideo && activeVideo) ||
-    (!isProcessingVideo && transcriptionProgress?.kind === "failed" && transcriptionProgress?.projectId)
-  );
 
   const refreshProjectsList = async () => {
     try {
@@ -291,370 +188,19 @@ export default function Home() {
     void refreshProjectsList();
   }, []);
 
-  // Unified clip generation runner that guards against race conditions and concurrent calls
-  const triggerClipGeneration = useCallback(async (projectId: string) => {
-    if (generatingProjectsRef.current.has(projectId)) return;
-    generatingProjectsRef.current.add(projectId);
-
-    const dur = clipDurationSecondsRef.current;
-    const subs = showCaptionsRef.current;
-    const wm = showWatermarkRef.current;
-    const fm = framingModeRef.current;
-    const cs = captionStyleRef.current;
-
-    setTranscriptionProgress({
-      kind: "generation",
-      step: "Clip generation started",
-      progress: 0,
-      projectId,
-    });
-    setDownloadStatus("Generating vertical clips with local AI...");
-
-    try {
-      const generation = await generateClips(
-        projectId,
-        subs,
-        (stepJob) => {
-          setTranscriptionProgress({
-            kind: "generation",
-            step: stepJob.step,
-            progress: stepJob.progress,
-            projectId,
-          });
-          if (stepJob.ready_clips && stepJob.ready_clips.length > 0) {
-            setGeneratedClips(stepJob.ready_clips);
-            setGeneratedProjectId(projectId);
-          }
-        },
-        dur,
-        wm,
-        fm,
-        cs,
-        undefined,
-        clipCountRef.current,
-        generationModeRef.current,
-      );
-
-      if (generation.cancelled) {
-        throw new Error("Clip generation was cancelled");
-      }
-
-      setGeneratedClips(generation.clips);
-      setGeneratedProjectId(projectId);
-      setTranscriptionProgress({
-        kind: "complete",
-        step: "Clip generation complete",
-        progress: 100,
-        projectId,
-      });
-      setDownloadStatus("Clips are ready.");
-      void refreshProjectsList();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Clip generation failed";
-      // If generation is already running on the backend, let active polling track it
-      if (msg.includes("already running")) {
-        return;
-      }
-      setDownloadStatus(msg);
-      setTranscriptionProgress((current) =>
-        current ? { ...current, kind: "failed", step: "Clip generation failed" } : null,
-      );
-    } finally {
-      generatingProjectsRef.current.delete(projectId);
-    }
-  }, []);
-
-  // Poll for background generation/transcription updates
-  useEffect(() => {
-    let isCurrent = true;
-    let timeoutId: number | undefined;
-
-    const restoreProgress = async () => {
-      try {
-        const current = transcriptionProgressRef.current;
-        const activeJobs = await getActiveJobs().catch(() => []);
-        if (!isCurrent) return;
-        const job = activeJobs[0];
-        if (job) {
-          setTranscriptionProgress({
-            kind: job.kind as "transcription" | "generation",
-            step: job.step,
-            progress:
-              job.kind === "transcription" ? 25 + Math.round(job.progress * 0.75) : job.progress,
-            projectId: job.project_id,
-          });
-          if (job.kind === "generation" && job.ready_clips && job.ready_clips.length > 0) {
-            setGeneratedClips(job.ready_clips);
-            setGeneratedProjectId(job.project_id);
-          }
-        } else if (current?.projectId && current.kind === "transcription") {
-          const transcription = await getLocalTranscriptionJob(current.projectId).catch(() => null);
-          if (!isCurrent) return;
-          if (transcription?.status === "failed") {
-            setTranscriptionProgress({
-              ...current,
-              kind: "failed",
-              step: transcription.step || "Transcription failed",
-            });
-          } else if (transcription?.status === "completed") {
-            const generation = await getLatestClipGenerationJob(current.projectId).catch(() => null);
-            if (!isCurrent) return;
-            if (generation) {
-              if (generation.ready_clips && generation.ready_clips.length > 0) {
-                setGeneratedClips(generation.ready_clips);
-                setGeneratedProjectId(current.projectId);
-              }
-              if (generation.status === "completed") {
-                setTranscriptionProgress({
-                  kind: "complete",
-                  step: "Clip generation complete",
-                  progress: 100,
-                  projectId: current.projectId,
-                });
-                void refreshProjectsList();
-              } else if (generation.status === "failed" || generation.status === "cancelled") {
-                setTranscriptionProgress({
-                  kind: "failed",
-                  step: generation.error ?? generation.step,
-                  progress: generation.progress,
-                  projectId: current.projectId,
-                });
-              } else {
-                setTranscriptionProgress({
-                  kind: "generation",
-                  step: generation.step,
-                  progress: generation.progress,
-                  projectId: current.projectId,
-                });
-              }
-            } else {
-              // Transcription finished and no generation job started yet: auto-trigger generation!
-              void triggerClipGeneration(current.projectId);
-            }
-          } else if (transcription) {
-            setTranscriptionProgress({
-              ...current,
-              step: transcription.step,
-              progress: 25 + Math.round(transcription.progress * 0.75),
-            });
-          }
-        } else if (current?.projectId && current.kind === "generation") {
-          const generation = await getLatestClipGenerationJob(current.projectId).catch(() => null);
-          if (!isCurrent) return;
-          if (!generation) {
-            // No generation job exists yet on backend: auto-trigger generation!
-            void triggerClipGeneration(current.projectId);
-            return;
-          }
-          if (generation.ready_clips && generation.ready_clips.length > 0) {
-            setGeneratedClips(generation.ready_clips);
-            setGeneratedProjectId(current.projectId);
-          }
-          if (generation.status === "completed") {
-            setTranscriptionProgress({
-              kind: "complete",
-              step: "Clip generation complete",
-              progress: 100,
-              projectId: current.projectId,
-            });
-            void refreshProjectsList();
-          } else if (generation.status === "failed" || generation.status === "cancelled") {
-            setTranscriptionProgress({
-              kind: "failed",
-              step: generation.error ?? generation.step,
-              progress: generation.progress,
-              projectId: current.projectId,
-            });
-          } else {
-            setTranscriptionProgress({
-              kind: "generation",
-              step: generation.step,
-              progress: generation.progress,
-              projectId: current.projectId,
-            });
-          }
-        }
-      } catch (error) {
-        console.error("Could not restore active video progress", error);
-      } finally {
-        if (isCurrent) {
-          timeoutId = window.setTimeout(() => void restoreProgress(), 1000);
-        }
-      }
-    };
-
-    void restoreProgress();
-    return () => {
-      isCurrent = false;
-      if (timeoutId !== undefined) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [triggerClipGeneration]);
-
-  // Shared pipeline to transcribe and generate clips for a downloaded project
-  const runGenerationPipeline = async (projectId: string, videoLabel: string) => {
-    setTranscriptionProgress({
-      kind: "transcription",
-      step: "Loading speech model",
-      progress: 5,
-      projectId,
-    });
-
-    try {
-      const job = await transcribeVideo(projectId);
-      setTranscriptionProgress({
-        kind: "transcription",
-        step: job.step || "Transcribing audio",
-        progress: 25 + Math.round(job.progress * 0.75),
-        projectId,
-      });
-
-      let currentJob = job;
-      while (currentJob.status !== "completed" && currentJob.status !== "failed") {
-        await new Promise((resolve) => window.setTimeout(resolve, 500));
-        currentJob = await getLocalTranscriptionJob(projectId);
-        setTranscriptionProgress({
-          kind: "transcription",
-          step: currentJob.step,
-          progress: 25 + Math.round(currentJob.progress * 0.75),
-          projectId,
-        });
-      }
-
-      if (currentJob.status === "failed") {
-        throw new Error(currentJob.error || "Audio transcription failed");
-      }
-
-      setDownloadStatus(`Transcribed ${videoLabel}. Generating clips...`);
-      await triggerClipGeneration(projectId);
-    } catch (error) {
-      setDownloadStatus(
-        error instanceof Error ? error.message : "Video processing failed",
-      );
-      setTranscriptionProgress((current) =>
-        current ? { ...current, kind: "failed", step: "Video processing failed" } : null,
-      );
-    }
+  // Reset the wizard to Step 1 (for "+ Add another video")
+  const handleResetFlow = () => {
+    setActiveVideo(null);
+    setHasSelectedRatio(false);
+    setYoutubeUrl("");
+    setInlineSourceError(null);
+    setSourceDuration(null);
+    setProjectName("");
+    setProjectNameError(null);
+    setCompatibilityNotice(null);
   };
 
-  const handleDownload = async (event?: FormEvent) => {
-    event?.preventDefault();
-    if (!youtubeUrl.trim() || isDownloading || isProcessingVideo) return;
-    if (!isValidYouTubeUrl(youtubeUrl)) {
-      setDownloadStatus("Please enter a valid YouTube video or Shorts link.");
-      return;
-    }
-
-    setIsDownloading(true);
-    setYoutubeDownloadError(null);
-    setDownloadStatus("Connecting to YouTube...");
-    setDownloadProgress({ step: "Downloading video from YouTube", progress: 5 });
-
-    try {
-      const result = await downloadVideo(youtubeUrl, (job) => {
-        setDownloadProgress({
-          step: job.step,
-          progress: job.progress,
-          title: job.title,
-        });
-      });
-
-      const videoLabel = result.title || result.file;
-      if (result.duration) {
-        setSourceDuration(result.duration);
-      }
-      setActiveVideo({
-        kind: "downloaded",
-        projectId: result.project_id,
-        fileName: result.file,
-        name: videoLabel,
-      });
-      setDownloadStatus(`Downloaded ${videoLabel}.`);
-      setYoutubeUrl("");
-      void refreshProjectsList();
-    } catch (error) {
-      const rawMsg = error instanceof Error ? error.message : "";
-      const friendlyMsg =
-        rawMsg && rawMsg.includes("unavailable")
-          ? rawMsg
-          : "This YouTube video was unavailable to download. You can choose or drop a local video file (MP4, MOV, MKV, WebM) below instead.";
-      setDownloadStatus(friendlyMsg);
-      setYoutubeDownloadError(friendlyMsg);
-    } finally {
-      setIsDownloading(false);
-      setDownloadProgress(null);
-    }
-  };
-
-  const handleStartGenerating = async () => {
-    if (isProcessingVideo) return;
-    if (!activeVideo) {
-      if (transcriptionProgress?.projectId) {
-        await triggerClipGeneration(transcriptionProgress.projectId);
-      }
-      return;
-    }
-
-    setTranscriptionProgress(null);
-    setDownloadStatus("");
-
-    if (activeVideo.kind === "downloaded") {
-      await runGenerationPipeline(activeVideo.projectId, activeVideo.name);
-      return;
-    }
-
-    // Local file upload & generation
-    setDownloadStatus("Uploading video for local processing...");
-    setTranscriptionProgress({
-      kind: "transcription",
-      step: "Uploading video",
-      progress: 0,
-    });
-
-    try {
-      const result = await transcribeLocalVideo(activeVideo.file, (uploadProgress) => {
-        setTranscriptionProgress({
-          kind: "transcription",
-          step: "Uploading video",
-          progress: Math.round(uploadProgress * 0.25),
-        });
-      });
-
-      setTranscriptionProgress({
-        kind: "transcription",
-        step: "Speech model loading",
-        progress: 25,
-        projectId: result.project_id,
-      });
-
-      let currentJob = result;
-      while (currentJob.status !== "completed" && currentJob.status !== "failed") {
-        await new Promise((resolve) => window.setTimeout(resolve, 500));
-        currentJob = await getLocalTranscriptionJob(result.project_id);
-        setTranscriptionProgress({
-          kind: "transcription",
-          step: currentJob.step,
-          progress: 25 + Math.round(currentJob.progress * 0.75),
-          projectId: result.project_id,
-        });
-      }
-
-      if (currentJob.status === "failed") {
-        throw new Error(currentJob.error || "Audio transcription failed");
-      }
-
-      await triggerClipGeneration(result.project_id);
-    } catch (error) {
-      setDownloadStatus(
-        error instanceof Error ? error.message : "Local video processing failed",
-      );
-      setTranscriptionProgress((current) =>
-        current ? { ...current, kind: "failed", step: "Video processing failed" } : null,
-      );
-    }
-  };
-
+  // Step 1: File selection handlers
   const isVideoFile = (file: File) => {
     if (file.type.startsWith("video/")) return true;
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
@@ -662,52 +208,186 @@ export default function Home() {
   };
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const video = event.target.files?.[0];
+    const file = event.target.files?.[0];
     event.target.value = "";
-    if (video) {
-      if (!isVideoFile(video)) {
-        setActiveVideo(null);
-        setDownloadStatus("Please choose a valid video file (MP4, MOV, MKV, WebM, AVI).");
-        return;
-      }
-      void getFileDuration(video).then((dur) => {
-        if (dur) setSourceDuration(dur);
-      });
-      setActiveVideo({
-        kind: "file",
-        file: video,
-        name: video.name,
-        size: video.size,
-      });
-      setDownloadStatus("");
-      setYoutubeDownloadError(null);
-      setTranscriptionProgress(null);
+    if (!file) return;
+
+    if (!isVideoFile(file)) {
+      setInlineSourceError("Unsupported format. Please select an MP4, MOV, MKV, WebM, or AVI file.");
+      return;
     }
+
+    if (file.size > 4 * 1024 * 1024 * 1024) {
+      setInlineSourceError("File is too large. Clip Robin supports video files up to 4 GB.");
+      return;
+    }
+
+    setInlineSourceError(null);
+    void getFileDuration(file).then((dur) => {
+      if (dur) setSourceDuration(dur);
+    });
+
+    setActiveVideo({
+      kind: "file",
+      file,
+      name: file.name,
+      size: file.size,
+    });
+
+    const existingNames = [
+      ...recentProjects.map((p) => p.title || p.project_id),
+      ...queue.map((q) => q.projectName),
+    ];
+    setProjectName(sanitizeProjectName(file.name, existingNames));
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setIsDragging(false);
-    if (isProcessingVideo) return;
-    const video = event.dataTransfer.files[0];
-    if (video) {
-      if (!isVideoFile(video)) {
-        setActiveVideo(null);
-        setDownloadStatus("Please drop a valid video file (MP4, MOV, MKV, WebM, AVI).");
-        return;
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+
+    if (!isVideoFile(file)) {
+      setInlineSourceError("Unsupported format. Please drop an MP4, MOV, MKV, WebM, or AVI file.");
+      return;
+    }
+
+    if (file.size > 4 * 1024 * 1024 * 1024) {
+      setInlineSourceError("File is too large. Clip Robin supports video files up to 4 GB.");
+      return;
+    }
+
+    setInlineSourceError(null);
+    void getFileDuration(file).then((dur) => {
+      if (dur) setSourceDuration(dur);
+    });
+
+    setActiveVideo({
+      kind: "file",
+      file,
+      name: file.name,
+      size: file.size,
+    });
+
+    const existingNames = [
+      ...recentProjects.map((p) => p.title || p.project_id),
+      ...queue.map((q) => q.projectName),
+    ];
+    setProjectName(sanitizeProjectName(file.name, existingNames));
+  };
+
+  // Step 1: YouTube link submission
+  const handleValidateYouTubeUrl = (event?: FormEvent) => {
+    event?.preventDefault();
+    const trimmed = youtubeUrl.trim();
+    if (!trimmed) {
+      setInlineSourceError("Please enter a YouTube video or Shorts link.");
+      return;
+    }
+
+    if (!isValidYouTubeUrl(trimmed)) {
+      setInlineSourceError(
+        "Invalid YouTube URL. Please enter a valid link (e.g. https://www.youtube.com/watch?v=... or https://youtu.be/...)."
+      );
+      return;
+    }
+
+    setInlineSourceError(null);
+    setActiveVideo({
+      kind: "youtube",
+      url: trimmed,
+      name: "YouTube Video",
+    });
+
+    const existingNames = [
+      ...recentProjects.map((p) => p.title || p.project_id),
+      ...queue.map((q) => q.projectName),
+    ];
+    setProjectName(sanitizeProjectName("YouTube Video", existingNames));
+  };
+
+  // Step 2: Aspect Ratio selection
+  const handleSelectFramingMode = (mode: FramingMode) => {
+    const prevMode = framingMode;
+    setFramingMode(mode);
+    setHasSelectedRatio(true);
+
+    try {
+      localStorage.setItem("cliprobin_framing_mode", mode);
+    } catch {}
+
+    // Compatibility check between ratio and other settings
+    if (prevMode && prevMode !== mode) {
+      if (mode === "square_rounded") {
+        setCompatibilityNotice("Selected 1:1 Rounded square canvas. Subtitle safe-margins adjusted to centered square framing.");
+      } else if (mode === "true_9_16") {
+        setCompatibilityNotice("Selected Full 9:16 Crop. AI face & speaker tracking enabled.");
+      } else {
+        setCompatibilityNotice("Selected 16:9 Letterbox widescreen canvas.");
       }
-      void getFileDuration(video).then((dur) => {
-        if (dur) setSourceDuration(dur);
-      });
-      setActiveVideo({
-        kind: "file",
-        file: video,
-        name: video.name,
-        size: video.size,
-      });
-      setDownloadStatus("");
-      setYoutubeDownloadError(null);
-      setTranscriptionProgress(null);
+    }
+  };
+
+  // Step 3: Project name validation & handlers
+  const handleProjectNameChange = (val: string) => {
+    setProjectName(val);
+    const check = validateProjectName(val);
+    if (!check.valid && check.error) {
+      setProjectNameError(check.error);
+    } else {
+      setProjectNameError(null);
+    }
+  };
+
+  const handleProjectNameBlur = () => {
+    const existingNames = [
+      ...recentProjects.map((p) => p.title || p.project_id),
+      ...queue.map((q) => q.projectName),
+    ];
+    setProjectName(sanitizeProjectName(projectName, existingNames));
+    setProjectNameError(null);
+  };
+
+  // Submit flow: Add to Queue / Generate
+  const handleSubmitToQueue = () => {
+    if (!activeVideo || !hasSelectedRatio) return;
+
+    if (isAtLimit) {
+      setInlineSourceError(`Queue is full (${maxQueueSize}/${maxQueueSize}). Please wait for active videos to complete.`);
+      return;
+    }
+
+    const existingNames = [
+      ...recentProjects.map((p) => p.title || p.project_id),
+      ...queue.map((q) => q.projectName),
+    ];
+    const finalName = sanitizeProjectName(projectName || activeVideo.name, existingNames);
+
+    const queueSource: QueueSource =
+      activeVideo.kind === "youtube"
+        ? { kind: "youtube", url: activeVideo.url, videoLabel: finalName }
+        : { kind: "file", file: activeVideo.file, name: activeVideo.name, size: activeVideo.size };
+
+    const result = addToQueue({
+      projectName: finalName,
+      source: queueSource,
+      settings: {
+        framingMode,
+        clipDurationSeconds,
+        clipCount,
+        generationMode,
+        captionStyle,
+        showCaptions,
+        showWatermark,
+      },
+    });
+
+    if (result.success) {
+      // Reset the local wizard so user can queue another video right away
+      handleResetFlow();
+      void refreshProjectsList();
+    } else if (result.error) {
+      setInlineSourceError(result.error);
     }
   };
 
@@ -715,39 +395,58 @@ export default function Home() {
     CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle)?.name || "Classic";
 
   return (
-    <main className="min-h-screen bg-[#09090b] text-[#f4f4f5] px-6 lg:px-10 py-6 lg:py-8">
-      <div className="mx-auto max-w-[1560px] space-y-8">
-        {/* Header */}
-        <header className="border-b border-zinc-800/80 pb-5">
+    <main className="min-h-full p-4 md:p-8 xl:p-10 max-w-7xl mx-auto">
+      <div className="space-y-8">
+        {/* Header Bar */}
+        <header className="flex flex-col gap-3 pb-6 border-b border-zinc-800/80">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-                Dashboard
-              </h1>
-              <p className="mt-1 text-[13px] text-zinc-400">
-                Turn long videos into engaging, vertical short clips with local AI.
+              <h1 className="text-2xl font-bold tracking-tight text-white">Create Clips</h1>
+              <p className="text-xs text-zinc-400 mt-1">
+                Turn long video content into vertical short-form clips powered by local AI
               </p>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="emerald" size="md">Local Engine Ready</Badge>
+              {queueCount > 0 && (
+                <Badge variant={isAtLimit ? "amber" : "emerald"} size="md">
+                  Queue: {queueCount}/{maxQueueSize}
+                </Badge>
+              )}
             </div>
           </div>
         </header>
 
-        {/* 2-Column Responsive Layout: Left Inputs + Right Sticky Live Preview Aside */}
+        {/* Video Processing Queue (Visible whenever items are queued or processing) */}
+        {queue.length > 0 && (
+          <VideoQueueView onAddAnotherVideo={handleResetFlow} />
+        )}
+
+        {/* 2-Column Responsive Layout: Left Steps + Right Sticky Preview */}
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] 2xl:grid-cols-[1fr_420px] gap-6 xl:gap-8 items-start">
-          {/* Left Column: 1. Add video & 2. Clip settings */}
+          {/* Left Column: Progressive Step-by-Step Wizard */}
           <div className="space-y-6 min-w-0">
-            {/* Step 1: Add a video */}
-            <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150">
-              <div className="mb-5 flex items-center justify-between">
+            {/* STEP 1: Source (Always visible on load) */}
+            <section
+              aria-label="Step 1: Video source"
+              className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-200"
+            >
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <span className="flex size-7 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-300">
-                    1
+                  <span
+                    className={`flex size-7 items-center justify-center rounded-full text-xs font-bold transition-colors ${
+                      activeVideo
+                        ? "bg-[#10b981] text-zinc-950"
+                        : "bg-zinc-800 text-zinc-300"
+                    }`}
+                  >
+                    {activeVideo ? "✓" : "1"}
                   </span>
                   <div>
-                    <h2 className="text-base font-semibold text-white">Add a video</h2>
-                    <p className="text-xs text-zinc-400">Select a local video file or download from YouTube</p>
+                    <h2 className="text-base font-semibold text-white">1. Add source video</h2>
+                    <p className="text-xs text-zinc-400">
+                      Upload a local video file or paste a YouTube video / Shorts link
+                    </p>
                   </div>
                 </div>
 
@@ -755,8 +454,11 @@ export default function Home() {
                   <div className="flex items-center rounded-xl border border-zinc-800 bg-[#0d0d10] p-1">
                     <button
                       type="button"
-                      onClick={() => setImportTab("file")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      onClick={() => {
+                        setImportTab("file");
+                        setInlineSourceError(null);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                         importTab === "file"
                           ? "bg-zinc-800 text-white font-semibold shadow-sm"
                           : "text-zinc-400 hover:text-zinc-200"
@@ -769,8 +471,11 @@ export default function Home() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setImportTab("youtube")}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      onClick={() => {
+                        setImportTab("youtube");
+                        setInlineSourceError(null);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer ${
                         importTab === "youtube"
                           ? "bg-zinc-800 text-white font-semibold shadow-sm"
                           : "text-zinc-400 hover:text-zinc-200"
@@ -785,9 +490,9 @@ export default function Home() {
                 )}
               </div>
 
-              {/* Collapsed File Card when Video is chosen */}
+              {/* Once source is valid: Display active video banner */}
               {activeVideo ? (
-                <div className="rounded-xl border border-zinc-700/80 bg-[#0c0c0e] p-4 transition-all duration-150 animate-fade-in">
+                <div className="rounded-xl border border-zinc-700/80 bg-[#0c0c0e] p-4 transition-all duration-200 animate-fade-in">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3.5 min-w-0">
                       <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-[#10b981]">
@@ -799,11 +504,11 @@ export default function Home() {
                         <p className="text-sm font-semibold text-white truncate max-w-md" title={activeVideo.name}>
                           {activeVideo.name}
                         </p>
-                        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
                           <span>
-                            {activeVideo.kind === "downloaded"
-                              ? `YouTube Project ${activeVideo.projectId}`
-                              : formatFileSize(activeVideo.size)}
+                            {activeVideo.kind === "file"
+                              ? formatFileSize(activeVideo.size)
+                              : "YouTube Video"}
                           </span>
                           {sourceDuration && (
                             <>
@@ -814,7 +519,7 @@ export default function Home() {
                           <span>•</span>
                           <span className="text-emerald-400 font-medium flex items-center gap-1">
                             <span className="size-1.5 rounded-full bg-[#10b981]" />
-                            Ready for generation
+                            Source valid
                           </span>
                         </div>
                       </div>
@@ -823,25 +528,24 @@ export default function Home() {
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        disabled={isProcessingVideo}
                         onClick={() => {
-                          if (fileInputRef.current) fileInputRef.current.click();
+                          if (activeVideo.kind === "file") {
+                            fileInputRef.current?.click();
+                          } else {
+                            setActiveVideo(null);
+                            setHasSelectedRatio(false);
+                          }
                         }}
                         className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 text-xs font-medium text-zinc-200 hover:text-white hover:bg-zinc-700 transition-colors focus-ring cursor-pointer"
                       >
-                        Replace
+                        Change
                       </button>
                       <IconButton
-                        label="Remove video"
+                        label="Remove source video"
                         tooltip="Remove video"
                         variant="ghost"
                         size="sm"
-                        disabled={isProcessingVideo}
-                        onClick={() => {
-                          setActiveVideo(null);
-                          setDownloadStatus("");
-                          setTranscriptionProgress(null);
-                        }}
+                        onClick={handleResetFlow}
                         icon={
                           <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="18" y1="6" x2="6" y2="18" />
@@ -853,58 +557,64 @@ export default function Home() {
                   </div>
                 </div>
               ) : importTab === "file" ? (
-                /* Drag & Drop File Zone */
-                <div
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    if (!isProcessingVideo) setIsDragging(true);
-                  }}
-                  onDragEnter={(e) => {
-                    e.preventDefault();
-                    if (!isProcessingVideo) setIsDragging(true);
-                  }}
-                  onDragLeave={() => setIsDragging(false)}
-                  onDrop={handleDrop}
-                  onClick={() => {
-                    if (!isProcessingVideo) fileInputRef.current?.click();
-                  }}
-                  className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all duration-200 ${
-                    isDragging
-                      ? "border-[#10b981] bg-[#10b981]/10 text-emerald-400 shadow-lg shadow-emerald-950/20"
-                      : "border-zinc-800 bg-[#0c0c0e]/60 hover:border-zinc-700 hover:bg-[#0c0c0e]"
-                  } ${isProcessingVideo ? "cursor-not-allowed opacity-50" : ""}`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="video/*,.mkv,.avi,.webm"
-                    onChange={handleFileChange}
-                    disabled={isProcessingVideo}
-                    className="hidden"
-                  />
+                /* Choice A: Drag & Drop File Zone */
+                <div className="space-y-3">
+                  <div
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsDragging(true);
+                    }}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      setIsDragging(true);
+                    }}
+                    onDragLeave={() => setIsDragging(false)}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all duration-200 ${
+                      isDragging
+                        ? "border-[#10b981] bg-[#10b981]/10 text-emerald-400 shadow-lg shadow-emerald-950/20"
+                        : "border-zinc-800 bg-[#0c0c0e]/60 hover:border-zinc-700 hover:bg-[#0c0c0e]"
+                    }`}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="video/*,.mkv,.avi,.webm"
+                      onChange={handleFileChange}
+                      className="hidden"
+                    />
 
-                  <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all duration-150">
-                    <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
-                    </svg>
+                    <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all duration-150">
+                      <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                      </svg>
+                    </div>
+
+                    <p className="text-sm font-semibold text-zinc-200">
+                      Drag &amp; drop a video or <span className="text-[#10b981] underline underline-offset-4">browse files</span>
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-400">
+                      MP4, MOV, MKV, or WebM up to 4 GB
+                    </p>
+
+                    <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
+                      <span className="px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/50">Local privacy</span>
+                      <span>•</span>
+                      <span>Processed 100% on device</span>
+                    </div>
                   </div>
 
-                  <p className="text-sm font-semibold text-zinc-200">
-                    Drag &amp; drop a video or <span className="text-[#10b981] underline underline-offset-4">browse files</span>
-                  </p>
-                  <p className="mt-1 text-xs text-zinc-400">
-                    MP4, MOV, MKV, or WebM up to 4 GB
-                  </p>
-
-                  <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
-                    <span className="px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/50">Local privacy</span>
-                    <span>•</span>
-                    <span>Processed 100% on device</span>
-                  </div>
+                  {inlineSourceError && (
+                    <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-xs text-red-300 animate-fade-in flex items-center gap-2">
+                      <span className="shrink-0">⚠️</span>
+                      <span>{inlineSourceError}</span>
+                    </div>
+                  )}
                 </div>
               ) : (
-                /* YouTube URL Input Mode */
-                <div className="space-y-4 animate-fade-in">
+                /* Choice B: YouTube URL Input */
+                <form onSubmit={handleValidateYouTubeUrl} className="space-y-3">
                   <div>
                     <label htmlFor="youtube-url-input" className="block text-xs font-medium text-zinc-400 mb-1.5">
                       YouTube Video or Shorts URL
@@ -916,361 +626,244 @@ export default function Home() {
                         value={youtubeUrl}
                         onChange={(e) => {
                           setYoutubeUrl(e.target.value);
-                          if (youtubeDownloadError) setYoutubeDownloadError(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            void handleDownload();
-                          }
+                          if (inlineSourceError) setInlineSourceError(null);
                         }}
                         placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
-                        disabled={isDownloading || isProcessingVideo}
-                        className="flex-1 min-w-0 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 focus-ring disabled:opacity-50"
+                        className="flex-1 min-w-0 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 focus-ring"
                       />
                       <button
-                        type="button"
-                        onClick={handleDownload}
-                        disabled={!youtubeUrl.trim() || !isValidYouTubeUrl(youtubeUrl) || isDownloading || isProcessingVideo}
-                        className="shrink-0 px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800/90 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 hover:text-white transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed focus-ring cursor-pointer"
+                        type="submit"
+                        disabled={!youtubeUrl.trim()}
+                        className="shrink-0 px-4 py-2.5 rounded-xl border border-zinc-700 bg-zinc-800/90 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 hover:text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed focus-ring cursor-pointer"
                       >
-                        {isDownloading ? (
-                          <span className="flex items-center gap-2">
-                            <svg className="size-4 animate-spin text-zinc-400" viewBox="0 0 24 24" fill="none">
-                              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".2" />
-                              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                            </svg>
-                            Downloading...
-                          </span>
-                        ) : (
-                          "Import video"
-                        )}
+                        Use YouTube Video
                       </button>
                     </div>
-
-                    {/* Inline Validation / Feedback */}
-                    <div className="mt-2 text-xs">
-                      {youtubeUrl.trim() && !isValidYouTubeUrl(youtubeUrl) ? (
-                        <p className="text-amber-400/90 flex items-center gap-1.5">
-                          <span>⚠️</span> Enter a valid YouTube video or Shorts link (e.g. https://www.youtube.com/watch?v=...)
-                        </p>
-                      ) : youtubeUrl.trim() && isValidYouTubeUrl(youtubeUrl) ? (
-                        <p className="text-emerald-400 flex items-center gap-1.5">
-                          <span>✓</span> Valid YouTube link ready for import
-                        </p>
-                      ) : (
-                        <p className="text-zinc-400">
-                          Paste any public YouTube video or Shorts URL to import directly.
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Dedicated YouTube Download Unavailable Alert */}
-                    {youtubeDownloadError && (
-                      <div
-                        role="alert"
-                        className="mt-3 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-200 animate-fade-in"
-                      >
-                        <svg className="size-4 shrink-0 text-amber-400 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <div className="flex-1 space-y-1">
-                          <p className="font-medium text-amber-200">{youtubeDownloadError}</p>
-                          <p className="text-xs text-amber-300/80">
-                            YouTube may be restricting automated downloads or the video might be private/geo-blocked. Choose or drop your file directly to proceed.
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setYoutubeDownloadError(null)}
-                          className="text-amber-400 hover:text-amber-200 p-0.5 transition-colors cursor-pointer"
-                          aria-label="Dismiss message"
-                        >
-                          <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Live Download Progress Bar */}
-                    {isDownloading && downloadProgress && (
-                      <div
-                        role="status"
-                        aria-live="polite"
-                        className="mt-3.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5 space-y-2.5 animate-fade-in"
-                      >
-                        <div className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2 min-w-0 pr-2">
-                            <svg className="size-4 animate-spin text-[#10b981] shrink-0" viewBox="0 0 24 24" fill="none">
-                              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeOpacity=".25" />
-                              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-                            </svg>
-                            <span className="font-semibold text-white truncate">
-                              {downloadProgress.title || "Downloading video from YouTube..."}
-                            </span>
-                          </div>
-                          <span className="font-mono font-medium text-emerald-400 shrink-0">
-                            {Math.round(downloadProgress.progress)}%
-                          </span>
-                        </div>
-
-                        <div
-                          role="progressbar"
-                          aria-label="YouTube video download progress"
-                          aria-valuemin={0}
-                          aria-valuemax={100}
-                          aria-valuenow={Math.round(downloadProgress.progress)}
-                          className="h-2 w-full overflow-hidden rounded-full bg-zinc-800"
-                        >
-                          <div
-                            className="h-full rounded-full bg-[#10b981] transition-[width] duration-200 ease-out"
-                            style={{ width: `${Math.max(4, Math.round(downloadProgress.progress))}%` }}
-                          />
-                        </div>
-
-                        <div className="flex items-center justify-between text-xs text-zinc-400">
-                          <span className="truncate">{downloadProgress.step}</span>
-                          <span className="font-mono text-zinc-500 shrink-0">yt-dlp engine</span>
-                        </div>
-                      </div>
-                    )}
                   </div>
-                </div>
+
+                  {inlineSourceError ? (
+                    <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-xs text-red-300 animate-fade-in flex items-center gap-2">
+                      <span className="shrink-0">⚠️</span>
+                      <span>{inlineSourceError}</span>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-400">
+                      Paste any public YouTube video or Shorts link to configure your clips.
+                    </p>
+                  )}
+                </form>
               )}
             </section>
 
-            {/* Step 2: Clip settings */}
-            <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-6">
-              <div className="flex items-center gap-3">
-                <span className="flex size-7 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-300">
-                  2
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold text-white">Clip settings</h2>
-                  <p className="text-xs text-zinc-400">Customize framing, caption style, and clip durations</p>
-                </div>
-              </div>
-
-              {/* Single Source of Truth ClipSettings */}
-              <ClipSettings
-                variant="full"
-                aiModeEnabled={aiModeEnabled}
-                aiModeDisabledReason={aiDeveloperStatus?.reason}
-                generationMode={generationMode}
-                onGenerationModeChange={handleGenerationModeChange}
-                clipDurationSeconds={clipDurationSeconds}
-                onClipDurationChange={handleClipDurationChange}
-                clipCount={clipCount}
-                onClipCountChange={handleClipCountChange}
-                maxClips={maxClips}
-                framingMode={framingMode}
-                onFramingModeChange={handleFramingModeChange}
-                showCaptions={showCaptions}
-                onShowCaptionsChange={handleShowCaptionsChange}
-                captionStyle={captionStyle}
-                onCaptionStyleChange={handleCaptionStyleChange}
-                showWatermark={showWatermark}
-                onShowWatermarkChange={handleShowWatermarkChange}
-                disabled={isProcessingVideo}
-              />
-            </section>
-
-            {/* Active Processing Card (Progress / Failed) */}
-            {transcriptionProgress && (
+            {/* STEP 2: Aspect Ratio (Revealed only after source is valid) */}
+            {activeVideo && (
               <section
-                aria-live="polite"
-                className={`rounded-2xl border p-6 shadow-sm space-y-4 transition-all duration-150 animate-fade-in ${
-                  transcriptionProgress.kind === "failed"
-                    ? "border-red-500/30 bg-red-950/15"
-                    : "border-zinc-800 bg-[#121215]"
-                }`}
+                aria-label="Step 2: Output aspect ratio"
+                className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-300 animate-fade-in space-y-5"
               >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className={`text-sm font-semibold ${
-                      transcriptionProgress.kind === "failed" ? "text-red-300" : "text-white"
-                    }`}>
-                      {transcriptionProgress.step}
-                    </h3>
-                    {transcriptionProgress.projectId && (
-                      <p className="text-xs text-zinc-400 mt-0.5">
-                        Project ID: <span className="font-mono text-zinc-300">{transcriptionProgress.projectId}</span>
-                      </p>
-                    )}
-                  </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    {transcriptionProgress.kind === "failed" ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          generatingProjectsRef.current.clear();
-                          setTranscriptionProgress(null);
-                          setDownloadStatus("");
-                        }}
-                        className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-medium text-red-200 hover:bg-red-500/20 transition-colors cursor-pointer"
-                      >
-                        Dismiss &amp; Reset
-                      </button>
-                    ) : (
-                      <span className="text-sm font-mono font-medium text-emerald-400">
-                        {transcriptionProgress.progress}%
-                      </span>
-                    )}
+                    <span
+                      className={`flex size-7 items-center justify-center rounded-full text-xs font-bold transition-colors ${
+                        hasSelectedRatio
+                          ? "bg-[#10b981] text-zinc-950"
+                          : "bg-zinc-800 text-zinc-300"
+                      }`}
+                    >
+                      {hasSelectedRatio ? "✓" : "2"}
+                    </span>
+                    <div>
+                      <h2 className="text-base font-semibold text-white">2. Output aspect ratio &amp; canvas</h2>
+                      <p className="text-xs text-zinc-400">
+                        Choose how your video is framed inside the 9:16 vertical canvas
+                      </p>
+                    </div>
                   </div>
+                  <Badge variant="neutral" size="sm">9:16 Canvas</Badge>
                 </div>
 
-                {transcriptionProgress.kind === "failed" ? (
-                  <div className="space-y-3 pt-1">
-                    {downloadStatus && downloadStatus !== transcriptionProgress.step && (
-                      <p className="text-xs text-red-300/80 bg-black/40 rounded-lg p-2.5 font-mono break-words border border-red-500/20">
-                        {downloadStatus}
-                      </p>
-                    )}
-                    <div className="flex items-center justify-between pt-1 text-xs text-zinc-400">
-                      <span>Click &quot;Dismiss &amp; Reset&quot; or press &quot;Generate Clips&quot; to retry.</span>
-                      {transcriptionProgress.projectId && (
-                        <Link
-                          href={`/clips?project=${encodeURIComponent(transcriptionProgress.projectId)}`}
-                          className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
-                        >
-                          Open in Clips Studio &rarr;
-                        </Link>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    {/* Progress Bar */}
-                    <div
-                      role="progressbar"
-                      aria-label="Video processing progress"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={transcriptionProgress.progress}
-                      className="h-2 w-full overflow-hidden rounded-full bg-zinc-800"
-                    >
-                      <div
-                        className="h-full rounded-full bg-[#10b981] transition-[width] duration-300 ease-out"
-                        style={{ width: `${transcriptionProgress.progress}%` }}
-                      />
-                    </div>
-
-                    {/* Steps Checklist */}
-                    <ol className="grid gap-2 sm:grid-cols-2 pt-2 border-t border-zinc-800">
-                      {(transcriptionProgress.kind === "transcription"
-                        ? ["Uploading video", "Loading speech model", "Transcribing audio", "Saving transcript", "Complete"]
-                        : ["Transcription complete", "Clip generation started", "Clips ready"]
-                      ).map((step, index) => {
-                        const activeStep = step === transcriptionProgress.step
-                          || (step === "Generating clips" && transcriptionProgress.kind === "generation");
-                        const done = transcriptionProgress.kind !== "transcription"
-                          ? transcriptionProgress.kind === "complete" || index < 1
-                          : step === "Uploading video"
-                          ? transcriptionProgress.progress >= 25
-                          : step === "Loading speech model"
-                            ? ["Transcribing audio", "Saving transcript", "Complete"].includes(transcriptionProgress.step)
-                            : step === "Transcribing audio"
-                              ? ["Saving transcript", "Complete"].includes(transcriptionProgress.step)
-                              : step === "Saving transcript"
-                                ? transcriptionProgress.step === "Complete"
-                                : transcriptionProgress.step === "Complete";
-
-                        return (
-                          <li
-                            key={step}
-                            className={`flex items-center gap-2 text-xs transition-colors duration-150 ${
-                              activeStep
-                                ? "text-emerald-400 font-medium"
-                                : done
-                                ? "text-zinc-300"
-                                : "text-zinc-500"
-                            }`}
-                          >
-                            <span className={`flex size-4 items-center justify-center rounded-full text-xs ${
-                              done ? "bg-[#10b981]/15 text-[#10b981]" : activeStep ? "bg-emerald-400/20 text-emerald-300 font-bold" : "text-zinc-600"
-                            }`}>
-                              {done ? "✓" : activeStep ? "●" : "○"}
-                            </span>
-                            <span>{step}</span>
-                          </li>
-                        );
-                      })}
-                    </ol>
-
-                    {["generation", "complete"].includes(transcriptionProgress.kind) && transcriptionProgress.projectId && (
-                      <div className="pt-2">
-                        <Link
-                          href={`/clips?project=${encodeURIComponent(transcriptionProgress.projectId)}`}
-                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
-                        >
-                          View clips in Project {transcriptionProgress.projectId} &rarr;
-                        </Link>
+                {/* Aspect ratio selectable cards */}
+                <div
+                  className="grid grid-cols-1 @md:grid-cols-3 gap-3"
+                  role="radiogroup"
+                  aria-label="Output aspect ratio"
+                >
+                  {/* Option 1: 16:9 Letterbox */}
+                  <OptionCard
+                    title="16:9 Letterbox"
+                    subtitle="Original widescreen"
+                    selected={hasSelectedRatio && framingMode === "standard"}
+                    onClick={() => handleSelectFramingMode("standard")}
+                    previewGraphic={
+                      <div className="relative aspect-[9/16] w-12 rounded-[5px] border border-zinc-700/60 bg-[#0a0a0d] flex items-center justify-center overflow-hidden p-1 shadow-inner">
+                        <div className="h-4.5 w-full rounded-[3px] bg-zinc-700/80 border border-zinc-600/70 flex items-center justify-center">
+                          <span className="text-[7px] font-semibold text-zinc-300">16:9</span>
+                        </div>
                       </div>
-                    )}
-                  </>
+                    }
+                  />
+
+                  {/* Option 2: 1:1 Rounded */}
+                  <OptionCard
+                    title="1:1 Rounded"
+                    subtitle="Centered square"
+                    badge={<Badge variant="emerald" size="sm">Popular</Badge>}
+                    selected={hasSelectedRatio && framingMode === "square_rounded"}
+                    onClick={() => handleSelectFramingMode("square_rounded")}
+                    previewGraphic={
+                      <div className="relative aspect-[9/16] w-12 rounded-[5px] border border-zinc-700/60 bg-[#0a0a0d] flex items-center justify-center overflow-hidden p-1 shadow-inner">
+                        <div className="w-full aspect-square rounded-[3px] bg-zinc-700/80 border border-zinc-600/70 flex items-center justify-center">
+                          <span className="text-[7px] font-semibold text-emerald-300">1:1</span>
+                        </div>
+                      </div>
+                    }
+                  />
+
+                  {/* Option 3: Full 9:16 Crop */}
+                  <OptionCard
+                    title="Full 9:16 Crop"
+                    subtitle="Speaker tracking"
+                    badge={<Badge variant="purple" size="sm">AI</Badge>}
+                    selected={hasSelectedRatio && framingMode === "true_9_16"}
+                    onClick={() => handleSelectFramingMode("true_9_16")}
+                    previewGraphic={
+                      <div className="relative aspect-[9/16] w-12 rounded-[5px] border border-zinc-700/60 bg-[#0a0a0d] flex items-center justify-center overflow-hidden p-1 shadow-inner">
+                        <div className="size-full rounded-[3px] bg-zinc-700/80 border border-purple-500/40 flex items-center justify-center">
+                          <svg className="size-4 text-purple-300/90" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <circle cx="12" cy="8" r="4" strokeWidth="2" />
+                            <path d="M6 20v-2a6 6 0 0 1 12 0v2" strokeWidth="2" />
+                          </svg>
+                        </div>
+                      </div>
+                    }
+                  />
+                </div>
+
+                {/* Compatibility notice if ratio changed */}
+                {compatibilityNotice && (
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3 text-xs text-emerald-300 animate-fade-in flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="size-1.5 rounded-full bg-[#10b981]" />
+                      <span>{compatibilityNotice}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setCompatibilityNotice(null)}
+                      className="text-emerald-400/80 hover:text-emerald-200 text-xs"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
                 )}
               </section>
             )}
 
-            {/* Generated clips preview section if ready */}
-            {generatedClips.length > 0 && (
-              <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="flex size-5 items-center justify-center rounded-full bg-[#10b981]/15 text-xs text-[#10b981]">✓</span>
-                    <h3 className="text-sm font-semibold text-white">
-                      Generated Clips ({generatedClips.length})
-                    </h3>
+            {/* STEP 3: Remaining Options & Project Name (Revealed only after ratio is selected) */}
+            {activeVideo && hasSelectedRatio && (
+              <section
+                aria-label="Step 3: Clip options & project name"
+                className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-300 animate-fade-in space-y-6"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex size-7 items-center justify-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-300">
+                    3
+                  </span>
+                  <div>
+                    <h2 className="text-base font-semibold text-white">3. Clip options &amp; project name</h2>
+                    <p className="text-xs text-zinc-400">
+                      Configure clip lengths, subtitle branding, and customize your project name
+                    </p>
                   </div>
-                  {generatedProjectId && (
-                    <Link
-                      href={`/clips?project=${encodeURIComponent(generatedProjectId)}`}
-                      className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
-                    >
-                      View all in Clips Studio &rarr;
-                    </Link>
+                </div>
+
+                {/* Project Name Field */}
+                <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="project-name-input" className="block text-xs font-semibold text-zinc-200">
+                      Project Name
+                    </label>
+                    <span className="text-[11px] font-mono text-zinc-500">
+                      {projectName.length}/60
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="project-name-input"
+                      type="text"
+                      value={projectName}
+                      onChange={(e) => handleProjectNameChange(e.target.value)}
+                      onBlur={handleProjectNameBlur}
+                      maxLength={60}
+                      placeholder="Enter project name..."
+                      className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </div>
+                  {projectNameError ? (
+                    <p className="text-xs text-red-400">{projectNameError}</p>
+                  ) : (
+                    <p className="text-[11px] text-zinc-400">
+                      Auto-derived from source file. Letters, numbers, spaces, and hyphens permitted.
+                    </p>
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  {generatedClips.slice(0, 4).map((clip) => (
-                    <div
-                      key={clip.id}
-                      className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3 transition-all duration-150 hover:border-zinc-700"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-mono text-xs font-semibold text-white truncate">
-                          {clip.id}
-                        </span>
-                        <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-xs font-mono text-zinc-300">
-                          {clip.duration.toFixed(1)}s
-                        </span>
-                      </div>
-                      <p className="mt-1.5 text-xs text-zinc-300 line-clamp-2" title={clip.title}>
-                        {clip.title}
-                      </p>
-                      <div className="mt-2.5 flex items-center justify-between border-t border-zinc-800/80 pt-2 text-xs">
-                        <span className="text-zinc-400 font-mono">
-                          {Math.floor(clip.start / 60)}:{String(Math.floor(clip.start % 60)).padStart(2, "0")} - {Math.floor(clip.end / 60)}:{String(Math.floor(clip.end % 60)).padStart(2, "0")}
-                        </span>
-                        {generatedProjectId && (
-                          <Link
-                            href={`/clips?project=${encodeURIComponent(generatedProjectId)}`}
-                            className="text-[#10b981] hover:underline"
-                          >
-                            Watch clip &rarr;
-                          </Link>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                {/* Remaining Options (Duration, Count, Captions, Watermark) */}
+                <ClipSettings
+                  variant="full"
+                  hideFraming={true}
+                  aiModeEnabled={aiModeEnabled}
+                  aiModeDisabledReason={aiDeveloperStatus?.reason}
+                  generationMode={generationMode}
+                  onGenerationModeChange={setGenerationMode}
+                  clipDurationSeconds={clipDurationSeconds}
+                  onClipDurationChange={setClipDurationSeconds}
+                  clipCount={clipCount}
+                  onClipCountChange={setClipCount}
+                  maxClips={maxClips}
+                  framingMode={framingMode}
+                  onFramingModeChange={handleSelectFramingMode}
+                  showCaptions={showCaptions}
+                  onShowCaptionsChange={setShowCaptions}
+                  captionStyle={captionStyle}
+                  onCaptionStyleChange={setCaptionStyle}
+                  showWatermark={showWatermark}
+                  onShowWatermarkChange={setShowWatermark}
+                />
+
+                {/* Submit to Queue Button in Step 3 */}
+                <div className="pt-2 border-t border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={handleSubmitToQueue}
+                    disabled={isAtLimit}
+                    className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 ${
+                      isAtLimit
+                        ? "bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed opacity-60"
+                        : "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 cursor-pointer"
+                    }`}
+                  >
+                    <svg className="size-4 fill-current" viewBox="0 0 24 24">
+                      <polygon points="5 3 19 12 5 21 5 3" />
+                    </svg>
+                    <span>
+                      {isAtLimit
+                        ? "Queue Limit Reached (10/10)"
+                        : queueCount > 0
+                        ? `Add to Queue (${queueCount}/10)`
+                        : `Start Generating ${clipCount} ${clipCount === 1 ? "Clip" : "Clips"}`}
+                    </span>
+                  </button>
+                  {isAtLimit && (
+                    <p className="mt-2 text-center text-xs text-amber-400/90">
+                      Maximum 10 videos in queue. Please wait for current items to finish.
+                    </p>
+                  )}
                 </div>
               </section>
             )}
           </div>
 
-          {/* Right Column: Sticky Aside with Live 9:16 Preview, Summary Chips & Primary CTA */}
+          {/* Right Column: Sticky Aside with Live 9:16 Preview, Summary Chips & Action */}
           <aside className="sticky top-6 space-y-6">
             <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4">
               <div className="flex items-center justify-between">
@@ -1285,8 +878,20 @@ export default function Home() {
 
                 {/* Video / Graphic Area */}
                 <div className="relative size-full rounded-2xl overflow-hidden bg-black flex items-center justify-center">
-                  {/* Dynamic Layout Representation */}
-                  {framingMode === "true_9_16" ? (
+                  {!activeVideo ? (
+                    // Empty preview state before Step 1 is chosen
+                    <div className="size-full bg-gradient-to-b from-zinc-900/60 to-black flex flex-col items-center justify-center p-4 text-center">
+                      <div className="size-12 rounded-full border border-dashed border-zinc-700 bg-zinc-900/80 flex items-center justify-center text-zinc-500">
+                        <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                      </div>
+                      <p className="mt-3 text-xs font-semibold text-zinc-300">Step 1</p>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">
+                        Add a source video to unlock live preview
+                      </p>
+                    </div>
+                  ) : framingMode === "true_9_16" ? (
                     // Full bleed True 9:16
                     videoPreviewUrl ? (
                       <video
@@ -1358,15 +963,8 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Empty state overlay message if no video loaded */}
-                  {!activeVideo && !videoPreviewUrl && (
-                    <div className="absolute inset-x-3 bottom-3 rounded-lg bg-black/80 border border-white/10 p-2 text-center backdrop-blur-xs">
-                      <p className="text-[10px] text-zinc-300 font-medium">Add a video to preview framing</p>
-                    </div>
-                  )}
-
-                  {/* Watermark Overlay Preview (Top-right corner with platform safe-space margins) */}
-                  {showWatermark && (
+                  {/* Watermark Overlay Preview */}
+                  {activeVideo && showWatermark && (
                     <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-xs shadow-sm">
                       <span className="size-1.5 rounded-full bg-[#10b981]" />
                       <span className="text-[8px] font-semibold text-white tracking-tight">Clip Robin</span>
@@ -1374,7 +972,7 @@ export default function Home() {
                   )}
 
                   {/* Live Moving Captions Overlay */}
-                  {showCaptions && (
+                  {activeVideo && showCaptions && (
                     <div
                       className={`absolute inset-x-2 z-20 text-center pointer-events-none transition-all duration-200 ${
                         framingMode === "square_rounded" ? "bottom-[18%]" : "bottom-[26.5%]"
@@ -1399,72 +997,51 @@ export default function Home() {
                       ? "1:1 Rounded"
                       : "16:9 Letterbox"}
                   </Badge>
-                  <Badge variant="neutral">{clipCount} {clipCount === 1 ? "clip" : "clips"} · {clipDurationSeconds}s</Badge>
+                  <Badge variant="neutral">
+                    {clipCount} {clipCount === 1 ? "clip" : "clips"} · {clipDurationSeconds}s
+                  </Badge>
                   <Badge variant={showCaptions ? "emerald" : "neutral"}>
                     {showCaptions ? `${activeStyleName} subtitles` : "No subtitles"}
                   </Badge>
-                  <Badge variant={showWatermark ? "neutral" : "neutral"}>
+                  <Badge variant="neutral">
                     {showWatermark ? "Watermark on" : "No watermark"}
                   </Badge>
                 </div>
               </div>
 
-              {/* Primary Action Button */}
+              {/* Action Button */}
               <div className="pt-2">
                 <button
                   type="button"
-                  onClick={() => void handleStartGenerating()}
-                  disabled={!canStartOrRetry}
+                  onClick={handleSubmitToQueue}
+                  disabled={!activeVideo || !hasSelectedRatio || isAtLimit}
                   className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 ${
-                    canStartOrRetry
+                    activeVideo && hasSelectedRatio && !isAtLimit
                       ? "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 cursor-pointer"
                       : "border border-zinc-800 bg-zinc-900/60 text-zinc-500 cursor-not-allowed opacity-60"
                   }`}
                 >
-                  {activeVideoJob?.kind === "transcription" ? (
-                    <span className="flex items-center gap-2">
-                      <svg className="size-4 animate-spin text-zinc-950" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
-                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                      </svg>
-                      Transcribing audio...
-                    </span>
-                  ) : activeVideoJob?.kind === "generation" ? (
-                    <span className="flex items-center gap-2">
-                      <svg className="size-4 animate-spin text-zinc-950" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="3" strokeOpacity=".25" />
-                        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-                      </svg>
-                      Rendering clips ({transcriptionProgress?.progress ?? 0}%)...
-                    </span>
-                  ) : transcriptionProgress?.kind === "failed" && transcriptionProgress?.projectId ? (
-                    <>
-                      <svg className="size-4 fill-current" viewBox="0 0 24 24">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                      <span>Retry Clip Generation</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="size-4 fill-current" viewBox="0 0 24 24">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                      <span>Generate {clipCount} {clipCount === 1 ? "Clip" : "Clips"}</span>
-                    </>
-                  )}
+                  <svg className="size-4 fill-current" viewBox="0 0 24 24">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  <span>
+                    {!activeVideo
+                      ? "Add Video (Step 1)"
+                      : !hasSelectedRatio
+                      ? "Select Aspect Ratio (Step 2)"
+                      : isAtLimit
+                      ? "Queue Full (10/10)"
+                      : queueCount > 0
+                      ? `Add to Queue (${queueCount}/10)`
+                      : `Generate ${clipCount} ${clipCount === 1 ? "Clip" : "Clips"}`}
+                  </span>
                 </button>
-
-                {!activeVideo && !isProcessingVideo && !transcriptionProgress?.projectId && (
-                  <p className="mt-2 text-center text-xs text-zinc-500">
-                    Select a local file or YouTube link to enable generation.
-                  </p>
-                )}
               </div>
             </section>
           </aside>
         </div>
 
-        {/* Wide Lower Section: Recent Projects & Engine Guarantee Card */}
+        {/* Lower Section: Recent Projects & Local Engine Guarantee */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pt-4 border-t border-zinc-800/80">
           {/* Recent Projects List (Span 2 cols) */}
           <section className="lg:col-span-2 rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
@@ -1504,8 +1081,8 @@ export default function Home() {
                   >
                     <div>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-white font-mono text-xs">
-                          {project.project_id}
+                        <span className="font-semibold text-white font-mono text-xs truncate" title={project.title || project.project_id}>
+                          {project.title || project.project_id}
                         </span>
                         <StatusPill status={project.status} />
                       </div>

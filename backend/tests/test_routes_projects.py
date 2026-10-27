@@ -53,3 +53,17 @@ def test_delete_project_not_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     response = client.delete("/api/projects/project_999")
     assert response.status_code == 404
 
+
+
+def test_update_project_title(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLIPROBIN_PROJECTS_DIR", str(tmp_path))
+    project_id, project_dir = create_project()
+    response = client.patch(f"/api/projects/{project_id}", json={"title": "My Viral Reel"})
+    assert response.status_code == 200
+    assert response.json()["title"] == "My Viral Reel"
+
+    # Verify get_projects reflects the updated title
+    res = client.get("/api/projects")
+    assert res.status_code == 200
+    p = next(x for x in res.json()["projects"] if x["project_id"] == project_id)
+    assert p["title"] == "My Viral Reel"
