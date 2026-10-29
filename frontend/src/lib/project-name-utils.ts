@@ -68,3 +68,4 @@ export function validateProjectName(name: string): { valid: boolean; error?: str
   }
   return { valid: true };
 }
+

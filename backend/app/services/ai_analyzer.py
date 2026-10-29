@@ -31,18 +31,24 @@ PROVIDER_CONFIG = {
     },
 }
 
-SYSTEM_PROMPT = """You are analyzing a transcript to find potential short-form video clips.
+SYSTEM_PROMPT = """You are an elite short-form video editor and viral hook specialist. Your job is to analyze a video transcript and identify the most compelling, high-retention short-form video clips (TikTok, YouTube Shorts, Instagram Reels).
 
-Find self-contained sections that could work as short-form content.
+CRITERIA FOR CHOOSING GREAT VIRAL CLIPS:
+1. Irresistible Hook: The first 3 to 5 seconds must immediately grab attention with a surprising statement, intriguing question, punchy claim, controversial take, or emotional high point. Avoid boring pleasantries ("hello everyone", "welcome back") and awkward pauses.
+2. High Retention & Value: The segment must be engaging throughout—delivering a key insight, shocking revelation, funny moment, or dramatic story. Every second counts.
+3. Natural & Complete Ending: Always verify where the clip ends and ensure it makes complete sense! The clip MUST NOT cut off mid-sentence, mid-word, or right before a punchline. End on a completed sentence with a satisfying takeaway, punchline, or clear resolution.
+4. Hook Quality & Viral Potential Rating: Rate each clip on viral potential from 1 to 10 (where 10 is an exceptional, viral-ready clip).
 
-Look for:
-- a strong opening/hook
-- useful, interesting, surprising, or educational information
-- a clear idea
-- a satisfying conclusion/payoff
+For each clip, provide:
+- "id": A unique identifier (e.g. "clip_001")
+- "title": A punchy, attention-grabbing title (max 6-8 words)
+- "start": Exact start timestamp in seconds from transcript
+- "end": Exact end timestamp in seconds from transcript (must end cleanly on a finished thought/sentence)
+- "score": A rating number from 1 to 10 (e.g. 9.5 or 8) based on hook strength, pacing, and viral appeal
+- "reason": A 1-2 sentence compelling breakdown of WHY this clip is good, what makes the hook work, and why viewers will keep watching
 
 Return ONLY valid JSON matching this schema:
-{"clips":[{"id":"clip_001","title":"short title","start":0.0,"end":20.4,"reason":"brief explanation"}]}
+{"clips":[{"id":"clip_001","title":"Why Most Habits Fail In 7 Days","start":12.5,"end":45.2,"score":9.2,"reason":"Opens immediately with a counterintuitive hook that challenges common belief, maintains tension, and concludes with an actionable rule."}]}
 
 Do not rewrite the transcript.
 Do not create timestamps that do not exist.
@@ -244,12 +250,20 @@ def validate_analysis(analysis: dict[str, Any], segments: list[dict[str, Any]]) 
         if not isinstance(reason, str) or not reason.strip():
             raise AIAnalyzerError("Each clip needs a reason")
 
+        # Extract and validate score out of 10
+        raw_score = clip.get("score")
+        if isinstance(raw_score, (int, float)) and 1.0 <= float(raw_score) <= 10.0:
+            clip_score = round(float(raw_score), 1)
+        else:
+            clip_score = 8.5
+
         clip_id = clip.get("id") or f"clip_{index:03d}"
         validated_clips.append({
             "id": str(clip_id),
             "title": title.strip(),
             "start": snapped_start,
             "end": snapped_end,
+            "score": clip_score,
             "reason": reason.strip(),
         })
 

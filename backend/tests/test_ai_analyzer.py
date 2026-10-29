@@ -115,3 +115,19 @@ def test_validate_analysis_snaps_floating_point_boundaries():
     assert validated["clips"][1]["start"] == 14.512
     assert validated["clips"][1]["end"] == 32.894
 
+
+
+def test_validate_analysis_preserves_and_defaults_score():
+    segments = [
+        {"start": 0.0, "end": 15.0, "text": "Viral hook."},
+        {"start": 15.0, "end": 30.0, "text": "Payoff."},
+    ]
+    analysis = {
+        "clips": [
+            {"title": "Hook", "start": 0.0, "end": 15.0, "reason": "High hook potential", "score": 9.4},
+            {"title": "Payoff", "start": 15.0, "end": 30.0, "reason": "Great ending"},
+        ]
+    }
+    validated = validate_analysis(analysis, segments)
+    assert validated["clips"][0]["score"] == 9.4
+    assert validated["clips"][1]["score"] == 8.5

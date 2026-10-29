@@ -112,6 +112,7 @@ export default function Home() {
 
   // Video Preview URL
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
+  const [queueSuccessBanner, setQueueSuccessBanner] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Calculate dynamic max clips
@@ -276,7 +277,26 @@ export default function Home() {
     setProjectName(sanitizeProjectName(file.name, existingNames));
   };
 
-  // Step 1: YouTube link submission
+  // Step 1: YouTube link submission & auto-detection
+  const handleYouTubeInputChange = (val: string) => {
+    setYoutubeUrl(val);
+    if (inlineSourceError) setInlineSourceError(null);
+    const trimmed = val.trim();
+    if (trimmed && isValidYouTubeUrl(trimmed)) {
+      setInlineSourceError(null);
+      setActiveVideo({
+        kind: "youtube",
+        url: trimmed,
+        name: "YouTube Video",
+      });
+      const existingNames = [
+        ...recentProjects.map((p) => p.title || p.project_id),
+        ...queue.map((q) => q.projectName),
+      ];
+      setProjectName(sanitizeProjectName("YouTube Video", existingNames));
+    }
+  };
+
   const handleValidateYouTubeUrl = (event?: FormEvent) => {
     event?.preventDefault();
     const trimmed = youtubeUrl.trim();
@@ -350,7 +370,11 @@ export default function Home() {
 
   // Submit flow: Add to Queue / Generate
   const handleSubmitToQueue = () => {
-    if (!activeVideo || !hasSelectedRatio) return;
+    if (!activeVideo) return;
+    if (!hasSelectedRatio) {
+      setHasSelectedRatio(true);
+      return;
+    }
 
     if (isAtLimit) {
       setInlineSourceError(`Queue is full (${maxQueueSize}/${maxQueueSize}). Please wait for active videos to complete.`);
@@ -383,7 +407,8 @@ export default function Home() {
     });
 
     if (result.success) {
-      // Reset the local wizard so user can queue another video right away
+      setQueueSuccessBanner(`"${finalName}" was added to the queue! Processing is running in the background.`);
+      setTimeout(() => setQueueSuccessBanner(null), 6000);
       handleResetFlow();
       void refreshProjectsList();
     } else if (result.error) {
@@ -416,6 +441,23 @@ export default function Home() {
             </div>
           </div>
         </header>
+
+        {/* Success toast after video queued */}
+        {queueSuccessBanner && (
+          <div className="rounded-xl border border-emerald-500/30 bg-emerald-950/40 p-3.5 text-xs text-emerald-300 flex items-center justify-between gap-2 shadow-lg animate-fade-in">
+            <div className="flex items-center gap-2">
+              <span className="flex size-5 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-400 font-bold">✓</span>
+              <span className="font-medium">{queueSuccessBanner}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setQueueSuccessBanner(null)}
+              className="text-xs text-emerald-400/70 hover:text-emerald-200"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Video Processing Queue (Visible whenever items are queued or processing) */}
         {queue.length > 0 && (
@@ -624,9 +666,10 @@ export default function Home() {
                         id="youtube-url-input"
                         type="url"
                         value={youtubeUrl}
-                        onChange={(e) => {
-                          setYoutubeUrl(e.target.value);
-                          if (inlineSourceError) setInlineSourceError(null);
+                        onChange={(e) => handleYouTubeInputChange(e.target.value)}
+                        onPaste={(e) => {
+                          const pasted = e.clipboardData.getData("text");
+                          if (pasted) handleYouTubeInputChange(pasted);
                         }}
                         placeholder="https://www.youtube.com/watch?v=... or https://youtu.be/..."
                         className="flex-1 min-w-0 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-4 py-2.5 text-sm text-white placeholder:text-zinc-500 focus-ring"
@@ -1014,9 +1057,9 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleSubmitToQueue}
-                  disabled={!activeVideo || !hasSelectedRatio || isAtLimit}
+                  disabled={!activeVideo || isAtLimit}
                   className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 ${
-                    activeVideo && hasSelectedRatio && !isAtLimit
+                    activeVideo && !isAtLimit
                       ? "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 cursor-pointer"
                       : "border border-zinc-800 bg-zinc-900/60 text-zinc-500 cursor-not-allowed opacity-60"
                   }`}
@@ -1028,7 +1071,7 @@ export default function Home() {
                     {!activeVideo
                       ? "Add Video (Step 1)"
                       : !hasSelectedRatio
-                      ? "Select Aspect Ratio (Step 2)"
+                      ? "Confirm Aspect Ratio (Step 2)"
                       : isAtLimit
                       ? "Queue Full (10/10)"
                       : queueCount > 0

@@ -69,6 +69,7 @@ export type Clip = {
   start: number;
   end: number;
   duration: number;
+  score?: number;
   reason?: string;
   file: string;
   top_line?: string;

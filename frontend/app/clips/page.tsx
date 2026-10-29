@@ -428,30 +428,33 @@ const ProClipCard = memo(function ProClipCard({
       </div>
 
       {/* Card Content & Metadata */}
-      <div className="mt-3 space-y-2">
+      <div className="mt-3 space-y-2.5">
         <div className="flex items-start justify-between gap-2">
-          <h3 className="text-[13px] font-semibold text-white leading-snug line-clamp-1" title={clip.title}>
+          <h3 className="text-[13px] font-semibold text-white leading-snug line-clamp-1 flex-1" title={clip.title}>
             {clip.title}
           </h3>
-          <StatusPill status={clip.status} />
+          <div className="flex items-center gap-1.5 shrink-0">
+            {typeof clip.score === "number" && (
+              <span
+                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-bold border ${
+                  clip.score >= 8.5
+                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30 shadow-sm shadow-emerald-950/40"
+                    : clip.score >= 7.0
+                    ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                    : "bg-zinc-800 text-zinc-400 border-zinc-700"
+                }`}
+                title={`Viral Hook Potential: ${clip.score}/10`}
+              >
+                <span>⭐</span>
+                <span>{clip.score.toFixed(1)}/10</span>
+              </span>
+            )}
+            <StatusPill status={clip.status} />
+          </div>
         </div>
 
-        {/* 2-line transcript / reason snippet */}
-        {clip.reason ? (
-          <p
-            className="text-xs text-zinc-400 line-clamp-2 leading-relaxed"
-            title={clip.reason}
-          >
-            {clip.reason}
-          </p>
-        ) : (
-          <p className="text-xs text-zinc-500 italic line-clamp-1">
-            Segment from source video
-          </p>
-        )}
-
         {/* Timecode badge & Hook indicator */}
-        <div className="flex items-center justify-between gap-2 pt-1 text-xs font-mono text-zinc-500">
+        <div className="flex items-center justify-between gap-2 text-xs font-mono text-zinc-500">
           <span>{formatTime(clip.start)} — {formatTime(clip.end)}</span>
           {clip.top_line && (
             <span className="text-xs font-sans font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={clip.top_line}>
@@ -460,8 +463,37 @@ const ProClipCard = memo(function ProClipCard({
           )}
         </div>
 
+        {/* Why this clip is good / Hook breakdown */}
+        {clip.reason ? (
+          <div className="rounded-xl border border-zinc-800/80 bg-[#0c0c0e] p-2.5 space-y-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+                <svg className="size-3 fill-current text-emerald-400" viewBox="0 0 24 24">
+                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                </svg>
+                Why this clip is good:
+              </span>
+              {typeof clip.score === "number" && (
+                <span className="text-[10px] text-zinc-400 font-mono">
+                  Rating: <span className="text-white font-bold">{clip.score.toFixed(1)}</span>/10
+                </span>
+              )}
+            </div>
+            <p
+              className="text-[11px] text-zinc-300 line-clamp-3 leading-relaxed"
+              title={clip.reason}
+            >
+              {clip.reason}
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-zinc-500 italic line-clamp-1">
+            Segment from source video
+          </p>
+        )}
+
         {/* Three actions: Download, Upload, Add/Edit Top Line */}
-        <div className="mt-2.5 pt-2.5 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
+        <div className="pt-2 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             disabled={isDownloading}
@@ -574,9 +606,22 @@ function ClipModalViewer({
         {/* Details Pane */}
         <div className="flex-1 space-y-4 overflow-y-auto max-h-[500px] pr-2">
           <div>
-            <span className="text-xs font-mono font-semibold text-emerald-400">
-              {clip.id}
-            </span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-mono font-semibold text-emerald-400">
+                {clip.id}
+              </span>
+              {typeof clip.score === "number" && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-bold border ${
+                    clip.score >= 8.5
+                      ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                      : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                  }`}
+                >
+                  <span>⭐ Viral Rating: {clip.score.toFixed(1)}/10</span>
+                </span>
+              )}
+            </div>
             <h2 className="text-lg font-bold text-white mt-1 leading-snug">
               {clip.title}
             </h2>
@@ -588,9 +633,21 @@ function ClipModalViewer({
           </div>
 
           {clip.reason && (
-            <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 space-y-1.5">
-              <span className="text-xs font-semibold text-zinc-300">Segment Context</span>
-              <p className="text-xs text-zinc-400 leading-relaxed">{clip.reason}</p>
+            <div className="rounded-xl border border-emerald-500/20 bg-[#0c0c0e] p-4 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                  <svg className="size-3.5 fill-current" viewBox="0 0 24 24">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  Why this clip is good
+                </span>
+                {typeof clip.score === "number" && (
+                  <span className="text-xs text-zinc-400 font-mono">
+                    Hook Score: <span className="text-emerald-400 font-bold">{clip.score.toFixed(1)}/10</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-zinc-300 leading-relaxed">{clip.reason}</p>
             </div>
           )}
 

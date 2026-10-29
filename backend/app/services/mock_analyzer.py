@@ -105,6 +105,7 @@ def create_mock_analysis(
             "title": " ".join(segment["text"] for segment in selected)[:80].strip(),
             "start": selected[0]["start"],
             "end": selected[-1]["end"],
+            "score": 8.5,
             "reason": "Mock analysis: a longer self-contained group of timestamped transcript segments.",
         })
 

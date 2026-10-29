@@ -17,10 +17,10 @@ import {
   updateProjectTitle,
   deleteProject,
   Clip,
-  ClipDuration,
   FramingMode,
   CaptionStyle,
 } from "@/src/lib/api";
+import { ClipDuration } from "@/src/components/clip-settings";
 import { sanitizeProjectName } from "@/src/lib/project-name-utils";
 
 export type QueueSource =
@@ -95,7 +95,15 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
   }, [queue]);
 
   const isWorkerRunningRef = useRef(false);
+  const isMountedRef = useRef(true);
   const activeAbortRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Sync finished items to localStorage
   useEffect(() => {
@@ -125,13 +133,15 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
 
   const updateItem = useCallback(
     (id: string, updater: Partial<QueueItem> | ((prev: QueueItem) => Partial<QueueItem>)) => {
-      setQueue((prevQueue) =>
-        prevQueue.map((item) => {
+      setQueue((prevQueue) => {
+        const nextQueue = prevQueue.map((item) => {
           if (item.id !== id) return item;
           const updates = typeof updater === "function" ? updater(item) : updater;
           return { ...item, ...updates };
-        })
-      );
+        });
+        queueRef.current = nextQueue;
+        return nextQueue;
+      });
     },
     []
   );
@@ -283,35 +293,49 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     [updateItem]
   );
 
-  // Sequential FIFO Worker Loop
+  const processQueueItemRef = useRef(processQueueItem);
   useEffect(() => {
-    let active = true;
+    processQueueItemRef.current = processQueueItem;
+  }, [processQueueItem]);
 
-    const runWorkerLoop = async () => {
-      if (isWorkerRunningRef.current) return;
+  // FIFO Queue Runner: checks for next queued item and executes sequentially
+  const kickWorkerRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    kickWorkerRef.current = () => {
+      if (isWorkerRunningRef.current || !isMountedRef.current) return;
 
-      // Find the next item waiting in queue
       const nextItem = queueRef.current.find((item) => item.status === "queued");
-      if (!nextItem || !active) return;
+      if (!nextItem) return;
 
       isWorkerRunningRef.current = true;
-      try {
-        await processQueueItem(nextItem);
-      } finally {
-        isWorkerRunningRef.current = false;
-        // Trigger next iteration for subsequent queued items
-        if (active) {
-          setTimeout(runWorkerLoop, 300);
+      void (async () => {
+        try {
+          await processQueueItemRef.current(nextItem);
+        } catch (err) {
+          console.error("Queue execution error:", err);
+        } finally {
+          isWorkerRunningRef.current = false;
+          if (isMountedRef.current) {
+            setTimeout(() => {
+              kickWorkerRef.current();
+            }, 150);
+          }
         }
-      }
+      })();
     };
+  });
 
-    void runWorkerLoop();
+  const kickWorker = useCallback(() => {
+    kickWorkerRef.current();
+  }, []);
 
-    return () => {
-      active = false;
-    };
-  }, [queue, processQueueItem]);
+  // Monitor queue updates to kick off worker if queued items exist and worker is idle
+  useEffect(() => {
+    const hasQueuedItems = queue.some((item) => item.status === "queued");
+    if (hasQueuedItems && !isWorkerRunningRef.current) {
+      kickWorker();
+    }
+  }, [queue, kickWorker]);
 
   // Public Actions
   const addToQueue = useCallback(
@@ -350,14 +374,28 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
         createdAt: Date.now(),
       };
 
-      setQueue((prev) => [...prev, newItem]);
+      setQueue((prev) => {
+        const next = [...prev, newItem];
+        queueRef.current = next;
+        return next;
+      });
+
+      // Kick worker
+      setTimeout(() => {
+        void kickWorker();
+      }, 50);
+
       return { success: true, id: newItem.id };
     },
-    []
+    [kickWorker]
   );
 
   const removeFromQueue = useCallback((id: string) => {
-    setQueue((prev) => prev.filter((item) => item.id !== id || item.status !== "queued"));
+    setQueue((prev) => {
+      const next = prev.filter((item) => item.id !== id || item.status !== "queued");
+      queueRef.current = next;
+      return next;
+    });
   }, []);
 
   const cancelRunningItem = useCallback(
@@ -400,7 +438,11 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
   );
 
   const clearCompletedItems = useCallback(() => {
-    setQueue((prev) => prev.filter((item) => ["queued", "processing"].includes(item.status)));
+    setQueue((prev) => {
+      const next = prev.filter((item) => ["queued", "processing"].includes(item.status));
+      queueRef.current = next;
+      return next;
+    });
   }, []);
 
   const activeCount = queue.filter((item) =>
