@@ -40,3 +40,4 @@ test("sanitizeProjectName enforces max 60 length", () => {
   const result = sanitizeProjectName(longName);
   assert.equal(result.length, 60);
 });
+
