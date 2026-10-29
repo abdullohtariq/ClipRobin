@@ -74,20 +74,9 @@ const STORAGE_KEY = "cliprobin_video_queue_history";
 const QueueContext = createContext<QueueContextType | null>(null);
 
 export function QueueProvider({ children }: { children: React.ReactNode }) {
-  const [queue, setQueue] = useState<QueueItem[]>(() => {
-    if (typeof window === "undefined") return [];
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored) as QueueItem[];
-        // Only restore completed/failed items from previous sessions
-        return parsed.filter((item) => ["done", "failed"].includes(item.status));
-      }
-    } catch {
-      // Ignore localStorage errors
-    }
-    return [];
-  });
+  // Start with empty queue on SSR and initial client hydration to prevent hydration mismatch
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
   const queueRef = useRef(queue);
   useEffect(() => {
@@ -105,8 +94,30 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Sync finished items to localStorage
+  // Restore completed/failed items from localStorage only on client after initial hydration
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as QueueItem[];
+        setQueue((prev) => {
+          const existingIds = new Set(prev.map((i) => i.id));
+          const restored = parsed.filter(
+            (item) => ["done", "failed"].includes(item.status) && !existingIds.has(item.id)
+          );
+          return [...prev, ...restored];
+        });
+      }
+    } catch {
+      // Ignore localStorage errors
+    } finally {
+      setHasHydrated(true);
+    }
+  }, []);
+
+  // Sync finished items to localStorage (only after initial hydration to prevent wiping)
+  useEffect(() => {
+    if (!hasHydrated) return;
     try {
       const persistable = queue
         .filter((item) => ["done", "failed"].includes(item.status))
@@ -129,7 +140,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Ignore quota errors
     }
-  }, [queue]);
+  }, [queue, hasHydrated]);
 
   const updateItem = useCallback(
     (id: string, updater: Partial<QueueItem> | ((prev: QueueItem) => Partial<QueueItem>)) => {
