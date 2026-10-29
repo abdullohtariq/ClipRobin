@@ -46,11 +46,24 @@ pub fn run() {
                     .create(true)
                     .append(true)
                     .open(&log_path)?;
-                let backend = app.path().resource_dir()?.join("cliprobin-api.exe");
+                let resource_dir = app.path().resource_dir()?;
+                let backend = resource_dir.join("cliprobin-api.exe");
+                let bin_dir = resource_dir.join("bin");
+
+                let existing_path = std::env::var_os("PATH").unwrap_or_default();
+                let mut new_path = bin_dir.clone().into_os_string();
+                if !existing_path.is_empty() {
+                    new_path.push(";");
+                    new_path.push(existing_path);
+                }
+
                 let listener = TcpListener::bind(("127.0.0.1", 0))?;
                 let port = listener.local_addr()?.port();
                 drop(listener);
                 let mut child = Command::new(backend)
+                    .env("PATH", new_path)
+                    .env("CLIPROBIN_RESOURCE_DIR", &resource_dir)
+                    .env("CLIPROBIN_FFMPEG_DIR", &bin_dir)
                     .env("CLIPROBIN_PROJECTS_DIR", projects_dir)
                     .env("CLIPROBIN_API_PORT", port.to_string())
                     .env("HF_HOME", model_cache_dir)

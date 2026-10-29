@@ -80,21 +80,193 @@ class ClipGenerationCancelled(Exception):
     """Raised when clip rendering is cancelled by the user."""
 
 
-def find_ffmpeg() -> str:
+def _prepend_to_path(folder: Path | str) -> None:
+    folder_str = str(folder)
+    current_path = os.environ.get("PATH", "")
+    paths = current_path.split(os.pathsep) if current_path else []
+    if folder_str not in paths:
+        os.environ["PATH"] = folder_str + (os.pathsep + current_path if current_path else "")
+
+
+def _auto_download_ffmpeg() -> str | None:
+    """Download standalone static FFmpeg essentials on Windows if missing entirely."""
+    if os.name != "nt":
+        return None
+
+    target_dir = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".cliprobin")) / "ClipRobin" / "bin"
+    target_ffmpeg = target_dir / "ffmpeg.exe"
+    target_ffprobe = target_dir / "ffprobe.exe"
+    if target_ffmpeg.is_file() and target_ffmpeg.stat().st_size > 1_000_000:
+        _prepend_to_path(target_dir)
+        return str(target_ffmpeg)
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    urls = [
+        "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+    ]
+
+    import urllib.request
+    import zipfile
+
+    for url in urls:
+        try:
+            logger.info("Attempting to download FFmpeg static build from %s...", url)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+                tmp_path = Path(tmp.name)
+            req = urllib.request.Request(url, headers={"User-Agent": "ClipRobin/1.0"})
+            with urllib.request.urlopen(req, timeout=90) as response, open(tmp_path, "wb") as out:
+                shutil.copyfileobj(response, out)
+
+            with zipfile.ZipFile(tmp_path) as z:
+                for name in z.namelist():
+                    norm = name.replace("\\", "/").lower()
+                    if norm.endswith("/ffmpeg.exe") or norm == "ffmpeg.exe":
+                        with z.open(name) as src, open(target_ffmpeg, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+                    elif norm.endswith("/ffprobe.exe") or norm == "ffprobe.exe":
+                        with z.open(name) as src, open(target_ffprobe, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+
+            tmp_path.unlink(missing_ok=True)
+
+            if target_ffmpeg.is_file() and target_ffmpeg.stat().st_size > 1_000_000:
+                _prepend_to_path(target_dir)
+                logger.info("Successfully installed static FFmpeg to %s", target_ffmpeg)
+                return str(target_ffmpeg)
+        except Exception as exc:
+            logger.warning("Failed downloading FFmpeg from %s: %s", url, exc)
+            continue
+
+    return None
+
+
+def find_ffmpeg(auto_download: bool = True) -> str:
+    # 1. System PATH
     executable = shutil.which("ffmpeg")
     if executable:
+        _prepend_to_path(Path(executable).parent)
         return executable
 
+    # 2. Explicit environment variables
+    for env_var in ("CLIPROBIN_FFMPEG_PATH", "FFMPEG_PATH"):
+        candidate = os.environ.get(env_var)
+        if candidate and Path(candidate).is_file():
+            _prepend_to_path(Path(candidate).parent)
+            return candidate
+
+    for env_var in ("CLIPROBIN_FFMPEG_DIR", "CLIPROBIN_RESOURCE_DIR"):
+        candidate_dir = os.environ.get(env_var)
+        if candidate_dir:
+            p = Path(candidate_dir)
+            for sub in (p, p / "bin", p / "resources" / "bin"):
+                cand = sub / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+                if cand.is_file():
+                    _prepend_to_path(cand.parent)
+                    return str(cand)
+
+    # 3. Bundled executable / PyInstaller paths
+    import sys
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = Path(meipass)
+        for cand in (p / "bin" / "ffmpeg.exe", p / "ffmpeg.exe"):
+            if cand.is_file():
+                _prepend_to_path(cand.parent)
+                return str(cand)
+
+    exe_parent = Path(sys.executable).parent
+    for sub in (exe_parent, exe_parent / "bin", exe_parent / "resources" / "bin"):
+        cand = sub / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        if cand.is_file():
+            _prepend_to_path(cand.parent)
+            return str(cand)
+
+    # 4. Project workspace directory paths
+    current_file = Path(__file__).resolve()
+    backend_bin = current_file.parents[2] / "bin" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if backend_bin.is_file():
+        _prepend_to_path(backend_bin.parent)
+        return str(backend_bin)
+
+    cwd_bin = Path.cwd() / "backend" / "bin" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if cwd_bin.is_file():
+        _prepend_to_path(cwd_bin.parent)
+        return str(cwd_bin)
+
+    # 5. LocalAppData ClipRobin bin
+    local_app_bin = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".cliprobin")) / "ClipRobin" / "bin" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    if local_app_bin.is_file():
+        _prepend_to_path(local_app_bin.parent)
+        return str(local_app_bin)
+
+    # 6. Package managers & common locations on Windows
     if os.name == "nt":
         winget_packages = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
-        matches = winget_packages.glob("Gyan.FFmpeg.Shared*/*/bin/ffmpeg.exe")
-        for match in matches:
-            if match.is_file():
-                return str(match)
+        if winget_packages.is_dir():
+            for match in winget_packages.glob("Gyan.FFmpeg*/**/ffmpeg.exe"):
+                if match.is_file():
+                    _prepend_to_path(match.parent)
+                    return str(match)
+
+        common_candidates = [
+            Path("C:/ProgramData/chocolatey/bin/ffmpeg.exe"),
+            Path.home() / "scoop" / "shims" / "ffmpeg.exe",
+            Path.home() / "scoop" / "apps" / "ffmpeg" / "current" / "bin" / "ffmpeg.exe",
+            Path("C:/Program Files/ffmpeg/bin/ffmpeg.exe"),
+            Path("C:/Program Files (x86)/ffmpeg/bin/ffmpeg.exe"),
+            Path("C:/ffmpeg/bin/ffmpeg.exe"),
+        ]
+        for candidate in common_candidates:
+            if candidate.is_file():
+                _prepend_to_path(candidate.parent)
+                return str(candidate)
+
+    # 7. Common Unix paths
+    if os.name != "nt":
+        for unix_cand in (Path("/usr/local/bin/ffmpeg"), Path("/opt/homebrew/bin/ffmpeg"), Path("/usr/bin/ffmpeg")):
+            if unix_cand.is_file():
+                _prepend_to_path(unix_cand.parent)
+                return str(unix_cand)
+
+    # 8. Auto-download static build if missing
+    if auto_download:
+        downloaded = _auto_download_ffmpeg()
+        if downloaded:
+            return downloaded
 
     raise VideoEditorError(
         "FFmpeg was not found. Install FFmpeg and restart the backend."
     )
+
+
+def find_ffprobe(ffmpeg_path: str | None = None) -> str | None:
+    """Find ffprobe binary if available."""
+    executable = shutil.which("ffprobe")
+    if executable:
+        return executable
+
+    if ffmpeg_path:
+        cand = Path(ffmpeg_path).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if cand.is_file():
+            return str(cand)
+
+    try:
+        ff = find_ffmpeg(auto_download=False)
+        cand = Path(ff).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if cand.is_file():
+            return str(cand)
+    except Exception:
+        pass
+
+    if os.name == "nt":
+        winget_packages = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
+        if winget_packages.is_dir():
+            for match in winget_packages.glob("Gyan.FFmpeg*/**/ffprobe.exe"):
+                if match.is_file():
+                    return str(match)
+
+    return None
 
 
 def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
@@ -115,11 +287,7 @@ def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
 
 def probe_video_duration(source_path: Path, ffmpeg_path: str | None = None) -> float:
     """Probe the duration of a video in seconds using ffprobe or ffmpeg."""
-    ffprobe_path = shutil.which("ffprobe")
-    if not ffprobe_path and ffmpeg_path:
-        candidate = Path(ffmpeg_path).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
-        if candidate.is_file():
-            ffprobe_path = str(candidate)
+    ffprobe_path = find_ffprobe(ffmpeg_path)
 
     if ffprobe_path:
         try:

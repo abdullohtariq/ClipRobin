@@ -1124,11 +1124,48 @@ def test_generate_clips_reanalyzes_when_duration_changes(
     assert reanalyzed["max_clip_seconds"] == 15
     assert results[0]["duration"] == 15.0
 
+def test_find_ffmpeg_priority(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import os
+    from app.services.video_editor import find_ffmpeg, find_ffprobe, VideoEditorError
+
+    # 1. shutil.which priority
+    monkeypatch.setattr("shutil.which", lambda cmd: "/custom/path/ffmpeg" if cmd == "ffmpeg" else None)
+    assert find_ffmpeg() == "/custom/path/ffmpeg"
+
+    # 2. Env var priority
+    monkeypatch.setattr("shutil.which", lambda cmd: None)
+    dummy_ffmpeg = tmp_path / "env_ffmpeg.exe"
+    dummy_ffmpeg.write_bytes(b"exe")
+    monkeypatch.setenv("CLIPROBIN_FFMPEG_PATH", str(dummy_ffmpeg))
+    assert find_ffmpeg() == str(dummy_ffmpeg)
+
+    # 3. Resource dir priority
+    monkeypatch.delenv("CLIPROBIN_FFMPEG_PATH")
+    res_dir = tmp_path / "resources"
+    (res_dir / "bin").mkdir(parents=True)
+    res_ffmpeg = res_dir / "bin" / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+    res_ffmpeg.write_bytes(b"exe")
+    monkeypatch.setenv("CLIPROBIN_RESOURCE_DIR", str(res_dir))
+    assert find_ffmpeg() == str(res_ffmpeg)
+
+    # 4. find_ffprobe with sibling
+    res_ffprobe = res_dir / "bin" / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
+    res_ffprobe.write_bytes(b"exe")
+    assert find_ffprobe(str(res_ffmpeg)) == str(res_ffprobe)
 
 
+def test_find_ffmpeg_missing_raises(monkeypatch: pytest.MonkeyPatch):
+    from app.services.video_editor import find_ffmpeg, VideoEditorError
 
+    monkeypatch.setattr("shutil.which", lambda cmd: None)
+    monkeypatch.delenv("CLIPROBIN_FFMPEG_PATH", raising=False)
+    monkeypatch.delenv("FFMPEG_PATH", raising=False)
+    monkeypatch.delenv("CLIPROBIN_FFMPEG_DIR", raising=False)
+    monkeypatch.delenv("CLIPROBIN_RESOURCE_DIR", raising=False)
+    monkeypatch.setattr("sys.executable", "nonexistent/python.exe")
+    monkeypatch.setattr("pathlib.Path.is_file", lambda self: False)
+    monkeypatch.setattr("pathlib.Path.is_dir", lambda self: False)
 
-
-
-
+    with pytest.raises(VideoEditorError, match="FFmpeg was not found"):
+        find_ffmpeg(auto_download=False)
 

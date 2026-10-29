@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Clip Robin",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "identifier": "com.cliprobin.desktop",
   "build": {
     "frontendDist": "../out",
@@ -39,7 +39,9 @@
       }
     },
     "resources": {
-      "../../backend/dist/cliprobin-api.exe": "cliprobin-api.exe"
+      "../../backend/dist/cliprobin-api.exe": "cliprobin-api.exe",
+      "../../backend/bin/ffmpeg.exe": "bin/ffmpeg.exe",
+      "../../backend/bin/ffprobe.exe": "bin/ffprobe.exe"
     },
     "icon": [
       "icons/32x32.png",

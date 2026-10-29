@@ -59,12 +59,11 @@ def _stream_rotation(stream: dict[str, Any]) -> int:
 
 def probe_video_dimensions(source_path: Path, ffmpeg_path: str | None = None) -> tuple[int, int]:
     """Probe the original video width and height using ffprobe or ffmpeg."""
-    ffprobe_path = shutil.which("ffprobe")
-    if not ffprobe_path and os.name == "nt":
-        winget_packages = Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Packages"
-        matches = list(winget_packages.glob("Gyan.FFmpeg.Shared*/*/bin/ffprobe.exe"))
-        if matches and matches[0].is_file():
-            ffprobe_path = str(matches[0])
+    try:
+        from app.services.video_editor import find_ffprobe
+        ffprobe_path = find_ffprobe(ffmpeg_path)
+    except Exception:
+        ffprobe_path = shutil.which("ffprobe")
 
     if ffprobe_path:
         try:
@@ -97,7 +96,11 @@ def probe_video_dimensions(source_path: Path, ffmpeg_path: str | None = None) ->
             logger.warning("ffprobe check failed: %s", e)
 
     # Fallback using ffmpeg -i inspection
-    ff_exec = ffmpeg_path or shutil.which("ffmpeg") or "ffmpeg"
+    try:
+        from app.services.video_editor import find_ffmpeg
+        ff_exec = ffmpeg_path or find_ffmpeg()
+    except Exception:
+        ff_exec = ffmpeg_path or shutil.which("ffmpeg") or "ffmpeg"
     try:
         res = subprocess.run(
             [ff_exec, "-i", str(source_path)],

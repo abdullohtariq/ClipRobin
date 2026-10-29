@@ -72,8 +72,14 @@ def get_whisper_model(model_name: str = MODEL_NAME) -> WhisperModel:
 def extract_audio_wav(video_path: Path, output_wav: Path) -> bool:
     """Pre-extract 16kHz mono audio track using FFmpeg to avoid slow video decoding during inference."""
     try:
+        from app.services.video_editor import find_ffmpeg
+        ffmpeg_bin = find_ffmpeg()
+    except Exception:
+        ffmpeg_bin = shutil.which("ffmpeg") or "ffmpeg"
+
+    try:
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin,
             "-y",
             "-v", "error",
             "-i", str(video_path),

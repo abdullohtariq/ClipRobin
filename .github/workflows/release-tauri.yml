@@ -49,6 +49,20 @@ jobs:
           python -m pip install --disable-pip-version-check pyinstaller -r requirements/backend.txt
           python -m PyInstaller --clean --noconfirm --onefile --windowed --icon "$repo\backend\icon.ico" --name cliprobin-api --distpath backend/dist --workpath "$env:RUNNER_TEMP\pyinstaller-work" --specpath "$env:RUNNER_TEMP\pyinstaller-spec" --collect-all faster_whisper --collect-all ctranslate2 --collect-all av --collect-all tokenizers --collect-all huggingface_hub --collect-all uvicorn --collect-all yt_dlp --collect-all cv2 --add-data "$repo\backend\app\models;app/models" --add-data "$repo\backend\assets;assets" --add-data "$repo\clip_robin_watermark.png;assets" backend/run.py
 
+      - name: Stage FFmpeg static binaries for packaging
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path backend/bin
+          Write-Host "Downloading FFmpeg static essentials build..."
+          $zipPath = "$env:RUNNER_TEMP\ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath "$env:RUNNER_TEMP\ffmpeg_extracted" -Force
+          $foundFfmpeg = Get-ChildItem -Path "$env:RUNNER_TEMP\ffmpeg_extracted" -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
+          $foundFfprobe = Get-ChildItem -Path "$env:RUNNER_TEMP\ffmpeg_extracted" -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+          Copy-Item -Force $foundFfmpeg.FullName backend/bin/ffmpeg.exe
+          Copy-Item -Force $foundFfprobe.FullName backend/bin/ffprobe.exe
+          Write-Host "Staged FFmpeg: $((Get-Item backend/bin/ffmpeg.exe).Length) bytes"
+          Write-Host "Staged FFprobe: $((Get-Item backend/bin/ffprobe.exe).Length) bytes"
 
       - name: Install frontend dependencies
         working-directory: frontend
