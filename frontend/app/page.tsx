@@ -201,6 +201,22 @@ export default function Home() {
     setCompatibilityNotice(null);
   };
 
+  const handleAddAnotherVideoClick = () => {
+    handleResetFlow();
+    const intakeEl = document.getElementById("source-intake-section");
+    intakeEl?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (importTab === "file") {
+      setTimeout(() => {
+        fileInputRef.current?.click();
+      }, 100);
+    } else {
+      setTimeout(() => {
+        const urlInput = document.getElementById("youtube-url-input") as HTMLInputElement | null;
+        urlInput?.focus();
+      }, 100);
+    }
+  };
+
   // Step 1: File selection handlers
   const isVideoFile = (file: File) => {
     if (file.type.startsWith("video/")) return true;
@@ -218,8 +234,8 @@ export default function Home() {
       return;
     }
 
-    if (file.size > 4 * 1024 * 1024 * 1024) {
-      setInlineSourceError("File is too large. Clip Robin supports video files up to 4 GB.");
+    if (file.size > 16 * 1024 * 1024 * 1024) {
+      setInlineSourceError("File is too large. Clip Robin supports video files up to 16 GB.");
       return;
     }
 
@@ -234,6 +250,7 @@ export default function Home() {
       name: file.name,
       size: file.size,
     });
+    setHasSelectedRatio(true);
 
     const existingNames = [
       ...recentProjects.map((p) => p.title || p.project_id),
@@ -253,8 +270,8 @@ export default function Home() {
       return;
     }
 
-    if (file.size > 4 * 1024 * 1024 * 1024) {
-      setInlineSourceError("File is too large. Clip Robin supports video files up to 4 GB.");
+    if (file.size > 16 * 1024 * 1024 * 1024) {
+      setInlineSourceError("File is too large. Clip Robin supports video files up to 16 GB.");
       return;
     }
 
@@ -269,6 +286,7 @@ export default function Home() {
       name: file.name,
       size: file.size,
     });
+    setHasSelectedRatio(true);
 
     const existingNames = [
       ...recentProjects.map((p) => p.title || p.project_id),
@@ -289,6 +307,7 @@ export default function Home() {
         url: trimmed,
         name: "YouTube Video",
       });
+      setHasSelectedRatio(true);
       const existingNames = [
         ...recentProjects.map((p) => p.title || p.project_id),
         ...queue.map((q) => q.projectName),
@@ -318,6 +337,7 @@ export default function Home() {
       url: trimmed,
       name: "YouTube Video",
     });
+    setHasSelectedRatio(true);
 
     const existingNames = [
       ...recentProjects.map((p) => p.title || p.project_id),
@@ -370,9 +390,13 @@ export default function Home() {
 
   // Submit flow: Add to Queue / Generate
   const handleSubmitToQueue = () => {
-    if (!activeVideo) return;
-    if (!hasSelectedRatio) {
-      setHasSelectedRatio(true);
+    if (!activeVideo) {
+      if (importTab === "file") {
+        fileInputRef.current?.click();
+      } else {
+        const input = document.getElementById("youtube-url-input") as HTMLInputElement | null;
+        input?.focus();
+      }
       return;
     }
 
@@ -461,7 +485,7 @@ export default function Home() {
 
         {/* Video Processing Queue (Visible whenever items are queued or processing) */}
         {queue.length > 0 && (
-          <VideoQueueView onAddAnotherVideo={handleResetFlow} />
+          <VideoQueueView onAddAnotherVideo={handleAddAnotherVideoClick} />
         )}
 
         {/* 2-Column Responsive Layout: Left Steps + Right Sticky Preview */}
@@ -470,6 +494,7 @@ export default function Home() {
           <div className="space-y-6 min-w-0">
             {/* STEP 1: Source (Always visible on load) */}
             <section
+              id="source-intake-section"
               aria-label="Step 1: Video source"
               className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-200"
             >
@@ -637,7 +662,7 @@ export default function Home() {
                       Drag &amp; drop a video or <span className="text-[#10b981] underline underline-offset-4">browse files</span>
                     </p>
                     <p className="mt-1 text-xs text-zinc-400">
-                      MP4, MOV, MKV, or WebM up to 4 GB
+                      MP4, MOV, MKV, or WebM up to 16 GB
                     </p>
 
                     <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
@@ -1057,11 +1082,11 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={handleSubmitToQueue}
-                  disabled={!activeVideo || isAtLimit}
-                  className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 ${
-                    activeVideo && !isAtLimit
-                      ? "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 cursor-pointer"
-                      : "border border-zinc-800 bg-zinc-900/60 text-zinc-500 cursor-not-allowed opacity-60"
+                  disabled={isAtLimit}
+                  className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 cursor-pointer ${
+                    isAtLimit
+                      ? "border border-zinc-800 bg-zinc-900/60 text-zinc-500 cursor-not-allowed opacity-60"
+                      : "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40"
                   }`}
                 >
                   <svg className="size-4 fill-current" viewBox="0 0 24 24">
@@ -1069,13 +1094,11 @@ export default function Home() {
                   </svg>
                   <span>
                     {!activeVideo
-                      ? "Add Video (Step 1)"
-                      : !hasSelectedRatio
-                      ? "Confirm Aspect Ratio (Step 2)"
+                      ? (importTab === "file" ? "Browse Video File" : "Paste YouTube Link")
                       : isAtLimit
                       ? "Queue Full (10/10)"
                       : queueCount > 0
-                      ? `Add to Queue (${queueCount}/10)`
+                      ? `Add to Queue (${queueCount + 1}/10)`
                       : `Generate ${clipCount} ${clipCount === 1 ? "Clip" : "Clips"}`}
                   </span>
                 </button>
