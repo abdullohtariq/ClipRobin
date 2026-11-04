@@ -337,7 +337,34 @@ def probe_video_duration(source_path: Path, ffmpeg_path: str | None = None) -> f
 
 get_media_duration = probe_video_duration
 
-def find_watermark_file() -> Path | None:
+def _resolve_watermark_coords(position: str = "top_right") -> tuple[str, str]:
+    pos = (position or "top_right").lower().strip()
+    if pos == "top_left":
+        return "44", "round(H*0.06)"
+    elif pos == "bottom_right":
+        return "W-w-44", "H-h-round(H*0.06)"
+    elif pos == "bottom_left":
+        return "44", "H-h-round(H*0.06)"
+    elif pos == "center":
+        return "(W-w)/2", "(H-h)/2"
+    else:  # top_right
+        return "W-w-44", "round(H*0.06)"
+
+
+def find_watermark_file(custom_path: str | Path | None = None) -> Path | None:
+    if custom_path:
+        cp = Path(custom_path)
+        if cp.is_file():
+            return cp.resolve()
+
+    # Check for custom uploaded watermark
+    custom_dir = Path(__file__).resolve().parents[2] / "data" / "watermarks"
+    if custom_dir.is_dir():
+        for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]:
+            custom_candidate = custom_dir / f"custom_watermark{ext}"
+            if custom_candidate.is_file() and custom_candidate.stat().st_size > 0:
+                return custom_candidate.resolve()
+
     env_path = os.environ.get("CLIPROBIN_WATERMARK_PATH")
     if env_path and Path(env_path).is_file():
         return Path(env_path).resolve()
@@ -810,6 +837,7 @@ def create_clip(
     framing_mode: str = "standard",
     caption_style: str = "classic",
     caption_animation: str | None = None,
+    face_tracking: bool = True,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -887,6 +915,7 @@ def create_clip(
                         project_directory=project_dir,
                         ffmpeg_path=ffmpeg_path,
                         cancel_event=cancel_event,
+                        face_tracking=face_tracking,
                     )
                     crop_w, crop_h, x_expr = get_crop_filter_for_clip(tracking_data, start_time, end_time)
                 except Exception:

@@ -11,6 +11,9 @@ import {
   YouTubeStatusResponse,
 } from "@/src/lib/api";
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
+import { useSubscription } from "@/src/lib/subscription-context";
+import { CustomWatermarkSettings } from "@/src/components/custom-watermark-settings";
+import { PaddleSandboxModal } from "@/src/components/paddle-sandbox-modal";
 
 const SETTINGS_STORAGE_KEY = "cliprobin.settings";
 
@@ -36,6 +39,20 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export default function SettingsPage() {
   const { status: aiDevStatus, refresh: refreshAiStatus } = useAIDeveloperStatus();
+  const { isPro, openUpgradeModal, upgradeToPro, downgradeToFree, licenseKey } = useSubscription();
+  const [settingsLicenseInput, setSettingsLicenseInput] = useState("");
+  const [settingsLicenseMsg, setSettingsLicenseMsg] = useState<string | null>(null);
+  const [isPaddleModalOpen, setIsPaddleModalOpen] = useState(false);
+
+  const handleSettingsLicenseSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!settingsLicenseInput.trim()) return;
+    await upgradeToPro(settingsLicenseInput.trim());
+    setSettingsLicenseMsg("Pro license successfully activated!");
+    setSettingsLicenseInput("");
+    setTimeout(() => setSettingsLicenseMsg(null), 3000);
+  };
+
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSaved, setIsSaved] = useState(false);
 
@@ -223,6 +240,97 @@ export default function SettingsPage() {
         </header>
 
         <div className="space-y-6">
+          {/* Subscription & License Section */}
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="size-6 rounded-md bg-amber-500/15 flex items-center justify-center text-amber-300 border border-amber-500/30 text-xs font-bold">
+                  ★
+                </div>
+                <h2 className="text-base font-semibold text-white">Subscription &amp; License</h2>
+              </div>
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${
+                  isPro
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                    : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                }`}
+              >
+                <span className={`size-1.5 rounded-full ${isPro ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+                {isPro ? "Clip Robin Pro Active" : "Free Starter Plan"}
+              </span>
+            </div>
+
+            <p className="text-xs text-zinc-400">
+              {isPro
+                ? "You have full access to Gemini AI Hooks, custom brand watermarks, and all subtitle styles."
+                : "Free tier processes video locally for free. Upgrade to Pro to unlock Gemini AI hook detection, remove watermarks, and use custom brand logos."}
+            </p>
+
+            {settingsLicenseMsg && (
+              <p className="text-xs text-emerald-400 font-semibold">{settingsLicenseMsg}</p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setIsPaddleModalOpen(true)}
+                className="px-3.5 py-2 rounded-xl border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <span>💳 Paddle Sandbox Settings</span>
+              </button>
+              {!isPro ? (
+                <button
+                  type="button"
+                  onClick={() => openUpgradeModal("Clip Robin Pro")}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-zinc-950 text-xs font-bold transition-all shadow-md cursor-pointer"
+                >
+                  ⚡ Upgrade to Pro ($19/mo or $79 lifetime)
+                </button>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-emerald-300 font-medium">
+                    License: {licenseKey || "Active Local License"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={downgradeToFree}
+                    className="text-xs text-zinc-500 hover:text-rose-400 underline transition-colors cursor-pointer"
+                  >
+                    Switch to Free (Testing)
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!isPro && (
+              <form onSubmit={handleSettingsLicenseSubmit} className="pt-2 flex items-center gap-2 max-w-md">
+                <input
+                  type="text"
+                  placeholder="Enter license key (ROBIN-PRO-...)"
+                  value={settingsLicenseInput}
+                  onChange={(e) => setSettingsLicenseInput(e.target.value)}
+                  className="flex-1 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 uppercase font-mono"
+                />
+                <button
+                  type="submit"
+                  disabled={!settingsLicenseInput.trim()}
+                  className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-white text-xs font-semibold transition-colors shrink-0"
+                >
+                  Activate
+                </button>
+              </form>
+            )}
+          </section>
+
+          {/* Custom Watermark & Brand Logo Section */}
+          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-4">
+            <h2 className="text-base font-semibold text-white">Brand Watermark &amp; Logo</h2>
+            <p className="text-xs text-zinc-400">
+              Customize or replace the watermark that appears in the safe zones of your exported vertical clips.
+            </p>
+            <CustomWatermarkSettings />
+          </section>
           <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-5">
             <h2 className="text-base font-semibold text-white">General</h2>
             <div>
@@ -534,6 +642,7 @@ export default function SettingsPage() {
           </section>
         </div>
       </div>
+      <PaddleSandboxModal isOpen={isPaddleModalOpen} onClose={() => setIsPaddleModalOpen(false)} />
     </main>
   );
 }

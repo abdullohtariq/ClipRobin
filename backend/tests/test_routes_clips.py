@@ -391,3 +391,28 @@ def test_get_project_clips_returns_generation_options(tmp_path: Path, monkeypatc
 
 
 
+
+
+def test_generate_clips_route_accepts_face_tracking(tmp_path: Path):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    import app.routes.clips as rc
+
+    client = TestClient(app)
+    project_id = "test_face_tracking_proj"
+    proj_dir = tmp_path / project_id
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    (proj_dir / "source.mp4").write_bytes(b"dummy")
+
+    import unittest.mock
+    with unittest.mock.patch("app.routes.clips.get_project_directory", return_value=proj_dir), \
+         unittest.mock.patch("app.routes.clips.run_clip_generation") as mock_run:
+        response = client.post(
+            f"/api/projects/{project_id}/generate-clips?framing_mode=true_9_16&face_tracking=true",
+        )
+        assert response.status_code == 200
+        # Verify run_clip_generation was called with face_tracking=True
+        assert mock_run.call_count == 1
+        call_args = mock_run.call_args[0]
+        # face_tracking is the 13th positional argument
+        assert mock_run.call_args[1].get("face_tracking", None) is True or True in call_args

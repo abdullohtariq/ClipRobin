@@ -5,6 +5,7 @@ import { CaptionStyle } from "@/src/lib/api";
 import { Badge } from "@/src/components/ui/badge";
 import { Checkbox } from "@/src/components/ui/checkbox";
 import { IconButton } from "@/src/components/ui/icon-button";
+import { useSubscription } from "@/src/lib/subscription-context";
 
 export interface StyleOption {
   id: CaptionStyle;
@@ -145,10 +146,11 @@ export function CaptionVisualSample({ styleId }: { styleId: CaptionStyle }) {
 interface CaptionCardProps {
   styleOption: StyleOption;
   isSelected: boolean;
+  isLocked?: boolean;
   onSelect: () => void;
 }
 
-function CaptionCard({ styleOption, isSelected, onSelect }: CaptionCardProps) {
+function CaptionCard({ styleOption, isSelected, isLocked = false, onSelect }: CaptionCardProps) {
   return (
     <div
       role="radio"
@@ -172,6 +174,12 @@ function CaptionCard({ styleOption, isSelected, onSelect }: CaptionCardProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20 pointer-events-none" />
         <CaptionVisualSample styleId={styleOption.id} />
 
+        {isLocked && (
+          <div className="absolute top-1.5 left-1.5 sm:top-2 sm:left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-[9px] sm:text-[10px] font-bold text-amber-300 backdrop-blur-xs">
+            <span>🔒</span>
+            <span>PRO</span>
+          </div>
+        )}
         {isSelected && (
           <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 z-10 flex size-5 items-center justify-center rounded-full bg-[#10b981] text-zinc-950 font-bold text-xs shadow">
             <svg className="size-3 stroke-[3]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -215,6 +223,7 @@ export function CaptionStylePicker({
   selectedStyle,
   onSelect,
 }: CaptionStylePickerProps) {
+  const { isCaptionStyleAllowed, openUpgradeModal } = useSubscription();
   const [tempStyle, setTempStyle] = useState<CaptionStyle>(selectedStyle);
   const [selectedCategory, setSelectedCategory] = useState<"all" | "bold" | "minimal" | "boxed">("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -373,6 +382,10 @@ export function CaptionStylePicker({
     CAPTION_STYLE_OPTIONS.find((s) => s.id === tempStyle) || CAPTION_STYLE_OPTIONS[0];
 
   const handleApply = () => {
+    if (!isCaptionStyleAllowed(tempStyle)) {
+      openUpgradeModal(`The "${activeStyleDef.name}" Subtitle Style`);
+      return;
+    }
     onSelect(tempStyle);
     onClose();
   };
@@ -579,7 +592,14 @@ export function CaptionStylePicker({
                       key={styleOpt.id}
                       styleOption={styleOpt}
                       isSelected={tempStyle === styleOpt.id}
-                      onSelect={() => setTempStyle(styleOpt.id)}
+                      isLocked={!isCaptionStyleAllowed(styleOpt.id)}
+                      onSelect={() => {
+                        if (!isCaptionStyleAllowed(styleOpt.id)) {
+                          openUpgradeModal(`The "${styleOpt.name}" Subtitle Style`);
+                          return;
+                        }
+                        setTempStyle(styleOpt.id);
+                      }}
                     />
                   ))}
                 </div>

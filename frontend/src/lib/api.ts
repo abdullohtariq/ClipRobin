@@ -76,6 +76,7 @@ export type Clip = {
   framing_mode?: FramingMode;
   caption_style?: CaptionStyle;
   caption_animation?: CaptionAnimation;
+  face_tracking?: boolean;
   status: string;
 };
 
@@ -322,6 +323,7 @@ export async function generateClips(
   captionAnimation?: CaptionAnimation,
   clipCount?: number,
   generationMode: "random" | "ai" = "random",
+  faceTracking?: boolean,
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const framingQuery = framingMode ? `&framing_mode=${encodeURIComponent(framingMode)}` : "";
@@ -329,8 +331,9 @@ export async function generateClips(
   const animQuery = captionAnimation ? `&caption_animation=${encodeURIComponent(captionAnimation)}` : "";
   const countQuery = typeof clipCount === "number" && clipCount > 0 ? `&clip_count=${clipCount}` : "";
   const modeQuery = `&generation_mode=${encodeURIComponent(generationMode)}`;
+  const faceTrackingQuery = faceTracking !== undefined ? `&face_tracking=${faceTracking}` : "";
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}${countQuery}${modeQuery}`,
+    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}${countQuery}${modeQuery}${faceTrackingQuery}`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -485,6 +488,7 @@ export async function setClipTopLine(
     framing_mode?: FramingMode;
     caption_style?: CaptionStyle;
     caption_animation?: CaptionAnimation;
+    face_tracking?: boolean;
   },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
@@ -500,6 +504,7 @@ export async function setClipTopLine(
         framing_mode: options?.framing_mode,
         caption_style: options?.caption_style,
         caption_animation: options?.caption_animation,
+        face_tracking: options?.face_tracking,
       }),
     },
   );
@@ -519,6 +524,7 @@ export async function removeClipTopLine(
     framing_mode?: FramingMode;
     caption_style?: CaptionStyle;
     caption_animation?: CaptionAnimation;
+    face_tracking?: boolean;
   },
 ): Promise<{ clip: Clip }> {
   const apiUrl = await getApiUrl();
@@ -537,6 +543,9 @@ export async function removeClipTopLine(
   }
   if (options?.caption_animation !== undefined) {
     query.set("caption_animation", options.caption_animation);
+  }
+  if (options?.face_tracking !== undefined) {
+    query.set("face_tracking", String(options.face_tracking));
   }
   const queryString = query.toString() ? `?${query.toString()}` : "";
   const response = await fetch(
@@ -856,6 +865,51 @@ export async function uploadClipToYouTube(payload: YouTubeUploadPayload): Promis
   if (!response.ok) {
     const resPayload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(resPayload, "YouTube video upload failed"));
+  }
+  return response.json();
+}
+
+
+export type WatermarkStatus = {
+  has_custom_watermark: boolean;
+  custom_filename: string | null;
+  custom_url: string | null;
+  default_available: boolean;
+};
+
+export async function getWatermarkStatus(): Promise<WatermarkStatus> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/watermark`, { cache: "no-store" });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to fetch watermark status"));
+  }
+  return response.json();
+}
+
+export async function uploadCustomWatermark(file: File): Promise<{ status: string; filename: string; url: string }> {
+  const apiUrl = await getApiUrl();
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(`${apiUrl}/api/watermark/upload`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to upload custom watermark"));
+  }
+  return response.json();
+}
+
+export async function deleteCustomWatermark(): Promise<{ status: string; deleted: boolean }> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/watermark`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to delete custom watermark"));
   }
   return response.json();
 }

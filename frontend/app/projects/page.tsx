@@ -22,12 +22,14 @@ import {
   getPreviewUrls,
 } from "@/src/components/caption-style-picker";
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
+import { useSubscription } from "@/src/lib/subscription-context";
 
 const CLIP_DURATIONS = [12, 30, 60, 90] as const;
 type ClipDuration = (typeof CLIP_DURATIONS)[number];
 
 export default function Projects() {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
+  const { isPro, openUpgradeModal } = useSubscription();
   const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -204,7 +206,7 @@ export default function Projects() {
           }
         },
         durationOptions[projectId] ?? defaultDuration,
-        watermarkOptions[projectId] ?? defaultWatermark,
+        isPro ? (watermarkOptions[projectId] ?? defaultWatermark) : true,
         framingOptions[projectId] ?? defaultFraming,
         captionStyleOptions[projectId] ?? defaultCaptionStyle,
         undefined,
@@ -520,6 +522,10 @@ export default function Projects() {
                                   title={aiModeEnabled ? "AI clip selection is enabled in Developer Mode" : aiDeveloperStatus?.reason || "Connect YouTube and enable AI Developer Mode to unlock AI clip selection"}
                                   aria-label={aiModeEnabled ? "Select AI generation mode" : "AI mode is available after YouTube sign-in and Developer Mode setup"}
                                   onClick={() => {
+                                    if (!isPro) {
+                                      openUpgradeModal("Gemini AI Hook Finder");
+                                      return;
+                                    }
                                     setGenerationModeOptions((prev) => ({ ...prev, [project.project_id]: "ai" }));
                                     try { localStorage.setItem("cliprobin_generation_mode", "ai"); } catch {}
                                   }}
@@ -588,6 +594,10 @@ export default function Projects() {
                             disabled={isGenerating || isTranscribing}
                             onClick={() => {
                               const nextWm = !showWm;
+                              if (!nextWm && !isPro) {
+                                openUpgradeModal("Watermark Removal");
+                                return;
+                              }
                               setWatermarkOptions((prev) => ({
                                 ...prev,
                                 [project.project_id]: nextWm,

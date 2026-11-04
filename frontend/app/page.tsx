@@ -94,6 +94,7 @@ export default function Home() {
   // Step 2 State: Aspect Ratio
   const [hasSelectedRatio, setHasSelectedRatio] = useState(false);
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
+  const [faceTracking, setFaceTracking] = useState<boolean>(true);
   const [compatibilityNotice, setCompatibilityNotice] = useState<string | null>(null);
 
   // Step 3 State: Project Name & Remaining Options
@@ -145,6 +146,10 @@ export default function Home() {
       const savedFraming = localStorage.getItem("cliprobin_framing_mode");
       if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
         setFramingMode(savedFraming as FramingMode);
+      }
+      const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
+      if (savedFaceTracking !== null) {
+        setFaceTracking(savedFaceTracking === "true");
       }
       const savedDuration = localStorage.getItem("cliprobin_clip_duration");
       if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
@@ -361,11 +366,18 @@ export default function Home() {
       if (mode === "square_rounded") {
         setCompatibilityNotice("Selected 1:1 Rounded square canvas. Subtitle safe-margins adjusted to centered square framing.");
       } else if (mode === "true_9_16") {
-        setCompatibilityNotice("Selected Full 9:16 Crop. AI face & speaker tracking enabled.");
+        setCompatibilityNotice("Selected Full 9:16 Crop. Smooth AI face tracking enabled.");
       } else {
         setCompatibilityNotice("Selected 16:9 Letterbox widescreen canvas.");
       }
     }
+  };
+
+  const handleToggleFaceTracking = (enabled: boolean) => {
+    setFaceTracking(enabled);
+    try {
+      localStorage.setItem("cliprobin_face_tracking", String(enabled));
+    } catch {}
   };
 
   // Step 3: Project name validation & handlers
@@ -427,6 +439,7 @@ export default function Home() {
         captionStyle,
         showCaptions,
         showWatermark,
+        faceTracking: framingMode === "true_9_16" ? faceTracking : false,
       },
     });
 
@@ -807,6 +820,54 @@ export default function Home() {
                   />
                 </div>
 
+                {/* Face Tracking Option - Exclusively active in 9:16 */}
+                {framingMode === "true_9_16" ? (
+                  <div className="rounded-xl border border-purple-500/30 bg-purple-950/20 p-3.5 flex items-center justify-between gap-3 animate-fade-in transition-all">
+                    <div className="flex items-start gap-2.5">
+                      <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 mt-0.5 shrink-0">
+                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="8" r="4" />
+                          <path d="M6 20v-2a6 6 0 0 1 12 0v2" />
+                          <path d="M2 12h2M20 12h2M12 2v2M12 20v2" strokeLinecap="round" strokeDasharray="1 3" />
+                        </svg>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] font-semibold text-zinc-100">Smooth Face Tracking</span>
+                          <Badge variant="purple" size="sm">9:16 AI Follow</Badge>
+                        </div>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          Smoothly moves the camera to keep the active speaker centered in 9:16 as they shift or move like Shorts &amp; Reels.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-label="Toggle smooth face tracking in 9:16"
+                      aria-checked={faceTracking}
+                      onClick={() => handleToggleFaceTracking(!faceTracking)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus-ring ${
+                        faceTracking ? "bg-purple-600" : "bg-zinc-700"
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                          faceTracking ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-2.5 px-3 flex items-center justify-between text-xs text-zinc-500">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-block size-1.5 rounded-full bg-zinc-600" />
+                      <span>Smooth Face Tracking is only available for <strong>Full 9:16 Crop</strong>.</span>
+                    </div>
+                    <Badge variant="neutral" size="sm">9:16 Only</Badge>
+                  </div>
+                )}
+
                 {/* Compatibility notice if ratio changed */}
                 {compatibilityNotice && (
                   <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 p-3 text-xs text-emerald-300 animate-fade-in flex items-center justify-between gap-2">
@@ -890,6 +951,8 @@ export default function Home() {
                   maxClips={maxClips}
                   framingMode={framingMode}
                   onFramingModeChange={handleSelectFramingMode}
+                  faceTracking={faceTracking}
+                  onFaceTrackingChange={handleToggleFaceTracking}
                   showCaptions={showCaptions}
                   onShowCaptionsChange={setShowCaptions}
                   captionStyle={captionStyle}
@@ -980,8 +1043,12 @@ export default function Home() {
                               <path d="M6 20v-2a6 6 0 0 1 12 0v2" strokeWidth="2" />
                             </svg>
                           </div>
-                          <span className="mt-2 text-[10px] font-semibold text-purple-300">Full 9:16 Crop</span>
-                          <span className="text-[8px] text-zinc-400 mt-0.5">Speaker tracking focus</span>
+                          <span className="mt-2 text-[10px] font-semibold text-purple-300">
+                            {faceTracking ? "Smooth Face Tracking" : "Full 9:16 Static Crop"}
+                          </span>
+                          <span className="text-[8px] text-zinc-400 mt-0.5">
+                            {faceTracking ? "Camera smoothly follows speaker" : "Fixed center crop"}
+                          </span>
                         </div>
                       </div>
                     )
@@ -1060,7 +1127,7 @@ export default function Home() {
                 <div className="flex flex-wrap gap-1.5">
                   <Badge variant="neutral">
                     {framingMode === "true_9_16"
-                      ? "Full 9:16 (AI)"
+                      ? (faceTracking ? "9:16 Face Track" : "9:16 Static")
                       : framingMode === "square_rounded"
                       ? "1:1 Rounded"
                       : "16:9 Letterbox"}

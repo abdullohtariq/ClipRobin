@@ -30,6 +30,7 @@ import { YouTubeUploadModal } from "@/src/components/youtube-upload-modal";
 import { TikTokUploadModal } from "@/src/components/tiktok-upload-modal";
 import { InstagramUploadModal } from "@/src/components/instagram-upload-modal";
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
+import { useSubscription } from "@/src/lib/subscription-context";
 
 interface AppliedProjectSettings {
   framingMode: FramingMode;
@@ -628,7 +629,7 @@ function ClipModalViewer({
             <div className="flex items-center gap-3 mt-2 text-xs text-zinc-400">
               <span>Duration: {clip.duration.toFixed(1)}s</span>
               <span>•</span>
-              <span>Framing: {clip.framing_mode || "Standard"}</span>
+              <span>Framing: {clip.framing_mode === "true_9_16" ? (clip.face_tracking !== false ? "9:16 Smooth Face Track" : "9:16 Static Crop") : clip.framing_mode || "Standard"}</span>
             </div>
           </div>
 
@@ -736,6 +737,7 @@ function ClipModalViewer({
 // Main Clips Studio Component
 function ProjectClipsContent({ projectId }: { projectId: string }) {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
+  const { isPro, openUpgradeModal, isCaptionStyleAllowed } = useSubscription();
   const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
   const router = useRouter();
   const [clips, setClips] = useState<Clip[]>([]);
@@ -748,6 +750,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
 
   // Settings state
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
+  const [faceTracking, setFaceTracking] = useState<boolean>(true);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
   const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
   const [clipCount, setClipCount] = useState<number>(3);
@@ -818,6 +821,10 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       const savedFraming = localStorage.getItem("cliprobin_framing_mode");
       if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
         setFramingMode(savedFraming as FramingMode);
+      }
+      const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
+      if (savedFaceTracking !== null) {
+        setFaceTracking(savedFaceTracking === "true");
       }
       const savedDuration = localStorage.getItem("cliprobin_clip_duration");
       if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
@@ -1008,12 +1015,13 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
           }
         },
         clipDurationSeconds,
-        showWatermark,
+        isPro ? showWatermark : true,
         framingMode,
         captionStyle,
         undefined,
         clipCount,
         generationMode,
+        faceTracking,
       );
 
       setClips(result.clips);
@@ -1272,6 +1280,10 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 aiModeDisabledReason={aiDeveloperStatus?.reason}
                 generationMode={generationMode}
                 onGenerationModeChange={(mode) => {
+                  if (mode === "ai" && !isPro) {
+                    openUpgradeModal("Gemini AI Hook Finder");
+                    return;
+                  }
                   setGenerationMode(mode);
                   try { localStorage.setItem("cliprobin_generation_mode", mode); } catch {}
                 }}
@@ -1291,6 +1303,11 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                   setFramingMode(fm);
                   try { localStorage.setItem("cliprobin_framing_mode", fm); } catch {}
                 }}
+                faceTracking={faceTracking}
+                onFaceTrackingChange={(ft) => {
+                  setFaceTracking(ft);
+                  try { localStorage.setItem("cliprobin_face_tracking", String(ft)); } catch {}
+                }}
                 showCaptions={showCaptions}
                 onShowCaptionsChange={(subs) => {
                   setShowCaptions(subs);
@@ -1298,11 +1315,19 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 }}
                 captionStyle={captionStyle}
                 onCaptionStyleChange={(st) => {
+                  if (!isCaptionStyleAllowed(st)) {
+                    openUpgradeModal("Pro Subtitle Styles");
+                    return;
+                  }
                   setCaptionStyle(st);
                   try { localStorage.setItem("cliprobin_caption_style", st); } catch {}
                 }}
-                showWatermark={showWatermark}
+                showWatermark={isPro ? showWatermark : true}
                 onShowWatermarkChange={(wm) => {
+                  if (!wm && !isPro) {
+                    openUpgradeModal("Watermark Removal");
+                    return;
+                  }
                   setShowWatermark(wm);
                   try { localStorage.setItem("cliprobin_show_watermark", String(wm)); } catch {}
                 }}

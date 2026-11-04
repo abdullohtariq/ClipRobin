@@ -33,6 +33,7 @@ class TopLineRequest(BaseModel):
     framing_mode: str | None = None
     caption_style: str | None = None
     caption_animation: str | None = None
+    face_tracking: bool | None = None
 
 
 router = APIRouter(prefix="/api/projects")
@@ -143,6 +144,7 @@ def generate_project_clips(
     framing_mode: str | None = None,
     caption_style: str | None = None,
     caption_animation: str | None = None,
+    face_tracking: bool | None = None,
 ) -> dict[str, str]:
     if generation_mode not in {"random", "ai"}:
         raise HTTPException(status_code=422, detail="Generation mode must be 'random' or 'ai'.")
@@ -220,6 +222,7 @@ def generate_project_clips(
         framing_mode,
         caption_style,
         caption_animation,
+        face_tracking,
     )
     return {"job_id": job_id}
 
@@ -237,6 +240,7 @@ def run_clip_generation(
     framing_mode: str | None = None,
     caption_style: str | None = None,
     caption_animation: str | None = None,
+    face_tracking: bool | None = None,
 ) -> None:
     def report_progress(
         step: str,
@@ -299,6 +303,7 @@ def run_clip_generation(
             framing_mode=framing_mode,
             caption_style=caption_style,
             caption_animation=caption_animation,
+            face_tracking=face_tracking,
         )
     except ClipGenerationCancelled:
         finish_cancelled_job(job_id, project_id)
@@ -455,6 +460,7 @@ def update_clip_top_line(
             framing_mode=payload.framing_mode,
             caption_style=payload.caption_style,
             caption_animation=payload.caption_animation,
+            face_tracking=payload.face_tracking,
         )
         return {"clip": updated_clip}
     except ValueError as error:
@@ -474,6 +480,7 @@ def delete_clip_top_line(
     framing_mode: str | None = None,
     caption_style: str | None = None,
     caption_animation: str | None = None,
+    face_tracking: bool | None = None,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
     raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
@@ -487,6 +494,7 @@ def delete_clip_top_line(
             framing_mode=framing_mode,
             caption_style=caption_style,
             caption_animation=caption_animation,
+            face_tracking=face_tracking,
         )
         return {"clip": updated_clip}
     except ValueError as error:

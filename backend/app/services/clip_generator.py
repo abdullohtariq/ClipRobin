@@ -74,6 +74,7 @@ def generate_clips(
     framing_mode: str | None = None,
     caption_style: str | None = None,
     caption_animation: str | None = None,
+    face_tracking: bool | None = None,
 ) -> list[dict[str, Any]]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -221,6 +222,13 @@ def generate_clips(
     else:
         use_caption_animation = None
 
+    if face_tracking is not None:
+        use_face_tracking = face_tracking
+    elif "face_tracking" in saved_options:
+        use_face_tracking = bool(saved_options["face_tracking"])
+    else:
+        use_face_tracking = True
+
     analysis["generation_options"] = {
         "generation_mode": generation_mode,
         "show_subtitles": show_subtitles,
@@ -228,6 +236,7 @@ def generate_clips(
         "framing_mode": use_framing_mode,
         "caption_style": use_caption_style,
         "caption_animation": use_caption_animation,
+        "face_tracking": use_face_tracking,
         "clip_duration_seconds": int(max_clip_seconds),
         "clip_count": requested_clip_count,
     }
@@ -260,6 +269,7 @@ def generate_clips(
             cancel_event=cancel_event,
             progress_callback=track_progress,
             max_duration=max_tracking_duration,
+            face_tracking=use_face_tracking,
         )
 
     if progress_callback:
@@ -299,6 +309,7 @@ def generate_clips(
                     framing_mode=use_framing_mode,
                     caption_style=use_caption_style,
                     caption_animation=use_caption_animation,
+                    face_tracking=use_face_tracking,
                 )
                 if cancel_event is not None and cancel_event.is_set():
                     if temp_output.is_file():
@@ -318,6 +329,7 @@ def generate_clips(
                     "framing_mode": use_framing_mode,
                     "caption_style": use_caption_style,
                     "caption_animation": use_caption_animation,
+                    "face_tracking": use_face_tracking,
                     "status": "ready",
                 }
                 generated.append(clip_metadata)
@@ -370,6 +382,7 @@ def render_single_clip(
     framing_mode: str | None = None,
     caption_style: str | None = None,
     caption_animation: str | None = None,
+    face_tracking: bool | None = None,
 ) -> dict[str, Any]:
     source_files = list(project_directory.glob("source.*"))
     if not source_files:
@@ -438,6 +451,15 @@ def render_single_clip(
     else:
         use_caption_animation = None
 
+    if face_tracking is not None:
+        use_face_tracking = face_tracking
+    elif "face_tracking" in target_clip:
+        use_face_tracking = bool(target_clip["face_tracking"])
+    elif "face_tracking" in saved_options:
+        use_face_tracking = bool(saved_options["face_tracking"])
+    else:
+        use_face_tracking = True
+
     if "generation_options" not in analysis:
         analysis["generation_options"] = {}
     analysis["generation_options"]["show_watermark"] = use_watermark
@@ -445,6 +467,7 @@ def render_single_clip(
     analysis["generation_options"]["framing_mode"] = use_framing_mode
     analysis["generation_options"]["caption_style"] = use_caption_style
     analysis["generation_options"]["caption_animation"] = use_caption_animation
+    analysis["generation_options"]["face_tracking"] = use_face_tracking
 
     transcript_segments = _load_transcript_segments(project_directory)
     subtitle_segments = [
@@ -471,6 +494,7 @@ def render_single_clip(
             framing_mode=use_framing_mode,
             caption_style=use_caption_style,
             caption_animation=use_caption_animation,
+            face_tracking=use_face_tracking,
         )
         if temp_output.is_file():
             temp_output.replace(final_output)
@@ -479,6 +503,7 @@ def render_single_clip(
             temp_output.unlink(missing_ok=True)
 
     target_clip["top_line"] = cleaned_top_line or ""
+    target_clip["face_tracking"] = use_face_tracking
     analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
 
     return {

@@ -347,7 +347,7 @@ def _compute_iou(box1: tuple[float, float, float, float], box2: tuple[float, flo
 # ---------------------------------------------------------------------------
 # Bump whenever the analysis algorithm changes so stale tracking_analysis.json
 # caches produced by older code are recomputed instead of silently reused.
-ANALYSIS_VERSION = 3
+ANALYSIS_VERSION = 4
 
 SAMPLE_FPS = 4.0             # face sampling cadence (250 ms) - enough for lip-motion cues
 SAMPLE_WIDTH = 640           # detector input width; faces >= ~20px here are reliable for YuNet
@@ -799,6 +799,111 @@ def _build_shots(
             shot["pan_seconds"] = round(min(PAN_SECONDS, (shot["end"] - shot["start"]) / 2.0), 3)
     return consolidated
 
+def _build_smooth_tracking_shots(
+    timeline: list[tuple[float, float, bool]],
+    crop_w: int,
+    orig_w: int,
+    frame_interval: float,
+) -> list[dict[str, Any]]:
+    """Build smooth tracking shots with continuous camera gliding for speaker face tracking in 9:16.
+
+    - Hard cuts on speaker switches when the target is far across the frame (> 35% of crop_w).
+    - Smooth camera panning (EMA + deadband) as the active speaker moves or shifts posture.
+    - Smoothstep (3u^2 - 2u^3) easing between waypoints for professional gimbal-like follow.
+    - Adjacent static holds are consolidated.
+    """
+    if not timeline:
+        return [{"start": 0.0, "end": 999999.0, "x": _even_left(orig_w / 2.0, crop_w, orig_w)}]
+
+    max_left = max(0, orig_w - crop_w)
+    deadzone = max(16.0, 0.035 * crop_w)
+    switch_px = SWITCH_FRACTION * crop_w
+
+    segments: list[list[tuple[float, int]]] = []
+    current_seg: list[tuple[float, int]] = []
+    prev_left: int | None = None
+
+    for t, cx, is_switch in timeline:
+        raw_left = max(0.0, min(float(max_left), cx - crop_w / 2.0))
+        even_left = int(round(raw_left)) & ~1
+
+        if current_seg and is_switch and prev_left is not None and abs(even_left - prev_left) > switch_px:
+            segments.append(current_seg)
+            current_seg = []
+
+        current_seg.append((t, even_left))
+        prev_left = even_left
+
+    if current_seg:
+        segments.append(current_seg)
+
+    all_shots: list[dict[str, Any]] = []
+
+    for seg in segments:
+        if not seg:
+            continue
+
+        smoothed: list[tuple[float, int]] = []
+        cur_filtered = float(seg[0][1])
+        smoothed.append((seg[0][0], int(round(cur_filtered)) & ~1))
+
+        alpha = 0.25
+        for t, target_x in seg[1:]:
+            diff = target_x - cur_filtered
+            if abs(diff) > deadzone:
+                step = diff - (deadzone if diff > 0 else -deadzone)
+                cur_filtered += alpha * step
+                cur_filtered = max(0.0, min(float(max_left), cur_filtered))
+            smoothed.append((t, int(round(cur_filtered)) & ~1))
+
+        waypoints: list[tuple[float, int]] = [smoothed[0]]
+        anchor_t, anchor_x = smoothed[0]
+        for t, x in smoothed[1:-1]:
+            dx = abs(x - anchor_x)
+            dt = t - anchor_t
+            if dx >= 10 or dt >= 1.0:
+                waypoints.append((t, x))
+                anchor_t, anchor_x = t, x
+        if len(smoothed) > 1 and waypoints[-1] != smoothed[-1]:
+            waypoints.append(smoothed[-1])
+
+        for i in range(len(waypoints) - 1):
+            t_a, x_a = waypoints[i]
+            t_b, x_b = waypoints[i + 1]
+            dt = max(0.05, round(t_b - t_a, 3))
+            shot: dict[str, Any] = {
+                "start": round(t_a, 3),
+                "end": round(t_b, 3),
+                "x": x_b,
+            }
+            if x_a != x_b and dt > 0.08:
+                shot["pan_from"] = x_a
+                shot["pan_seconds"] = dt
+            all_shots.append(shot)
+
+    consolidated: list[dict[str, Any]] = []
+    for s in all_shots:
+        if (
+            consolidated
+            and "pan_from" not in consolidated[-1]
+            and "pan_from" not in s
+            and consolidated[-1]["x"] == s["x"]
+        ):
+            consolidated[-1]["end"] = s["end"]
+        else:
+            consolidated.append(dict(s))
+
+    if consolidated:
+        consolidated[-1]["end"] = round(timeline[-1][0] + frame_interval + 10.0, 3)
+    else:
+        consolidated.append({
+            "start": 0.0,
+            "end": round(timeline[-1][0] + frame_interval + 10.0, 3),
+            "x": _even_left(timeline[0][1], crop_w, orig_w),
+        })
+
+    return consolidated
+
 
 def _find_source_video(project_directory: Path) -> Path:
     candidates = [p for p in project_directory.glob("source.*") if p.is_file()]
@@ -957,6 +1062,7 @@ def analyze_speaker_tracking(
     cancel_event: threading.Event | None = None,
     progress_callback: Any | None = None,
     max_duration: float | None = None,
+    face_tracking: bool = True,
 ) -> dict[str, Any]:
     """
     Run YuNet face detection and mouth-movement speech correlation across the video.
@@ -968,7 +1074,7 @@ def analyze_speaker_tracking(
     # One analysis per project at a time: a concurrent caller waits and then hits the cache
     # instead of decoding the whole video a second time.
     with lock:
-        return _analyze_speaker_tracking_locked(project_directory, ffmpeg_path, cancel_event, progress_callback, max_duration=max_duration)
+        return _analyze_speaker_tracking_locked(project_directory, ffmpeg_path, cancel_event, progress_callback, max_duration=max_duration, face_tracking=face_tracking)
 
 
 def _analyze_speaker_tracking_locked(
@@ -977,6 +1083,7 @@ def _analyze_speaker_tracking_locked(
     cancel_event: threading.Event | None,
     progress_callback: Any | None,
     max_duration: float | None = None,
+    face_tracking: bool = True,
 ) -> dict[str, Any]:
     source_path = _find_source_video(project_directory)
     signature = _source_signature(source_path)
@@ -989,6 +1096,8 @@ def _analyze_speaker_tracking_locked(
                 and "shots" in cached
                 and cached.get("version") == ANALYSIS_VERSION
                 and cached.get("source") == signature
+                and cached.get("face_tracking", True) == face_tracking
+                and not cached.get("fallback_reason")
             ):
                 return cached
         except Exception:
@@ -1067,19 +1176,25 @@ def _analyze_speaker_tracking_locked(
 
     assignments = _assign_speakers(speech_utterances, tracks)
     timeline = _build_target_timeline(frames, tracks, assignments, crop_w)
-    shots = _build_shots(timeline, crop_w, orig_w, frame_interval)
+    if face_tracking:
+        shots = _build_smooth_tracking_shots(timeline, crop_w, orig_w, frame_interval)
+    else:
+        shots = _build_shots(timeline, crop_w, orig_w, frame_interval)
 
-    result = {**base, "shots": shots}
+    result = {**base, "face_tracking": face_tracking, "shots": shots}
     _write_cache(analysis_cache, result)
     return result
 
 
-def _shot_value_expr(rel_start: float, x: int, pan_from: int | None, pan_seconds: float) -> str:
+def _shot_value_expr(rel_start: float, rel_end: float, x: int, pan_from: int | None, pan_seconds: float) -> str:
     """FFmpeg expression for one shot's x: constant, or a smoothstep ease from pan_from."""
     if pan_from is None or pan_from == x or pan_seconds <= 0 or rel_start + pan_seconds <= 0:
         return str(x)
     u = f"((t-({rel_start:.3f}))/{pan_seconds:.3f})"
-    return f"if(lt(t,{rel_start + pan_seconds:.3f}),{pan_from}+({x - pan_from})*{u}*{u}*(3-2*{u}),{x})"
+    ease_expr = f"{pan_from}+({x - pan_from})*{u}*{u}*(3-2*{u})"
+    if rel_start + pan_seconds < rel_end - 0.02:
+        return f"if(lt(t,{rel_start + pan_seconds:.3f}),{ease_expr},{x})"
+    return ease_expr
 
 
 def get_crop_filter_for_clip(
@@ -1114,7 +1229,7 @@ def get_crop_filter_for_clip(
             rel_end = min(clip_duration, s_end - clip_start)
             pan_from = s.get("pan_from")
             value = _shot_value_expr(
-                s_start - clip_start, x,
+                s_start - clip_start, rel_end, x,
                 int(pan_from) if pan_from is not None else None,
                 float(s.get("pan_seconds", PAN_SECONDS)),
             )
@@ -1122,6 +1237,18 @@ def get_crop_filter_for_clip(
 
     if not relevant:
         return crop_w, crop_h, str(shots[0].get("x", "(in_w-out_w)/2"))
+
+    # Guard against exceeding FFmpeg expression parser depth limits on long clips
+    max_safe_segments = 25
+    while len(relevant) > max_safe_segments:
+        best_idx = 0
+        min_move = float("inf")
+        for i in range(len(relevant) - 1):
+            move = abs(relevant[i+1][2] - relevant[i][2])
+            if move < min_move:
+                min_move = move
+                best_idx = i
+        relevant.pop(best_idx)
 
     # If only 1 shot or all relevant shots have the same static x
     if all(r[3] for r in relevant) and len({r[2] for r in relevant}) == 1:

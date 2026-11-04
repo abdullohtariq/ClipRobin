@@ -537,3 +537,67 @@ def test_failure_mode_14_phone_video_rotation_probe():
     # No rotation
     stream_normal = {"width": 1920, "height": 1080}
     assert _stream_rotation(stream_normal) == 0
+
+
+def test_smooth_face_tracking_pans_when_speaker_shifts():
+    """Verify smooth face tracking creates panning waypoints with smoothstep ease when speaker moves."""
+    from app.services.smart_framing import _build_smooth_tracking_shots, get_crop_filter_for_clip
+
+    # 15s timeline: speaker starts at 960 (center of 1920), shifts to 1180, returns to 960
+    timeline = []
+    for i in range(60):
+        t = i * 0.25
+        if 3.0 <= t <= 8.0:
+            cx = 960.0 + 200.0 * ((t - 3.0) / 5.0)
+        elif 8.0 < t <= 12.0:
+            cx = 1160.0
+        else:
+            cx = 960.0
+        timeline.append((t, cx, False))
+
+    shots = _build_smooth_tracking_shots(timeline, crop_w=608, orig_w=1920, frame_interval=0.25)
+    assert len(shots) > 1
+
+    # Check that panning occurred
+    panned_shots = [s for s in shots if "pan_from" in s and s["pan_from"] != s["x"]]
+    assert len(panned_shots) >= 1
+    assert any(s["pan_seconds"] > 0 for s in panned_shots)
+
+    # Check that get_crop_filter_for_clip generates valid FFmpeg expression
+    tracking_data = {
+        "crop_width": 608,
+        "crop_height": 1080,
+        "shots": shots,
+    }
+    cw, ch, expr = get_crop_filter_for_clip(tracking_data, 0.0, 15.0)
+    assert cw == 608
+    assert ch == 1080
+    assert "if(lt(t," in expr
+
+
+def test_get_crop_filter_safe_decimation_on_many_shots():
+    """Verify that a clip with > 50 shots is safely decimated to prevent FFmpeg expression parser overflow."""
+    from app.services.smart_framing import get_crop_filter_for_clip
+
+    # Create 80 shots in a 60s clip
+    shots = []
+    for i in range(80):
+        t_start = i * 0.75
+        t_end = (i + 1) * 0.75
+        shots.append({
+            "start": round(t_start, 3),
+            "end": round(t_end, 3),
+            "x": 600 + (10 if i % 2 == 0 else -10),
+            "pan_from": 600,
+            "pan_seconds": 0.5,
+        })
+
+    tracking_data = {
+        "crop_width": 608,
+        "crop_height": 1080,
+        "shots": shots,
+    }
+    cw, ch, expr = get_crop_filter_for_clip(tracking_data, 0.0, 60.0)
+    assert cw == 608
+    # Count occurrences of 'if(lt(t,' to verify it does not exceed 50
+    assert expr.count("if(lt(t,") <= 50

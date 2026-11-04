@@ -35,6 +35,7 @@ export interface QueueSettings {
   captionStyle: CaptionStyle;
   showCaptions: boolean;
   showWatermark: boolean;
+  faceTracking?: boolean;
 }
 
 export interface QueueItem {
@@ -276,7 +277,8 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           settings.captionStyle,
           undefined,
           settings.clipCount,
-          settings.generationMode
+          settings.generationMode,
+          settings.faceTracking
         );
 
         if (isCancelled || generation.cancelled) {
