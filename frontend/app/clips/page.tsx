@@ -960,6 +960,9 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
 
         if (job?.status === "failed" && job.error) {
           setStatus(job.error);
+        } else {
+          // Clear transient network errors once successful
+          setStatus((prev) => (prev === "Failed to fetch" || prev === "Failed to load clips" ? "" : prev));
         }
 
         if (isRunning && interval === undefined) {
@@ -971,7 +974,12 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       } catch (err) {
         if (!isCurrentRequest) return;
         setIsLoading(false);
-        setStatus(err instanceof Error ? err.message : "Failed to load clips");
+        const msg = err instanceof Error ? err.message : "Failed to load clips";
+        setStatus(msg);
+        // Automatically retry transient fetch failure after 2 seconds instead of stalling forever
+        if (interval === undefined && (msg.includes("fetch") || msg.includes("Failed"))) {
+          interval = window.setTimeout(() => void loadClipsAndStatus(), 2000) as unknown as number;
+        }
       }
     };
 

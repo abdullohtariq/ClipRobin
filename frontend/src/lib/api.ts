@@ -350,16 +350,29 @@ export async function generateClips(
     completed_clips: 0,
     total_clips: 0,
   });
-  let job: ClipGenerationJob;
-  do {
-    const jobResponse = await fetch(
-      `${apiUrl}/api/projects/${projectId}/generation-jobs/${jobId}`,
-    );
-    if (!jobResponse.ok) {
-      const payload: unknown = await jobResponse.json().catch(() => null);
-      throw new Error(getApiErrorMessage(payload, "Could not check clip generation progress"));
+  let job: ClipGenerationJob | undefined;
+  let pollFailures = 0;
+  while (true) {
+    try {
+      const jobResponse = await fetch(
+        `${apiUrl}/api/projects/${projectId}/generation-jobs/${jobId}`,
+      );
+      if (!jobResponse.ok) {
+        const payload: unknown = await jobResponse.json().catch(() => null);
+        throw new Error(getApiErrorMessage(payload, "Could not check clip generation progress"));
+      }
+      job = (await jobResponse.json()) as ClipGenerationJob;
+      pollFailures = 0;
+    } catch (pollErr) {
+      pollFailures += 1;
+      // Allow up to 15 retries (~15 seconds) for transient network drops or backend reload
+      if (pollFailures > 15) {
+        throw pollErr;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      continue;
     }
-    job = await jobResponse.json() as ClipGenerationJob;
+
     onProgress?.(job);
     if (job.status === "failed") {
       throw new Error(job.error ?? "Clip generation failed");
@@ -367,12 +380,13 @@ export async function generateClips(
     if (job.status === "cancelled") {
       return { clips: [], cancelled: true };
     }
-    if (job.status !== "completed") {
-      await new Promise((resolve) => window.setTimeout(resolve, 700));
+    if (job.status === "completed") {
+      break;
     }
-  } while (job.status !== "completed");
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+  }
 
-  return { clips: job.clips ?? [], cancelled: false };
+  return { clips: job?.clips ?? [], cancelled: false };
 }
 
 export async function cancelClipGeneration(
