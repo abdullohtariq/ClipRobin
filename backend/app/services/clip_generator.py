@@ -1,4 +1,5 @@
 import json
+import logging
 import shutil
 import tempfile
 import threading
@@ -8,6 +9,8 @@ from typing import Any, Callable
 
 from app.services.mock_analyzer import create_mock_analysis
 from app.services.video_editor import ClipGenerationCancelled, VideoEditorError, create_clip
+
+logger = logging.getLogger(__name__)
 
 def _load_transcript_segments(project_directory: Path) -> list[dict[str, Any]]:
     transcript_path = project_directory / "transcription" / "transcript.json"
