@@ -187,12 +187,20 @@ def generate_clips(
             if not transcript_path.is_file():
                 raise FileNotFoundError("Transcript not found for AI analysis")
             transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
-            analysis = analyze_transcript(
-                transcript,
-                provider="gemini",
-                max_clip_seconds=int(max_clip_seconds),
-                max_clips=requested_clip_count,
-            )
+            try:
+                analysis = analyze_transcript(
+                    transcript,
+                    provider="gemini",
+                    max_clip_seconds=int(max_clip_seconds),
+                    max_clips=requested_clip_count,
+                )
+            except Exception as e:
+                logger.warning("Gemini AI analysis failed after retries (%s); falling back to heuristic clip generator", e)
+                analysis = create_mock_analysis(
+                    project_directory,
+                    max_clip_seconds=max_clip_seconds,
+                    max_clips=requested_clip_count,
+                )
         else:
             analysis = create_mock_analysis(
                 project_directory,

@@ -1,9 +1,13 @@
 import json
+import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 PROVIDER_DEFAULT = "openai"
@@ -170,26 +174,71 @@ def request_openai_compatible(config: dict[str, str], api_key: str, user_prompt:
 
 
 def request_gemini(config: dict[str, str], api_key: str, user_prompt: str) -> str:
-    model = os.getenv(config["model_env"], config["default_model"])
+    primary_model = os.getenv(config["model_env"], config["default_model"])
     base_url = os.getenv(config["base_url_env"], config["default_base_url"])
-    response = httpx.post(
-        f"{base_url}/{model}:generateContent",
-        params={"key": api_key},
-        json={
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [{"parts": [{"text": user_prompt}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-                "responseMimeType": "application/json",
-            },
-        },
-        timeout=120.0,
-    )
-    response.raise_for_status()
-    try:
-        return response.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError, TypeError) as error:
-        raise AIAnalyzerError("AI provider returned an unexpected response") from error
+
+    candidate_models = [primary_model]
+    for alt in ["gemini-3.1-flash-lite", "gemini-flash-lite-latest"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
+
+    max_retries = 3
+    last_error: Exception | None = None
+
+    for model_idx, model in enumerate(candidate_models):
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = httpx.post(
+                    f"{base_url}/{model}:generateContent",
+                    params={"key": api_key},
+                    json={
+                        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                        "contents": [{"parts": [{"text": user_prompt}]}],
+                        "generationConfig": {
+                            "temperature": 0.2,
+                            "responseMimeType": "application/json",
+                        },
+                    },
+                    timeout=120.0,
+                )
+                response.raise_for_status()
+                try:
+                    return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+                except (KeyError, IndexError, TypeError) as error:
+                    raise AIAnalyzerError("AI provider returned an unexpected response") from error
+            except httpx.HTTPStatusError as error:
+                last_error = error
+                status = error.response.status_code
+                if status in {429, 500, 502, 503, 504} and attempt < max_retries:
+                    backoff = 1.5 * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Gemini API returned status %d on model %s. Retrying in %.1fs (attempt %d/%d)...",
+                        status, model, backoff, attempt, max_retries
+                    )
+                    time.sleep(backoff)
+                    continue
+                if status in {429, 500, 502, 503, 504} and model_idx + 1 < len(candidate_models):
+                    logger.warning(
+                        "Model %s returned status %d. Falling back to next candidate %s...",
+                        model, status, candidate_models[model_idx + 1]
+                    )
+                    break
+                raise
+            except (httpx.TimeoutException, httpx.NetworkError) as error:
+                last_error = error
+                if attempt < max_retries:
+                    backoff = 1.5 * (2 ** (attempt - 1))
+                    logger.warning(
+                        "Gemini API network error on %s: %s. Retrying in %.1fs (attempt %d/%d)...",
+                        model, error, backoff, attempt, max_retries
+                    )
+                    time.sleep(backoff)
+                    continue
+                raise
+
+    if last_error:
+        raise last_error
+    raise AIAnalyzerError("Gemini API request failed after all retries and fallback models")
 
 
 def parse_analysis(raw_response: str) -> dict[str, Any]:
