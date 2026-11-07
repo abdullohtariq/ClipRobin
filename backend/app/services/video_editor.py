@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -15,6 +16,74 @@ from app.services.process_utils import get_no_window_subprocess_kwargs
 logger = logging.getLogger(__name__)
 
 _ASS_FILTER_SUPPORT: dict[str, bool] = {}
+_AUDIO_STREAM_CACHE: dict[tuple[str, int, int], bool] = {}
+_VIDEO_DURATION_CACHE: dict[tuple[str, int, int], float] = {}
+_PROBE_CACHE_LOCK = threading.Lock()
+
+
+def _file_stat_key(path: Path) -> tuple[str, int, int] | None:
+    try:
+        resolved = path.resolve()
+        st = resolved.stat()
+        return (str(resolved), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+def _detect_letterbox_vertical_crop(
+    source_path: Path,
+    start_time: float,
+    end_time: float,
+    crop_w: int,
+    crop_h: int,
+    ffmpeg_path: str,
+) -> tuple[int, int, int, int]:
+    """Detect burned-in top/bottom letterbox bars in a 16:9 segment for true_9_16 mode.
+
+    Returns (adjusted_crop_w, adjusted_crop_h, y_offset, x_inset).
+    """
+    try:
+        if not source_path.is_file() or source_path.stat().st_size < 100_000:
+            return crop_w, crop_h, 0, 0
+        sample_ts = max(0.0, start_time + min(1.5, (end_time - start_time) * 0.5))
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-ss", f"{sample_ts:.2f}",
+            "-i", str(source_path),
+            "-t", "0.8",
+            "-an",
+            "-vf", "cropdetect=24:2:0",
+            "-f", "null",
+            "-",
+        ]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            **get_no_window_subprocess_kwargs(),
+        )
+        matches = re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", proc.stderr or "")
+        if not matches:
+            return crop_w, crop_h, 0, 0
+        _, h_str, _, y_str = matches[-1]
+        active_h = int(h_str)
+        active_y = int(y_str)
+        bottom_bar = crop_h - (active_y + active_h)
+        if (
+            active_y >= 16
+            and bottom_bar >= 16
+            and int(crop_h * 0.65) <= active_h <= int(crop_h * 0.94)
+        ):
+            new_h = active_h - (active_h % 2)
+            new_w = int(round(new_h * 9 / 16))
+            new_w = new_w - (new_w % 2)
+            x_inset = max(0, (crop_w - new_w) // 2)
+            return new_w, new_h, active_y, x_inset
+    except Exception:
+        pass
+    return crop_w, crop_h, 0, 0
 
 
 def has_ass_filter(ffmpeg_path: str | None = None) -> bool:
@@ -47,7 +116,6 @@ def has_ass_filter(ffmpeg_path: str | None = None) -> bool:
         return False
 
 
-
 def _generate_rounded_corner_mask(
     destination_directory: Path,
     size: int | None = None,
@@ -60,6 +128,20 @@ def _generate_rounded_corner_mask(
         width = size
         height = size
     mask_file = destination_directory / filename
+    cache_dir = Path(tempfile.gettempdir()) / "cliprobin_masks"
+    cached_mask = cache_dir / f"mask_{width}x{height}_r{radius}.png"
+
+    try:
+        if cached_mask.is_file() and cached_mask.stat().st_size > 0:
+            mask_file.unlink(missing_ok=True)
+            try:
+                os.link(cached_mask, mask_file)
+            except OSError:
+                shutil.copyfile(cached_mask, mask_file)
+            return mask_file
+    except OSError:
+        pass
+
     scale = 4
     high_w = width * scale
     high_h = height * scale
@@ -69,6 +151,15 @@ def _generate_rounded_corner_mask(
     draw.rounded_rectangle((0, 0, high_w, high_h), radius=high_radius, fill=255)
     img = img.resize((width, height), Image.Resampling.LANCZOS)
     img.save(mask_file)
+
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        tmp_cached = cache_dir / f"mask_{width}x{height}_r{radius}.{os.getpid()}.{threading.get_ident()}.tmp.png"
+        shutil.copyfile(mask_file, tmp_cached)
+        os.replace(tmp_cached, cached_mask)
+    except OSError:
+        pass
+
     return mask_file
 
 
@@ -270,24 +361,68 @@ def find_ffprobe(ffmpeg_path: str | None = None) -> str | None:
 
 
 def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
-    try:
-        result = subprocess.run(
-            [ffmpeg_path, "-i", str(source_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=5,
-            **get_no_window_subprocess_kwargs(),
-        )
-        return "Audio:" in result.stderr
-    except Exception:
-        return True
+    stat_key = _file_stat_key(source_path)
+    if stat_key is not None:
+        with _PROBE_CACHE_LOCK:
+            if stat_key in _AUDIO_STREAM_CACHE:
+                return _AUDIO_STREAM_CACHE[stat_key]
 
+    ffprobe_path = find_ffprobe(ffmpeg_path)
+    detected: bool | None = None
+    if ffprobe_path:
+        try:
+            probe_res = subprocess.run(
+                [
+                    ffprobe_path,
+                    "-v", "error",
+                    "-select_streams", "a",
+                    "-show_entries", "stream=index",
+                    "-of", "csv=p=0",
+                    str(source_path),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                **get_no_window_subprocess_kwargs(),
+            )
+            if probe_res.returncode == 0:
+                detected = bool(probe_res.stdout.strip())
+        except Exception:
+            detected = None
+
+    if detected is None:
+        try:
+            result = subprocess.run(
+                [ffmpeg_path, "-i", str(source_path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                **get_no_window_subprocess_kwargs(),
+            )
+            detected = "Audio:" in result.stderr
+        except Exception:
+            detected = True
+
+    if stat_key is not None:
+        with _PROBE_CACHE_LOCK:
+            if len(_AUDIO_STREAM_CACHE) > 256:
+                _AUDIO_STREAM_CACHE.clear()
+            _AUDIO_STREAM_CACHE[stat_key] = detected
+    return detected
 
 
 def probe_video_duration(source_path: Path, ffmpeg_path: str | None = None) -> float:
     """Probe the duration of a video in seconds using ffprobe or ffmpeg."""
+    stat_key = _file_stat_key(source_path)
+    if stat_key is not None:
+        with _PROBE_CACHE_LOCK:
+            if stat_key in _VIDEO_DURATION_CACHE:
+                return _VIDEO_DURATION_CACHE[stat_key]
+
     ffprobe_path = find_ffprobe(ffmpeg_path)
+    duration = 0.0
 
     if ffprobe_path:
         try:
@@ -310,32 +445,40 @@ def probe_video_duration(source_path: Path, ffmpeg_path: str | None = None) -> f
                 data = json.loads(result.stdout)
                 dur = float(data.get("format", {}).get("duration", 0))
                 if dur > 0:
-                    return dur
+                    duration = dur
         except Exception as e:
             logger.warning("ffprobe duration check failed: %s", e)
 
-    # Fallback to ffmpeg -i inspection
-    ff_exec = ffmpeg_path or shutil.which("ffmpeg") or "ffmpeg"
-    try:
-        res = subprocess.run(
-            [ff_exec, "-i", str(source_path)],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            **get_no_window_subprocess_kwargs(),
-        )
-        import re
-        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", res.stderr)
-        if match:
-            h, m, s = float(match.group(1)), float(match.group(2)), float(match.group(3))
-            return h * 3600.0 + m * 60.0 + s
-    except Exception:
-        pass
+    if duration <= 0:
+        # Fallback to ffmpeg -i inspection
+        ff_exec = ffmpeg_path or shutil.which("ffmpeg") or "ffmpeg"
+        try:
+            res = subprocess.run(
+                [ff_exec, "-i", str(source_path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                **get_no_window_subprocess_kwargs(),
+            )
+            import re
+            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", res.stderr)
+            if match:
+                h, m, s = float(match.group(1)), float(match.group(2)), float(match.group(3))
+                duration = h * 3600.0 + m * 60.0 + s
+        except Exception:
+            pass
 
-    return 0.0
+    if duration > 0 and stat_key is not None:
+        with _PROBE_CACHE_LOCK:
+            if len(_VIDEO_DURATION_CACHE) > 256:
+                _VIDEO_DURATION_CACHE.clear()
+            _VIDEO_DURATION_CACHE[stat_key] = duration
+
+    return duration
 
 
 get_media_duration = probe_video_duration
+
 
 def _resolve_watermark_coords(position: str = "top_right") -> tuple[str, str]:
     pos = (position or "top_right").lower().strip()
@@ -357,13 +500,23 @@ def find_watermark_file(custom_path: str | Path | None = None) -> Path | None:
         if cp.is_file():
             return cp.resolve()
 
-    # Check for custom uploaded watermark
-    custom_dir = Path(__file__).resolve().parents[2] / "data" / "watermarks"
-    if custom_dir.is_dir():
-        for ext in [".png", ".jpg", ".jpeg", ".webp", ".svg"]:
-            custom_candidate = custom_dir / f"custom_watermark{ext}"
-            if custom_candidate.is_file() and custom_candidate.stat().st_size > 0:
-                return custom_candidate.resolve()
+    # Check for custom uploaded watermark in persistent user data directory
+    custom_dirs: list[Path] = []
+    try:
+        from app.routes.watermark import get_watermarks_dir
+        custom_dirs.append(get_watermarks_dir())
+    except Exception:
+        pass
+    legacy_custom_dir = Path(__file__).resolve().parents[2] / "data" / "watermarks"
+    if legacy_custom_dir not in custom_dirs:
+        custom_dirs.append(legacy_custom_dir)
+
+    for custom_dir in custom_dirs:
+        if custom_dir.is_dir():
+            for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+                custom_candidate = custom_dir / f"custom_watermark{ext}"
+                if custom_candidate.is_file() and custom_candidate.stat().st_size > 0:
+                    return custom_candidate.resolve()
 
     env_path = os.environ.get("CLIPROBIN_WATERMARK_PATH")
     if env_path and Path(env_path).is_file():
@@ -399,7 +552,6 @@ def find_watermark_file(custom_path: str | Path | None = None) -> Path | None:
     return None
 
 
-
 def _copy_font_file(destination_directory: Path) -> str | None:
     if os.name == "nt":
         windows_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
@@ -420,7 +572,11 @@ def _copy_font_file(destination_directory: Path) -> str | None:
     for candidate in candidates:
         if candidate.is_file():
             font_file = destination_directory / "subtitle-font.ttf"
-            shutil.copyfile(candidate, font_file)
+            font_file.unlink(missing_ok=True)
+            try:
+                os.link(candidate, font_file)
+            except OSError:
+                shutil.copyfile(candidate, font_file)
             return font_file.name
     return None
 
@@ -838,6 +994,7 @@ def create_clip(
     caption_style: str = "classic",
     caption_animation: str | None = None,
     face_tracking: bool = True,
+    language: str | None = None,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -849,6 +1006,24 @@ def create_clip(
     source_path = source_path.resolve()
     output_path = output_path.resolve()
     watermark_path = find_watermark_file() if show_watermark else None
+
+    wm_position = "top_right"
+    wm_opacity = 100
+    if watermark_path and watermark_path.is_file():
+        try:
+            from app.routes.watermark import get_watermark_settings
+            wm_settings = get_watermark_settings()
+            wm_position = str(wm_settings.get("position", "top_right"))
+            wm_opacity = int(wm_settings.get("opacity", 100))
+        except Exception:
+            wm_position = "top_right"
+            wm_opacity = 100
+    wm_x, wm_y = _resolve_watermark_coords(wm_position)
+    wm_scale_filter = (
+        f"[1:v]scale=220:-2,format=rgba,colorchannelmixer=aa={max(10, min(100, wm_opacity)) / 100.0:.2f}[wm]"
+        if wm_opacity < 100
+        else "[1:v]scale=220:-2[wm]"
+    )
 
     try:
         with tempfile.TemporaryDirectory(
@@ -873,6 +1048,7 @@ def create_clip(
                     framing_mode=framing_mode,
                     top_line=top_line,
                     has_watermark=bool(watermark_path and watermark_path.is_file()),
+                    language=language,
                 )
                 ass_file = subtitle_directory / "captions.ass"
                 ass_file.write_text(ass_content, encoding="utf-8")
@@ -915,6 +1091,7 @@ def create_clip(
                         project_directory=project_dir,
                         ffmpeg_path=ffmpeg_path,
                         cancel_event=cancel_event,
+                        max_duration=end_time + 1.0,
                         face_tracking=face_tracking,
                     )
                     crop_w, crop_h, x_expr = get_crop_filter_for_clip(tracking_data, start_time, end_time)
@@ -930,22 +1107,30 @@ def create_clip(
                         "pad=720:1280:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p"
                     )
                 else:
-                    base_filter = f"crop=w={crop_w}:h={crop_h}:x='{x_expr}':y=0,scale=720:1280,format=yuv420p"
+                    adj_w, adj_h, y_off, x_inset = _detect_letterbox_vertical_crop(
+                        source_path, start_time, end_time, crop_w, crop_h, ffmpeg_path
+                    )
+                    if y_off > 0:
+                        adj_x = f"({x_expr})+{x_inset}" if x_inset > 0 else x_expr
+                        base_filter = (
+                            f"crop=w={adj_w}:h={adj_h}:x='{adj_x}':y={y_off},"
+                            f"scale=720:1280,setsar=1,format=yuv420p"
+                        )
+                    else:
+                        base_filter = f"crop=w={crop_w}:h={crop_h}:x='{x_expr}':y=0,scale=720:1280,format=yuv420p"
 
                 if watermark_path and watermark_path.is_file():
                     input_args = ["-i", str(source_path), "-i", str(watermark_path)]
-                    wm_x = "W-w-44"
-                    wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
                         base_filter_complex = (
                             f"[0:v]{base_filter},{ass_filter}[base];"
-                            f"[1:v]scale=220:-2[wm];"
+                            f"{wm_scale_filter};"
                             f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     else:
                         base_filter_complex = (
                             f"[0:v]{base_filter}[base];"
-                            f"[1:v]scale=220:-2[wm];"
+                            f"{wm_scale_filter};"
                             f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     if (not use_ass) and all_text_filters:
@@ -972,18 +1157,16 @@ def create_clip(
                 )
                 if watermark_path and watermark_path.is_file():
                     input_args = ["-i", str(source_path), "-i", str(watermark_path)]
-                    wm_x = "W-w-44"
-                    wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
                         base_filter_complex = (
                             f"{bg_and_square},{ass_filter}[base];"
-                            f"[1:v]scale=220:-2[wm];"
+                            f"{wm_scale_filter};"
                             f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     else:
                         base_filter_complex = (
                             f"{bg_and_square}[base];"
-                            f"[1:v]scale=220:-2[wm];"
+                            f"{wm_scale_filter};"
                             f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     if (not use_ass) and all_text_filters:
@@ -1016,18 +1199,16 @@ def create_clip(
                 )
                 if watermark_path and watermark_path.is_file():
                     input_args = ["-i", str(source_path), "-i", str(watermark_path)]
-                    wm_x = "W-w-44"
-                    wm_y = "round(H*0.06)"
                     if use_ass and ass_filter:
                         base_filter_complex = (
                             f"{bg_and_video},{ass_filter}[base];"
-                            f"[1:v]scale=220:-2[wm];"
+                            f"{wm_scale_filter};"
                             f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     else:
                         base_filter_complex = (
                             f"{bg_and_video}[base];"
-                            f"[1:v]scale=220:-2[wm];"
+                            f"{wm_scale_filter};"
                             f"[base][wm]overlay={wm_x}:{wm_y}"
                         )
                     if (not use_ass) and all_text_filters:

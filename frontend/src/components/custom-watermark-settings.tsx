@@ -1,28 +1,59 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
-import { getWatermarkStatus, uploadCustomWatermark, deleteCustomWatermark, WatermarkStatus } from "@/src/lib/api";
+import {
+  getWatermarkStatus,
+  uploadCustomWatermark,
+  deleteCustomWatermark,
+  updateWatermarkSettings,
+  resolveWatermarkImageUrl,
+  WatermarkPosition,
+  WatermarkStatus,
+} from "@/src/lib/api";
 import { useSubscription } from "@/src/lib/subscription-context";
 
 export interface CustomWatermarkSettingsProps {
   onSettingsChange?: () => void;
 }
 
+const VALID_POSITIONS: WatermarkPosition[] = [
+  "top_right",
+  "top_left",
+  "bottom_right",
+  "bottom_left",
+];
+
 export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSettingsProps) {
   const { isPro, openUpgradeModal } = useSubscription();
   const [status, setStatus] = useState<WatermarkStatus | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [position, setPosition] = useState("top_right");
+  const [position, setPosition] = useState<WatermarkPosition>("top_right");
   const [opacity, setOpacity] = useState(100);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const opacitySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadStatus = async () => {
     try {
       setLoading(true);
       const res = await getWatermarkStatus();
       setStatus(res);
+      const resolvedUrl = await resolveWatermarkImageUrl(res.custom_url);
+      setImageUrl(resolvedUrl);
+      if (res.position && VALID_POSITIONS.includes(res.position)) {
+        setPosition(res.position);
+        try {
+          localStorage.setItem("cliprobin_watermark_position", res.position);
+        } catch {}
+      }
+      if (typeof res.opacity === "number" && res.opacity >= 20 && res.opacity <= 100) {
+        setOpacity(res.opacity);
+        try {
+          localStorage.setItem("cliprobin_watermark_opacity", String(res.opacity));
+        } catch {}
+      }
     } catch {
       // ignore
     } finally {
@@ -31,28 +62,56 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
   };
 
   useEffect(() => {
-    void loadStatus();
     try {
-      const savedPos = localStorage.getItem("cliprobin_watermark_position");
-      if (savedPos) setPosition(savedPos);
+      const savedPos = localStorage.getItem("cliprobin_watermark_position") as WatermarkPosition | null;
+      if (savedPos && VALID_POSITIONS.includes(savedPos)) {
+        setPosition(savedPos);
+      }
       const savedOp = localStorage.getItem("cliprobin_watermark_opacity");
-      if (savedOp) setOpacity(Number(savedOp));
+      if (savedOp) {
+        const parsedOp = Number(savedOp);
+        if (Number.isFinite(parsedOp) && parsedOp >= 20 && parsedOp <= 100) {
+          setOpacity(parsedOp);
+        }
+      }
     } catch {}
+    void loadStatus();
+    return () => {
+      if (opacitySyncTimerRef.current) {
+        clearTimeout(opacitySyncTimerRef.current);
+      }
+    };
   }, []);
 
-  const handlePositionChange = (newPos: string) => {
+  const persistSettingsToBackend = (nextPos: WatermarkPosition, nextOp: number) => {
+    void updateWatermarkSettings(nextPos, nextOp).catch((err) => {
+      setError(err instanceof Error ? err.message : "Failed to save watermark settings");
+    });
+  };
+
+  const handlePositionChange = (newPos: WatermarkPosition) => {
     setPosition(newPos);
+    setError(null);
     try {
       localStorage.setItem("cliprobin_watermark_position", newPos);
     } catch {}
+    persistSettingsToBackend(newPos, opacity);
     onSettingsChange?.();
   };
 
   const handleOpacityChange = (newOp: number) => {
-    setOpacity(newOp);
+    const clamped = Math.max(20, Math.min(100, Math.round(newOp)));
+    setOpacity(clamped);
+    setError(null);
     try {
-      localStorage.setItem("cliprobin_watermark_opacity", String(newOp));
+      localStorage.setItem("cliprobin_watermark_opacity", String(clamped));
     } catch {}
+    if (opacitySyncTimerRef.current) {
+      clearTimeout(opacitySyncTimerRef.current);
+    }
+    opacitySyncTimerRef.current = setTimeout(() => {
+      persistSettingsToBackend(position, clamped);
+    }, 250);
     onSettingsChange?.();
   };
 
@@ -83,6 +142,7 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
     if (!confirm("Remove custom watermark and restore default branding?")) return;
     try {
       setLoading(true);
+      setError(null);
       await deleteCustomWatermark();
       await loadStatus();
       onSettingsChange?.();
@@ -113,7 +173,7 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
           </button>
         </div>
         <p className="text-[11px] text-zinc-400">
-          Upload your own PNG/JPG transparent logo to replace the Clip Robin watermark on all your exported clips.
+          Upload your own PNG, JPG, or WebP transparent logo to replace the Clip Robin watermark on all your exported clips.
         </p>
       </div>
     );
@@ -134,11 +194,11 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
       {/* Uploaded image status */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg border border-zinc-800/80 bg-zinc-900/40">
         <div className="flex items-center gap-3">
-          {status?.has_custom_watermark ? (
+          {status?.has_custom_watermark && imageUrl ? (
             <div className="size-12 rounded-lg bg-zinc-950 border border-emerald-500/30 p-1 flex items-center justify-center overflow-hidden">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="http://127.0.0.1:8000/api/watermark/image"
+                src={imageUrl}
                 alt="Custom watermark"
                 className="max-h-full max-w-full object-contain"
                 onError={(e) => {
@@ -161,7 +221,7 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
             <p className="text-[11px] text-zinc-400">
               {status?.has_custom_watermark
                 ? "Active on newly generated clips"
-                : "Upload transparent PNG or SVG logo for your personal brand"}
+                : "Upload transparent PNG, JPG, or WebP logo for your personal brand"}
             </p>
           </div>
         </div>
@@ -171,7 +231,7 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
             type="file"
             ref={fileInputRef}
             onChange={handleFileSelected}
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            accept="image/png,image/jpeg,image/webp"
             className="hidden"
           />
           <button
@@ -206,12 +266,14 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
             Logo Position
           </label>
           <div className="grid grid-cols-2 gap-1.5 text-xs">
-            {[
-              { id: "top_right", label: "Top Right (Recommended)" },
-              { id: "top_left", label: "Top Left" },
-              { id: "bottom_right", label: "Bottom Right" },
-              { id: "bottom_left", label: "Bottom Left" },
-            ].map((p) => (
+            {(
+              [
+                { id: "top_right", label: "Top Right (Recommended)" },
+                { id: "top_left", label: "Top Left" },
+                { id: "bottom_right", label: "Bottom Right" },
+                { id: "bottom_left", label: "Bottom Left" },
+              ] as const
+            ).map((p) => (
               <button
                 key={p.id}
                 type="button"

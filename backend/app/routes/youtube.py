@@ -1,7 +1,12 @@
+import html
 import logging
+import secrets
+import threading
+import time
 from pathlib import Path
 from typing import Any
-from fastapi import APIRouter, HTTPException, Query, Request
+
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
@@ -13,6 +18,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/youtube", tags=["youtube"])
 
 DEFAULT_CALLBACK_PATH = "/api/youtube/oauth/callback"
+_OAUTH_STATES: dict[str, tuple[float, str]] = {}
+_OAUTH_STATES_LOCK = threading.Lock()
+_OAUTH_STATE_TTL_SECONDS = 1800.0
+
+
+def _remember_oauth_state(redirect_uri: str) -> str:
+    now = time.monotonic()
+    state = secrets.token_urlsafe(24)
+    with _OAUTH_STATES_LOCK:
+        expired = [k for k, (exp, _) in _OAUTH_STATES.items() if exp < now]
+        for k in expired:
+            _OAUTH_STATES.pop(k, None)
+        _OAUTH_STATES[state] = (now + _OAUTH_STATE_TTL_SECONDS, redirect_uri)
+    return state
+
+
+def _consume_oauth_redirect_uri(state: str | None) -> str | None:
+    if not state:
+        return None
+    now = time.monotonic()
+    with _OAUTH_STATES_LOCK:
+        entry = _OAUTH_STATES.pop(state, None)
+    if entry is None or entry[0] < now:
+        return None
+    return entry[1]
 
 
 class YouTubeConfigPayload(BaseModel):
@@ -44,7 +74,7 @@ def get_youtube_status() -> dict[str, Any]:
 def save_youtube_config(payload: YouTubeConfigPayload) -> dict[str, Any]:
     """Save Google OAuth Client ID and Secret."""
     try:
-        updated = default_youtube_service.save_config(payload.client_id, payload.client_secret)
+        default_youtube_service.save_config(payload.client_id, payload.client_secret)
         return {
             "success": True,
             "status": default_youtube_service.get_status(),
@@ -77,7 +107,8 @@ def get_youtube_auth_url(request: Request, redirect_uri: str | None = None) -> d
             scheme = request.url.scheme
             redirect_uri = f"{scheme}://{host}{DEFAULT_CALLBACK_PATH}"
 
-        auth_url = default_youtube_service.get_auth_url(redirect_uri=redirect_uri)
+        state = _remember_oauth_state(redirect_uri)
+        auth_url = default_youtube_service.get_auth_url(redirect_uri=redirect_uri, state=state)
         return {"auth_url": auth_url, "redirect_uri": redirect_uri}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -95,6 +126,7 @@ def youtube_oauth_callback(
 ):
     """Handle Google OAuth2 redirect callback."""
     if error:
+        safe_error = html.escape(error, quote=True)
         return HTMLResponse(
             status_code=400,
             content=f"""
@@ -114,7 +146,7 @@ def youtube_oauth_callback(
             <body>
               <div class="card">
                 <h2>Authorization Failed</h2>
-                <p>Google returned an error: <strong>{error}</strong></p>
+                <p>Google returned an error: <strong>{safe_error}</strong></p>
                 <button onclick="window.close()">Close Window</button>
               </div>
             </body>
@@ -137,15 +169,19 @@ def youtube_oauth_callback(
             """,
         )
 
-    # Reconstruct the exact redirect_uri that was used
-    host = request.headers.get("host", "127.0.0.1:8000")
-    scheme = request.url.scheme
-    redirect_uri = f"{scheme}://{host}{DEFAULT_CALLBACK_PATH}"
+    # Use stored redirect_uri from OAuth state when available, otherwise reconstruct from request
+    remembered_redirect_uri = _consume_oauth_redirect_uri(state)
+    if remembered_redirect_uri:
+        redirect_uri = remembered_redirect_uri
+    else:
+        host = request.headers.get("host", "127.0.0.1:8000")
+        scheme = request.url.scheme
+        redirect_uri = f"{scheme}://{host}{DEFAULT_CALLBACK_PATH}"
 
     try:
         auth_data = default_youtube_service.exchange_code(code=code, redirect_uri=redirect_uri)
         channel = auth_data.get("channel") or {}
-        channel_title = channel.get("title", "YouTube Channel")
+        safe_channel_title = html.escape(str(channel.get("title", "YouTube Channel")), quote=True)
 
         return HTMLResponse(
             content=f"""
@@ -219,7 +255,7 @@ def youtube_oauth_callback(
               <div class="card">
                 <div class="icon">✓</div>
                 <h2>Connected to YouTube!</h2>
-                <div class="channel-name">{channel_title}</div>
+                <div class="channel-name">{safe_channel_title}</div>
                 <p>Your Google account has been linked with YouTube upload permissions. You can now close this tab and return to Clip Robin.</p>
                 <button onclick="window.close()">Return to Clip Robin</button>
               </div>
@@ -229,6 +265,7 @@ def youtube_oauth_callback(
         )
     except Exception as e:
         logger.exception("Failed to exchange OAuth code")
+        safe_exc = html.escape(str(e), quote=True)
         return HTMLResponse(
             status_code=500,
             content=f"""
@@ -236,7 +273,7 @@ def youtube_oauth_callback(
             <html>
             <body style="font-family: sans-serif; background: #0c0c0e; color: #fff; text-align: center; padding: 40px;">
               <h2 style="color: #f43f5e;">Authentication Failed</h2>
-              <p style="color: #a1a1aa;">{str(e)}</p>
+              <p style="color: #a1a1aa;">{safe_exc}</p>
               <button onclick="window.close()" style="margin-top: 20px; padding: 10px 20px;">Close Window</button>
             </body>
             </html>
@@ -258,26 +295,31 @@ def disconnect_youtube() -> dict[str, Any]:
 def upload_clip_to_youtube(payload: YouTubeUploadPayload) -> dict[str, Any]:
     """Upload a rendered clip to YouTube as a video or Short."""
     try:
-        project_dir = get_project_directory(payload.project_id)
+        get_project_directory(payload.project_id)
     except (ValueError, FileNotFoundError):
         raise HTTPException(status_code=404, detail="Project not found.")
 
-    clips_dir = get_clips_directory(payload.project_id)
-    
-    # Try clip_id.mp4 or check if clip_id already has .mp4
-    candidate_name = payload.clip_id if payload.clip_id.endswith(".mp4") else f"{payload.clip_id}.mp4"
-    clip_path = clips_dir / candidate_name
-    
-    if not clip_path.is_file():
-        # Fallback: check all .mp4 files in clips directory that start with clip_id
-        matches = list(clips_dir.glob(f"{payload.clip_id}*.mp4"))
-        if matches:
-            clip_path = matches[0]
-        else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Clip file '{candidate_name}' not found in project clips directory.",
-            )
+    raw_clip = payload.clip_id.strip()
+    if (
+        not raw_clip
+        or "/" in raw_clip
+        or "\\" in raw_clip
+        or ".." in raw_clip
+        or any(ch in raw_clip for ch in ("*", "?", "[", "]"))
+    ):
+        raise HTTPException(status_code=400, detail="Invalid clip ID.")
+
+    clips_dir = get_clips_directory(payload.project_id).resolve()
+    candidate_name = raw_clip if raw_clip.endswith(".mp4") else f"{raw_clip}.mp4"
+    if Path(candidate_name).name != candidate_name or candidate_name.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid clip filename.")
+
+    clip_path = (clips_dir / candidate_name).resolve()
+    if clip_path.parent != clips_dir or not clip_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Clip file '{candidate_name}' not found in project clips directory.",
+        )
 
     try:
         upload_result = default_youtube_service.upload_video(
@@ -294,4 +336,3 @@ def upload_clip_to_youtube(payload: YouTubeUploadPayload) -> dict[str, Any]:
     except Exception as e:
         logger.exception(f"Unexpected error during YouTube upload for clip {payload.clip_id}")
         raise HTTPException(status_code=500, detail=str(e))
-

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import {
+  getApiBaseUrl,
   getYouTubeStatus,
   saveYouTubeConfig,
   saveYouTubeJsonConfig,
@@ -84,7 +85,7 @@ export function YouTubeUploadModal({
     void fetchStatus();
   }, [fetchStatus]);
 
-  // Listen for OAuth postMessage callback from the popup
+  // Listen for OAuth postMessage callback from the popup & Escape key
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === "CLIPROBIN_YOUTUBE_AUTH_SUCCESS") {
@@ -92,12 +93,21 @@ export function YouTubeUploadModal({
         setIsConnecting(false);
       }
     };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isUploading) {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }
+    };
     window.addEventListener("message", handleMessage);
+    window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("message", handleMessage);
+      window.removeEventListener("keydown", handleKeyDown);
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-  }, [fetchStatus]);
+  }, [fetchStatus, isUploading, onClose]);
 
   // Handle saving Google OAuth Credentials
   const handleSaveConfig = async (e: React.FormEvent) => {
@@ -146,7 +156,14 @@ export function YouTubeUploadModal({
 
       // Poll periodically in case postMessage is blocked by cross-origin policies
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      let pollTicks = 0;
       pollTimerRef.current = setInterval(async () => {
+        pollTicks += 1;
+        if (pollTicks > 200) {
+          setIsConnecting(false);
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+          return;
+        }
         try {
           const curStatus = await getYouTubeStatus();
           if (curStatus.authenticated) {
@@ -215,7 +232,15 @@ export function YouTubeUploadModal({
         youtubeUrl: res.youtube_url,
       });
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Upload failed");
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      setUploadError(msg);
+      if (
+        msg.toLowerCase().includes("expired") ||
+        msg.toLowerCase().includes("reconnect") ||
+        msg.toLowerCase().includes("revoked")
+      ) {
+        void fetchStatus();
+      }
     } finally {
       setIsUploading(false);
     }
@@ -233,9 +258,16 @@ export function YouTubeUploadModal({
       role="dialog"
       aria-modal="true"
       aria-label="Upload Clip to YouTube"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!isUploading && e.target === e.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
     >
-      <div className="relative flex flex-col max-w-xl w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl max-h-[90vh] overflow-hidden">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative flex flex-col max-w-xl w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl max-h-[90vh] overflow-hidden"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 px-6 py-4 bg-[#141418]">
           <div className="flex items-center gap-3">
@@ -379,7 +411,7 @@ export function YouTubeUploadModal({
                     <li>
                       Add Authorised redirect URI:
                       <code className="block mt-1 font-mono text-[11px] text-emerald-400 bg-zinc-900 p-1 rounded select-all">
-                        http://127.0.0.1:8000/api/youtube/oauth/callback
+                        {`${getApiBaseUrl()}/api/youtube/oauth/callback`}
                       </code>
                     </li>
                     <li>Copy Client ID &amp; Client Secret below, or paste the downloaded JSON.</li>

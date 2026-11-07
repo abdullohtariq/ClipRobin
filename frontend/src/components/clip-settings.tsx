@@ -1,12 +1,18 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { CaptionStyle, FramingMode } from "@/src/lib/api";
+import { CaptionAnimation, CaptionStyle, FramingMode } from "@/src/lib/api";
 import {
   CaptionStylePicker,
+  CAPTION_ANIMATION_OPTIONS,
   CAPTION_STYLE_OPTIONS,
   CaptionVisualSample,
 } from "./caption-style-picker";
+import {
+  LiveMovingCaptions,
+  getDefaultAnimationForStyle,
+  getEffectiveAnimation,
+} from "./live-moving-captions";
 import { SegmentedControl } from "./ui/segmented-control";
 import { ToggleRow } from "./ui/toggle-row";
 import { OptionCard } from "./ui/option-card";
@@ -14,7 +20,7 @@ import { Badge } from "./ui/badge";
 import { useSubscription } from "@/src/lib/subscription-context";
 import { CustomWatermarkSettings } from "./custom-watermark-settings";
 
-export const CLIP_DURATIONS = [12, 30, 60, 90] as const;
+export const CLIP_DURATIONS = [12, 15, 30, 60, 90] as const;
 export type ClipDuration = (typeof CLIP_DURATIONS)[number];
 
 export interface ClipSettingsProps {
@@ -32,6 +38,8 @@ export interface ClipSettingsProps {
   onShowCaptionsChange: (show: boolean) => void;
   captionStyle: CaptionStyle;
   onCaptionStyleChange: (style: CaptionStyle) => void;
+  captionAnimation?: CaptionAnimation | null;
+  onCaptionAnimationChange?: (animation: CaptionAnimation | null) => void;
   showWatermark: boolean;
   onShowWatermarkChange: (show: boolean) => void;
   aiModeEnabled: boolean;
@@ -58,6 +66,8 @@ export function ClipSettings({
   onShowCaptionsChange,
   captionStyle,
   onCaptionStyleChange,
+  captionAnimation,
+  onCaptionAnimationChange,
   showWatermark,
   onShowWatermarkChange,
   aiModeEnabled,
@@ -77,37 +87,46 @@ export function ClipSettings({
   const [isCaptionPickerOpen, setIsCaptionPickerOpen] = useState(false);
   const [isAdvancedExpanded, setIsAdvancedExpanded] = useState(true);
   const [showCustomWatermarkPanel, setShowCustomWatermarkPanel] = useState(false);
-
-  // Pro subtitle customization options
-  const [captionScale, setCaptionScale] = useState<"normal" | "large" | "xl">("normal");
-  const [customAccentColor, setCustomAccentColor] = useState<string>("#34D399");
-  const [isUpperCase, setIsUpperCase] = useState(true);
+  const [internalAnimation, setInternalAnimation] = useState<CaptionAnimation | null>(null);
 
   useEffect(() => {
     try {
-      const savedScale = localStorage.getItem("cliprobin_caption_scale") as "normal" | "large" | "xl";
-      if (savedScale) setCaptionScale(savedScale);
-      const savedColor = localStorage.getItem("cliprobin_caption_accent");
-      if (savedColor) setCustomAccentColor(savedColor);
+      const savedAnim = localStorage.getItem("cliprobin_caption_animation") as CaptionAnimation | null;
+      if (savedAnim && ["pop", "grow", "sweep", "fade", "glide"].includes(savedAnim)) {
+        setInternalAnimation(savedAnim);
+      }
     } catch {}
   }, []);
 
-  const handleScaleChange = (scale: "normal" | "large" | "xl") => {
-    setCaptionScale(scale);
+  const currentAnimation = captionAnimation !== undefined ? captionAnimation : internalAnimation;
+
+  const handleAnimationChange = (anim: CaptionAnimation | null) => {
+    setInternalAnimation(anim);
     try {
-      localStorage.setItem("cliprobin_caption_scale", scale);
+      if (anim) {
+        localStorage.setItem("cliprobin_caption_animation", anim);
+      } else {
+        localStorage.removeItem("cliprobin_caption_animation");
+      }
     } catch {}
+    onCaptionAnimationChange?.(anim);
   };
 
-  const handleColorChange = (color: string) => {
-    setCustomAccentColor(color);
-    try {
-      localStorage.setItem("cliprobin_caption_accent", color);
-    } catch {}
+  const handleStyleSelect = (styleId: CaptionStyle) => {
+    if (!isCaptionStyleAllowed(styleId)) {
+      const styleDef = CAPTION_STYLE_OPTIONS.find((s) => s.id === styleId);
+      openUpgradeModal(`The "${styleDef?.name || styleId}" Subtitle Style`);
+      return;
+    }
+    onCaptionStyleChange(styleId);
   };
 
   const activeStyleOption =
     CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle) || CAPTION_STYLE_OPTIONS[0];
+  const effectiveAnimation = getEffectiveAnimation(captionStyle, currentAnimation);
+  const activeAnimationOption =
+    CAPTION_ANIMATION_OPTIONS.find((a) => a.id === effectiveAnimation) ||
+    CAPTION_ANIMATION_OPTIONS[0];
 
   const durationOptions = CLIP_DURATIONS.map((sec) => ({
     value: sec,
@@ -363,7 +382,7 @@ export function ClipSettings({
         </div>
       )}
 
-      {/* 3. Secondary Section: Captions & Branding (Collapsible) */}
+      {/* 3. Captions & Branding Studio */}
       <div className="rounded-xl border border-zinc-800 bg-[#121215] overflow-hidden transition-all duration-200">
         <button
           type="button"
@@ -372,12 +391,21 @@ export function ClipSettings({
           aria-expanded={isAdvancedExpanded}
         >
           <div className="space-y-0.5">
-            <span className="text-[13px] font-semibold text-white">
-              Captions &amp; branding
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[13px] font-semibold text-white">
+                Captions &amp; branding
+              </span>
+              {showCaptions && (
+                <Badge variant="emerald" size="sm">
+                  {activeStyleOption.name} • {activeAnimationOption.name}
+                </Badge>
+              )}
+            </div>
             <p className="text-xs text-zinc-400">
-              {showCaptions ? `${activeStyleOption.name} subtitles` : "Subtitles off"} •{" "}
-              {showWatermark ? "Watermark on" : "Watermark off"}
+              {showCaptions
+                ? `${activeStyleOption.name} subtitles (${activeAnimationOption.name} motion)`
+                : "Subtitles off"}{" "}
+              • {showWatermark ? "Watermark on" : "Watermark off"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -401,16 +429,17 @@ export function ClipSettings({
         {isAdvancedExpanded && (
           <div className="p-4 pt-1 border-t border-zinc-800/80 space-y-4 animate-fade-in">
             {/* Captions switch */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between pt-2">
               <div>
-                <span className="text-[13px] font-medium text-zinc-200">Burn subtitles into video</span>
+                <span className="text-[13px] font-medium text-zinc-200">Burn animated subtitles into video</span>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Synchronized word-by-word animated highlights generated locally
+                  Synchronized word-by-word animated highlights rendered into the safe zone
                 </p>
               </div>
               <button
                 type="button"
                 role="switch"
+                aria-label="Burn animated subtitles into video"
                 aria-checked={showCaptions}
                 disabled={disabled}
                 onClick={() => onShowCaptionsChange(!showCaptions)}
@@ -426,153 +455,187 @@ export function ClipSettings({
               </button>
             </div>
 
-            {/* Subtitle Visual Preview Canvas & Selector */}
+            {/* Interactive Subtitle Studio */}
             {showCaptions && (
-              <div className="pt-3 border-t border-zinc-800/80 space-y-3">
-                <div className="relative w-full h-20 rounded-xl overflow-hidden flex items-center justify-center border border-zinc-800 bg-[#141418] bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:12px_12px] shadow-inner">
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />
-                  <CaptionVisualSample styleId={captionStyle} />
-                  <div className="absolute top-2 left-2.5 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/60 border border-white/10 backdrop-blur-xs">
-                    <span className="text-xs font-mono text-zinc-400">Sample style</span>
-                  </div>
-                  {!isCaptionStyleAllowed(captionStyle) && (
-                    <div className="absolute top-2 right-2.5 flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-[10px] font-bold text-amber-300">
-                      <span>🔒</span>
-                      <span>PRO</span>
-                    </div>
-                  )}
-                </div>
+              <div className="pt-3 border-t border-zinc-800/80 space-y-4">
+                {/* 1. Live Animated Preview Stage */}
+                <div className="relative w-full h-24 rounded-xl overflow-hidden flex items-center justify-center border border-zinc-800 bg-[#0d0d11] bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:12px_12px] shadow-inner px-4">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/35 pointer-events-none" />
 
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[13px] font-semibold text-white tracking-tight">
-                        {activeStyleOption.name}
-                      </span>
-                      <Badge variant="emerald" size="sm">Selected</Badge>
-                      <Badge variant="neutral" size="sm">{activeStyleOption.animationName}</Badge>
-                      {!isCaptionStyleAllowed(captionStyle) && (
-                        <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
-                          PRO
-                        </span>
-                      )}
-                    </div>
-                    <p className="mt-0.5 text-xs text-zinc-400 line-clamp-1">
-                      {activeStyleOption.description}
-                    </p>
+                  {/* Live word-by-word animated preview */}
+                  <div className="relative z-10 pt-3">
+                    <LiveMovingCaptions
+                      captionStyle={captionStyle}
+                      captionAnimation={effectiveAnimation}
+                    />
                   </div>
 
+                  {/* Top-left live status badge */}
+                  <div className="absolute top-2 left-2.5 z-20 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/70 border border-white/10 backdrop-blur-xs">
+                    <span className="size-1.5 rounded-full bg-[#10b981] animate-pulse" />
+                    <span className="text-[11px] font-medium text-zinc-200">
+                      {activeStyleOption.name}
+                    </span>
+                    <span className="text-[10px] text-zinc-500">•</span>
+                    <span className="text-[10px] font-mono text-emerald-400">
+                      {activeAnimationOption.name} motion
+                    </span>
+                  </div>
+
+                  {/* Top-right 9:16 Video & Safe Zones Modal Trigger */}
                   <button
                     type="button"
                     disabled={disabled}
                     onClick={() => setIsCaptionPickerOpen(true)}
-                    className="w-full sm:w-auto shrink-0 justify-center px-3.5 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800/90 text-xs font-medium text-zinc-200 hover:border-emerald-500/50 hover:bg-[#10b981]/10 hover:text-white transition-all duration-150 disabled:opacity-50 focus-ring shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    className="absolute top-2 right-2.5 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 hover:border-emerald-500/50 text-[11px] font-medium text-zinc-200 hover:text-white transition-all focus-ring cursor-pointer shadow-sm"
                   >
-                    <span>Change style ({CAPTION_STYLE_OPTIONS.length} available)</span>
-                    <svg className="size-3.5 text-zinc-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                    <svg className="size-3 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z" />
                     </svg>
+                    <span>9:16 Video &amp; Safe Zones</span>
                   </button>
                 </div>
 
-                {/* Subtitle Customizer: Pro Feature */}
-                {isPro ? (
-                  <div className="mt-3 p-3 rounded-xl border border-zinc-800 bg-[#0c0c0e] space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold text-white">Pro Subtitle Customizer</span>
-                        <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold">
-                          UNLOCKED
-                        </span>
-                      </div>
-                      <span className="text-[11px] text-zinc-400">Live styling</span>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                      <div>
-                        <label className="block text-[11px] font-medium text-zinc-400 mb-1.5">
-                          Font Scale
-                        </label>
-                        <div className="flex rounded-lg bg-zinc-900 border border-zinc-800 p-0.5">
-                          {[
-                            { id: "normal", label: "Normal (100%)" },
-                            { id: "large", label: "Large (120%)" },
-                            { id: "xl", label: "XL (140%)" },
-                          ].map((s) => (
-                            <button
-                              key={s.id}
-                              type="button"
-                              onClick={() => handleScaleChange(s.id as "normal" | "large" | "xl")}
-                              className={`flex-1 py-1 rounded text-[11px] font-medium transition-colors ${
-                                captionScale === s.id
-                                  ? "bg-zinc-800 text-white font-semibold shadow-xs"
-                                  : "text-zinc-400 hover:text-white"
-                              }`}
-                            >
-                              {s.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5">
-                          <label className="block text-[11px] font-medium text-zinc-400">
-                            Accent Pop Color
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => setIsUpperCase(!isUpperCase)}
-                            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${
-                              isUpperCase
-                                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold"
-                                : "bg-zinc-800 border-zinc-700 text-zinc-400"
-                            }`}
-                          >
-                            {isUpperCase ? "ALL CAPS" : "Normal case"}
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {[
-                            { color: "#34D399", name: "Emerald" },
-                            { color: "#FFFF00", name: "Yellow" },
-                            { color: "#00F0FF", name: "Cyan" },
-                            { color: "#FF007F", name: "Magenta" },
-                            { color: "#FF5722", name: "Flame" },
-                          ].map((c) => (
-                            <button
-                              key={c.color}
-                              type="button"
-                              onClick={() => handleColorChange(c.color)}
-                              className={`size-6 rounded-full border-2 transition-transform ${
-                                customAccentColor === c.color
-                                  ? "scale-110 border-white shadow-md"
-                                  : "border-transparent opacity-70 hover:opacity-100"
-                              }`}
-                              style={{ backgroundColor: c.color }}
-                              title={c.name}
-                              aria-label={`Select accent color ${c.name}`}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                {/* 2. Direct 1-Click Caption Style Grid */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-zinc-200">
+                      Subtitle style
+                    </label>
+                    <span className="text-[11px] text-zinc-400 font-mono">
+                      {activeStyleOption.fontFamily}
+                    </span>
                   </div>
-                ) : (
-                  <div className="mt-2 p-2.5 rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-xs text-zinc-400">
-                      <span>✦</span>
-                      <span>Pro Subtitle Customizer (Custom colors, font sizing &amp; animations)</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => openUpgradeModal("Pro Subtitle Customizer")}
-                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-[11px] font-bold border border-amber-500/30 transition-colors shrink-0"
-                    >
-                      Unlock Pro
-                    </button>
+
+                  <div
+                    role="radiogroup"
+                    aria-label="Subtitle typography style"
+                    className="grid grid-cols-2 @md:grid-cols-3 gap-2"
+                  >
+                    {CAPTION_STYLE_OPTIONS.map((styleOpt) => {
+                      const isSelected = captionStyle === styleOpt.id;
+                      const isLocked = !isCaptionStyleAllowed(styleOpt.id);
+                      return (
+                        <button
+                          key={styleOpt.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          disabled={disabled}
+                          onClick={() => handleStyleSelect(styleOpt.id)}
+                          className={`group relative flex flex-col rounded-xl border p-2 transition-all duration-150 text-left focus-ring ${
+                            isSelected
+                              ? "border-[#10b981] bg-[#10b981]/10 ring-1 ring-[#10b981]/60 shadow-sm"
+                              : "border-zinc-800 bg-[#0d0d10] hover:border-zinc-700 hover:bg-[#15151a]"
+                          } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                        >
+                          {/* Mini visual sample */}
+                          <div className="relative w-full h-11 rounded-lg overflow-hidden flex items-center justify-center border border-zinc-800/80 bg-[#141418] px-1">
+                            <div className="scale-75 origin-center pointer-events-none">
+                              <CaptionVisualSample styleId={styleOpt.id} />
+                            </div>
+                            {isLocked && (
+                              <span className="absolute top-1 left-1 px-1 py-0.2 rounded bg-amber-500/20 border border-amber-500/40 text-[9px] font-bold text-amber-300">
+                                PRO
+                              </span>
+                            )}
+                            {isSelected && (
+                              <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-[#10b981] text-zinc-950">
+                                <svg className="size-2.5 stroke-[3]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                  <polyline points="20 6 9 17 4 12" />
+                                </svg>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="mt-1.5 flex items-center justify-between gap-1 w-full">
+                            <span className="text-xs font-semibold text-white truncate">
+                              {styleOpt.name}
+                            </span>
+                            <span className="text-[10px] text-zinc-400 font-medium shrink-0">
+                              {styleOpt.animationName}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
+
+                {/* 3. Word Animation Motion Selector */}
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <label className="text-xs font-semibold text-zinc-200">
+                        Word animation motion
+                      </label>
+                      <p className="text-[11px] text-zinc-400">
+                        {captionStyle === "classic"
+                          ? "Classic uses its built-in Pop word highlight."
+                          : `Customize how active words animate (default for ${activeStyleOption.name}: ${activeStyleOption.animationName}).`}
+                      </p>
+                    </div>
+                    {currentAnimation && captionStyle !== "classic" && (
+                      <button
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => handleAnimationChange(null)}
+                        className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 cursor-pointer shrink-0"
+                      >
+                        Reset to style default
+                      </button>
+                    )}
+                  </div>
+
+                  <div
+                    role="radiogroup"
+                    aria-label="Word animation motion"
+                    className="grid grid-cols-2 @sm:grid-cols-5 gap-1.5"
+                  >
+                    {CAPTION_ANIMATION_OPTIONS.map((anim) => {
+                      const isSelected = effectiveAnimation === anim.id;
+                      const isStyleDefault =
+                        getDefaultAnimationForStyle(captionStyle) === anim.id;
+                      const isDisabledForClassic =
+                        captionStyle === "classic" && anim.id !== "pop";
+
+                      return (
+                        <button
+                          key={anim.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={isSelected}
+                          disabled={disabled || isDisabledForClassic}
+                          onClick={() => {
+                            if (isDisabledForClassic) return;
+                            handleAnimationChange(isStyleDefault ? null : anim.id);
+                          }}
+                          className={`flex flex-col items-start rounded-lg border px-2.5 py-2 text-left transition-all focus-ring ${
+                            isSelected
+                              ? "border-[#10b981] bg-[#10b981]/10 text-white shadow-xs"
+                              : "border-zinc-800 bg-[#0d0d10] text-zinc-300 hover:border-zinc-700 hover:text-white"
+                          } ${
+                            disabled || isDisabledForClassic
+                              ? "opacity-40 cursor-not-allowed"
+                              : "cursor-pointer"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between w-full gap-1">
+                            <span className="text-xs font-semibold">{anim.name}</span>
+                            {isStyleDefault && (
+                              <span className="text-[9px] font-mono uppercase px-1 py-0.2 rounded bg-zinc-800 text-zinc-400">
+                                Default
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-zinc-400 line-clamp-1 mt-0.5">
+                            {anim.description}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -646,7 +709,9 @@ export function ClipSettings({
         isOpen={isCaptionPickerOpen}
         onClose={() => setIsCaptionPickerOpen(false)}
         selectedStyle={captionStyle}
-        onSelect={onCaptionStyleChange}
+        onSelect={handleStyleSelect}
+        selectedAnimation={currentAnimation}
+        onSelectAnimation={handleAnimationChange}
       />
     </div>
   );

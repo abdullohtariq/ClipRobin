@@ -1,9 +1,12 @@
 import json
 import logging
 import os
+import threading
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,27 @@ def get_auth_file() -> Path:
     return _get_data_dir() / "youtube_auth.json"
 
 
+def _atomic_write_json(target: Path, payload: dict[str, Any]) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, indent=2)
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(serialized, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        target.write_text(serialized, encoding="utf-8")
+
+
+def _stream_file_chunks(path: Path, chunk_size: int = 256 * 1024) -> Iterator[bytes]:
+    with open(path, "rb") as video_file:
+        while True:
+            chunk = video_file.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+
 class YouTubeService:
     def __init__(
         self,
@@ -43,28 +67,47 @@ class YouTubeService:
         auth_file: Path | None = None,
         client: httpx.Client | None = None,
     ):
-        self.config_file = config_file or get_config_file()
-        self.auth_file = auth_file or get_auth_file()
+        self.config_file: Path | None = config_file
+        self.auth_file: Path | None = auth_file
         self._client = client
+        self._shared_client: httpx.Client | None = None
+        self._lock = threading.RLock()
+
+    def _resolve_config_file(self) -> Path:
+        return self.config_file if self.config_file is not None else get_config_file()
+
+    def _resolve_auth_file(self) -> Path:
+        return self.auth_file if self.auth_file is not None else get_auth_file()
 
     def _get_client(self) -> httpx.Client:
         if self._client is not None:
             return self._client
-        return httpx.Client(timeout=120.0)
+        with self._lock:
+            if self._shared_client is None or self._shared_client.is_closed:
+                self._shared_client = httpx.Client(timeout=120.0)
+            return self._shared_client
 
     # -------------------------------------------------------------------------
     # Configuration (Client ID & Client Secret)
     # -------------------------------------------------------------------------
     def get_config(self) -> dict[str, Any]:
-        client_id = os.environ.get("CLIPROBIN_YOUTUBE_CLIENT_ID", "").strip()
-        client_secret = os.environ.get("CLIPROBIN_YOUTUBE_CLIENT_SECRET", "").strip()
+        client_id = (
+            os.environ.get("CLIPROBIN_YOUTUBE_CLIENT_ID", "").strip()
+            or os.environ.get("YOUTUBE_CLIENT_ID", "").strip()
+        )
+        client_secret = (
+            os.environ.get("CLIPROBIN_YOUTUBE_CLIENT_SECRET", "").strip()
+            or os.environ.get("YOUTUBE_CLIENT_SECRET", "").strip()
+        )
 
-        if self.config_file.is_file():
+        cfg_path = self._resolve_config_file()
+        if cfg_path.is_file():
             try:
-                with open(self.config_file, "r", encoding="utf-8") as f:
+                with open(cfg_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    client_id = data.get("client_id", client_id).strip()
-                    client_secret = data.get("client_secret", client_secret).strip()
+                    if isinstance(data, dict):
+                        client_id = str(data.get("client_id", client_id)).strip()
+                        client_secret = str(data.get("client_secret", client_secret)).strip()
             except Exception as e:
                 logger.warning(f"Failed to read YouTube config: {e}")
 
@@ -90,9 +133,8 @@ class YouTubeService:
             raise ValueError("Both Client ID and Client Secret are required.")
 
         payload = {"client_id": client_id, "client_secret": client_secret}
-        self.config_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.config_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
+        with self._lock:
+            _atomic_write_json(self._resolve_config_file(), payload)
 
         return self.get_config()
 
@@ -100,7 +142,7 @@ class YouTubeService:
     def parse_client_secret_json(raw_json: str | dict[str, Any]) -> tuple[str, str]:
         """Extract client_id and client_secret from Google Cloud Console JSON."""
         data = json.loads(raw_json) if isinstance(raw_json, str) else raw_json
-        
+
         # Check standard Google JSON structures ("installed" or "web")
         root = data.get("installed") or data.get("web") or data
         client_id = root.get("client_id", "").strip()
@@ -115,19 +157,20 @@ class YouTubeService:
     # Authentication & Tokens
     # -------------------------------------------------------------------------
     def get_auth_data(self) -> dict[str, Any] | None:
-        if not self.auth_file.is_file():
+        auth_path = self._resolve_auth_file()
+        if not auth_path.is_file():
             return None
         try:
-            with open(self.auth_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(auth_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else None
         except Exception as e:
             logger.warning(f"Failed to read YouTube auth file: {e}")
             return None
 
     def save_auth_data(self, auth_data: dict[str, Any]) -> None:
-        self.auth_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.auth_file, "w", encoding="utf-8") as f:
-            json.dump(auth_data, f, indent=2)
+        with self._lock:
+            _atomic_write_json(self._resolve_auth_file(), auth_data)
 
     def clear_auth(self) -> None:
         auth_data = self.get_auth_data()
@@ -140,9 +183,10 @@ class YouTubeService:
                 except Exception as e:
                     logger.debug(f"Revoke token call failed (non-fatal): {e}")
 
-        if self.auth_file.is_file():
+        auth_path = self._resolve_auth_file()
+        if auth_path.is_file():
             try:
-                self.auth_file.unlink()
+                auth_path.unlink()
             except Exception as e:
                 logger.warning(f"Failed to delete YouTube auth file: {e}")
 
@@ -278,49 +322,73 @@ class YouTubeService:
         }
 
     def get_valid_access_token(self) -> str:
-        auth_data = self.get_auth_data()
-        if not auth_data:
-            raise ValueError("Not connected to YouTube. Please connect your YouTube account first.")
+        with self._lock:
+            auth_data = self.get_auth_data()
+            if not auth_data:
+                raise ValueError("Not connected to YouTube. Please connect your YouTube account first.")
 
-        access_token = auth_data.get("access_token")
-        refresh_token = auth_data.get("refresh_token")
-        expires_at = auth_data.get("expires_at", 0)
+            access_token = auth_data.get("access_token")
+            refresh_token = auth_data.get("refresh_token")
+            expires_at = auth_data.get("expires_at", 0)
 
-        # If token is valid for at least another 60 seconds, use it
-        if access_token and (expires_at - time.time() > 60):
-            return access_token
-
-        # Needs refresh
-        if not refresh_token:
-            if access_token:
+            # If token is valid for at least another 60 seconds, use it
+            if access_token and (expires_at - time.time() > 60):
                 return access_token
-            raise ValueError("No refresh token available. Please reconnect your YouTube account.")
 
-        config = self.get_config()
-        if not config["configured"]:
-            raise ValueError("YouTube OAuth configuration missing. Cannot refresh token.")
+            # Needs refresh
+            if not refresh_token:
+                if access_token:
+                    return access_token
+                raise ValueError("No refresh token available. Please reconnect your YouTube account.")
 
-        client = self._get_client()
-        resp = client.post(
-            TOKEN_ENDPOINT,
-            data={
-                "client_id": config["client_id"],
-                "client_secret": config["client_secret"],
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-            },
-        )
-        if resp.status_code != 200:
-            raise ValueError(f"Failed to refresh YouTube access token: {resp.text}")
+            config = self.get_config()
+            if not config["configured"]:
+                raise ValueError("YouTube OAuth configuration missing. Cannot refresh token.")
 
-        token_data = resp.json()
-        new_access_token = token_data.get("access_token")
-        expires_in = token_data.get("expires_in", 3600)
-        auth_data["access_token"] = new_access_token
-        auth_data["expires_at"] = time.time() + float(expires_in)
-        auth_data["updated_at"] = time.time()
-        self.save_auth_data(auth_data)
-        return new_access_token
+            client = self._get_client()
+            resp = client.post(
+                TOKEN_ENDPOINT,
+                data={
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                },
+            )
+            if resp.status_code != 200:
+                error_data = {}
+                try:
+                    error_data = resp.json()
+                except Exception:
+                    pass
+                error_code = str(error_data.get("error", ""))
+                error_desc = str(error_data.get("error_description", ""))
+                raw_text = resp.text.lower()
+                if (
+                    error_code == "invalid_grant"
+                    or "expired" in error_desc.lower()
+                    or "revoked" in error_desc.lower()
+                    or "invalid_grant" in raw_text
+                ):
+                    logger.warning(
+                        f"YouTube refresh token expired or was revoked ({error_code}: {error_desc}). Clearing stale auth."
+                    )
+                    self.clear_auth()
+                    raise ValueError(
+                        "Your YouTube connection has expired or was revoked by Google. "
+                        "(Note: Google OAuth apps in 'Testing' mode automatically expire tokens after 7 days.) "
+                        "Please click 'Connect YouTube Channel' to re-authenticate."
+                    )
+                raise ValueError(f"Failed to refresh YouTube access token: {resp.text}")
+
+            token_data = resp.json()
+            new_access_token = token_data.get("access_token")
+            expires_in = token_data.get("expires_in", 3600)
+            auth_data["access_token"] = new_access_token
+            auth_data["expires_at"] = time.time() + float(expires_in)
+            auth_data["updated_at"] = time.time()
+            self.save_auth_data(auth_data)
+            return new_access_token
 
     # -------------------------------------------------------------------------
     # Video Upload (Resumable Upload)
@@ -391,18 +459,16 @@ class YouTubeService:
         if not upload_url:
             raise ValueError("YouTube API did not return an upload Location header.")
 
-        # Step 2: Upload Video File Content
-        with open(video_path, "rb") as video_file:
-            upload_headers = {
-                "Content-Type": "video/mp4",
-                "Content-Length": str(file_size),
-            }
-            # Stream upload using httpx
-            upload_resp = client.put(
-                upload_url,
-                headers=upload_headers,
-                content=video_file.read(),  # Read into memory/bytes for upload
-            )
+        # Step 2: Stream Video File Content in 256 KB chunks to avoid buffering large MP4s in RAM
+        upload_headers = {
+            "Content-Type": "video/mp4",
+            "Content-Length": str(file_size),
+        }
+        upload_resp = client.put(
+            upload_url,
+            headers=upload_headers,
+            content=_stream_file_chunks(video_path),
+        )
 
         if upload_resp.status_code not in (200, 201):
             error_msg = upload_resp.text
@@ -431,6 +497,5 @@ class YouTubeService:
         }
 
 
-# Singleton service instance
+# Singleton service instance (resolves data paths dynamically from CLIPROBIN_PROJECTS_DIR)
 default_youtube_service = YouTubeService()
-

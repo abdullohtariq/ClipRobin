@@ -60,6 +60,9 @@ exports/
 /backend/data/youtube_config.json
 /backend/data/youtube_auth.json
 /backend/data/gemini_config.json
+/backend/data/subscriptions.json
+/backend/data/watermark_settings.json
+/backend/data/watermarks/
 backend/data/projects/*
 !backend/data/projects/.gitkeep
 backend/dist/

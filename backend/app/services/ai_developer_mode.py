@@ -1,9 +1,13 @@
-"""Local Gemini configuration and YouTube-gated developer mode."""
+"""Local Gemini configuration and AI developer mode."""
 
 import json
 import os
+import tempfile
+import threading
 from pathlib import Path
 from typing import Any
+
+_CONFIG_LOCK = threading.RLock()
 
 
 def _config_path() -> Path:
@@ -13,14 +17,32 @@ def _config_path() -> Path:
 
 
 def _read_config() -> dict[str, Any]:
-    path = _config_path()
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    with _CONFIG_LOCK:
+        path = _config_path()
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+
+def _write_config_atomic(config: dict[str, Any]) -> None:
+    with _CONFIG_LOCK:
+        path = _config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(config, handle, indent=2)
+            os.replace(tmp_name, path)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
 
 def get_gemini_api_key() -> str:
@@ -35,23 +57,26 @@ def save_gemini_api_key(api_key: str) -> None:
     if len(normalized) > 512:
         raise ValueError("The Gemini API key is too long.")
 
-    config = _read_config()
-    config["api_key"] = normalized
-    path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    with _CONFIG_LOCK:
+        config = _read_config()
+        config["api_key"] = normalized
+        if "developer_mode" not in config:
+            config["developer_mode"] = True
+        _write_config_atomic(config)
 
 
 def set_developer_mode(enabled: bool) -> None:
-    config = _read_config()
-    config["developer_mode"] = bool(enabled)
-    path = _config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+    with _CONFIG_LOCK:
+        config = _read_config()
+        config["developer_mode"] = bool(enabled)
+        _write_config_atomic(config)
 
 
 def is_developer_mode_enabled() -> bool:
-    return bool(_read_config().get("developer_mode", False))
+    config = _read_config()
+    if "developer_mode" in config:
+        return bool(config.get("developer_mode"))
+    return bool(get_gemini_api_key())
 
 
 def get_ai_developer_status() -> dict[str, Any]:
@@ -60,16 +85,14 @@ def get_ai_developer_status() -> dict[str, Any]:
     gemini_configured = bool(get_gemini_api_key())
     youtube_authenticated = bool(default_youtube_service.get_status().get("authenticated"))
     developer_mode = is_developer_mode_enabled()
-    ai_enabled = gemini_configured and youtube_authenticated and developer_mode
+    ai_enabled = gemini_configured and developer_mode
 
     if ai_enabled:
         reason = None
-    elif not youtube_authenticated:
-        reason = "Connect your YouTube account to enable AI Developer Mode."
     elif not gemini_configured:
-        reason = "Add a Gemini API key to enable AI Developer Mode."
+        reason = "Add a Gemini API key in Settings to enable AI Hook Finder."
     else:
-        reason = "Enable Developer Mode to use AI clip generation."
+        reason = "Enable AI Developer Mode in Settings to use AI clip generation."
 
     return {
         "gemini_configured": gemini_configured,

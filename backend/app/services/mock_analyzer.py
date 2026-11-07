@@ -1,9 +1,12 @@
 import json
+import os
+import threading
 from pathlib import Path
 from typing import Any
 
 MIN_CLIP_SECONDS = 20.0
 MAX_CLIP_SECONDS = 60.0
+MOCK_ANALYZER_VERSION = 2
 
 
 def _normalize_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -109,8 +112,12 @@ def create_mock_analysis(
             "reason": "Mock analysis: a longer self-contained group of timestamped transcript segments.",
         })
 
-    analysis = {"clips": clips}
-    (project_directory / "analysis.json").write_text(
-        json.dumps(analysis, indent=2), encoding="utf-8"
-    )
+    analysis: dict[str, Any] = {
+        "analyzer_version": MOCK_ANALYZER_VERSION,
+        "clips": clips,
+    }
+    output_path = project_directory / "analysis.json"
+    tmp_path = project_directory / f"analysis.json.{os.getpid()}.{threading.get_ident()}.tmp"
+    tmp_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
+    os.replace(tmp_path, output_path)
     return analysis

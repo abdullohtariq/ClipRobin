@@ -38,15 +38,29 @@ export function TikTokUploadModal({
       if (active) setVideoUrl(url);
     });
 
-    const savedKey = localStorage.getItem("cliprobin_tiktok_client_key");
-    const savedSecret = localStorage.getItem("cliprobin_tiktok_client_secret");
-    if (savedKey) setClientKey(savedKey);
-    if (savedSecret) setClientSecret(savedSecret);
+    try {
+      const savedKey = localStorage.getItem("cliprobin_tiktok_client_key");
+      const savedSecret = localStorage.getItem("cliprobin_tiktok_client_secret");
+      if (savedKey) setClientKey(savedKey);
+      if (savedSecret) setClientSecret(savedSecret);
+    } catch {}
 
     return () => {
       active = false;
     };
   }, [clip, projectId]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isSaving) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isSaving, onClose]);
 
   const handleCopyCaption = async () => {
     try {
@@ -81,8 +95,10 @@ export function TikTokUploadModal({
   };
 
   const handleSaveApiKeys = () => {
-    localStorage.setItem("cliprobin_tiktok_client_key", clientKey.trim());
-    localStorage.setItem("cliprobin_tiktok_client_secret", clientSecret.trim());
+    try {
+      localStorage.setItem("cliprobin_tiktok_client_key", clientKey.trim());
+      localStorage.setItem("cliprobin_tiktok_client_secret", clientSecret.trim());
+    } catch {}
     setApiStatus("Credentials saved locally. Direct posting requires an approved TikTok Developer App with video.upload scope.");
     setTimeout(() => setApiStatus(null), 5000);
   };
@@ -92,9 +108,16 @@ export function TikTokUploadModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="tiktok-modal-title"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!isSaving && e.target === e.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
     >
-      <div className="relative flex flex-col max-w-xl w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl overflow-hidden max-h-[92vh]">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative flex flex-col max-w-xl w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl overflow-hidden max-h-[92vh]"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 px-6 py-4 bg-zinc-900/50">
           <div className="flex items-center gap-2.5">
@@ -115,9 +138,10 @@ export function TikTokUploadModal({
           </div>
           <button
             type="button"
+            disabled={isSaving}
             onClick={onClose}
             aria-label="Close dialog"
-            className="size-8 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center transition-colors focus-ring"
+            className="size-8 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center transition-colors focus-ring disabled:opacity-50"
           >
             ✕
           </button>
@@ -180,7 +204,7 @@ export function TikTokUploadModal({
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor="tiktok-caption" className="text-xs font-medium text-zinc-300">
-                    Caption & Viral Hashtags
+                    Caption &amp; Viral Hashtags
                   </label>
                   <button
                     type="button"

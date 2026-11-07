@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -42,26 +43,28 @@ _MODEL_INSTANCE: WhisperModel | None = None
 _MODEL_LOCK = threading.Lock()
 
 
-def get_whisper_model(model_name: str = MODEL_NAME) -> WhisperModel:
+def get_whisper_model(model_name: str | None = None) -> WhisperModel:
     global _MODEL_INSTANCE
+    resolved_model = (model_name or os.environ.get("WHISPER_MODEL") or MODEL_NAME).strip()
     if _MODEL_INSTANCE is None:
         with _MODEL_LOCK:
             if _MODEL_INSTANCE is None:
                 # Detect GPU acceleration if available
                 device = "cpu"
-                compute_type = "int8"
+                compute_type = os.environ.get("WHISPER_COMPUTE_TYPE", "").strip() or "int8"
                 try:
                     import ctranslate2
                     if ctranslate2.get_cuda_device_count() > 0:
                         device = "cuda"
-                        compute_type = "float16"
+                        if not os.environ.get("WHISPER_COMPUTE_TYPE"):
+                            compute_type = "float16"
                 except Exception:
                     pass
 
                 # Allocate optimal CPU threads across available cores
                 threads = min(8, max(4, (os.cpu_count() or 4)))
                 _MODEL_INSTANCE = WhisperModel(
-                    model_name,
+                    resolved_model,
                     device=device,
                     compute_type=compute_type,
                     cpu_threads=threads,
@@ -69,7 +72,21 @@ def get_whisper_model(model_name: str = MODEL_NAME) -> WhisperModel:
     return _MODEL_INSTANCE
 
 
-def extract_audio_wav(video_path: Path, output_wav: Path) -> bool:
+def _atomic_write_text(target: Path, content: str) -> None:
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def extract_audio_wav(
+    video_path: Path,
+    output_wav: Path,
+    max_duration: float | None = None,
+) -> bool:
     """Pre-extract 16kHz mono audio track using FFmpeg to avoid slow video decoding during inference."""
     try:
         from app.services.video_editor import find_ffmpeg
@@ -83,12 +100,16 @@ def extract_audio_wav(video_path: Path, output_wav: Path) -> bool:
             "-y",
             "-v", "error",
             "-i", str(video_path),
+        ]
+        if max_duration is not None and max_duration > 0:
+            cmd.extend(["-t", f"{max_duration + 5.0:.2f}"])
+        cmd.extend([
             "-vn",
             "-acodec", "pcm_s16le",
             "-ar", "16000",
             "-ac", "1",
             str(output_wav),
-        ]
+        ])
         res = subprocess.run(
             cmd,
             capture_output=True,
@@ -108,9 +129,26 @@ def transcribe_video(
     max_duration: float | None = None,
     segment_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("Transcription cancelled")
+
     output_directory.mkdir(parents=True, exist_ok=True)
     if progress_callback:
         progress_callback("Loading speech model", 0)
+
+    full_media_duration = 0.0
+    if max_duration is not None:
+        try:
+            from app.services.video_editor import probe_video_duration
+            full_media_duration = probe_video_duration(video_path)
+        except Exception:
+            full_media_duration = 0.0
+
+    # Only cap WAV extraction when max_duration is meaningfully shorter than the full video
+    extract_cap: float | None = None
+    if max_duration is not None and max_duration > 0:
+        if full_media_duration <= 0.0 or max_duration + 5.0 < full_media_duration:
+            extract_cap = max_duration
 
     # 1. Fast audio pre-extraction with FFmpeg (bypasses heavy video demuxing in Python)
     temp_audio_wav: Path | None = None
@@ -118,7 +156,7 @@ def transcribe_video(
     try:
         temp_dir = Path(tempfile.gettempdir())
         candidate_wav = temp_dir / f"cliprobin_audio_{uuid.uuid4().hex[:8]}.wav"
-        if extract_audio_wav(video_path, candidate_wav):
+        if extract_audio_wav(video_path, candidate_wav, max_duration=extract_cap):
             temp_audio_wav = candidate_wav
             audio_source = str(candidate_wav)
     except Exception:
@@ -137,27 +175,33 @@ def transcribe_video(
         )
 
         transcript_segments: list[dict[str, Any]] = []
-        duration = max(info.duration, 0.001)
+        duration = max(full_media_duration, info.duration, 0.001)
         effective_duration = min(duration, max_duration) if max_duration is not None else duration
+        stopped_early = extract_cap is not None
         if progress_callback:
             progress_callback("Transcribing audio", 0)
 
-        def _flush_transcript() -> None:
+        def _flush_transcript(is_final: bool = False) -> None:
+            if cancel_event is not None and cancel_event.is_set():
+                return
             transcript_text = "\n".join(
                 f"[{segment['start']:.3f} - {segment['end']:.3f}] {segment['text']}"
                 for segment in transcript_segments
             )
+            last_end = transcript_segments[-1]["end"] if transcript_segments else 0.0
+            is_complete = bool(is_final and not stopped_early)
+            covered = duration if is_complete else max(last_end, effective_duration if is_final else last_end)
             transcript_json = {
                 "language": info.language,
                 "language_probability": info.language_probability,
                 "segments": transcript_segments,
                 "duration": duration,
+                "is_complete": is_complete,
+                "covered_duration": round(covered, 3),
             }
-            (output_directory / "transcript.txt").write_text(transcript_text + "\n", encoding="utf-8")
-            (output_directory / "transcript.json").write_text(
-                json.dumps(transcript_json, indent=2),
-                encoding="utf-8",
-            )
+            output_directory.mkdir(parents=True, exist_ok=True)
+            _atomic_write_text(output_directory / "transcript.txt", transcript_text + "\n")
+            _atomic_write_text(output_directory / "transcript.json", json.dumps(transcript_json, indent=2))
 
         last_flush_time = time.monotonic()
         for segment in segments:
@@ -186,7 +230,7 @@ def transcribe_video(
             # 3. Throttle disk writes to every 3.5s to prevent disk I/O thrashing
             now = time.monotonic()
             if now - last_flush_time >= 3.5:
-                _flush_transcript()
+                _flush_transcript(is_final=False)
                 last_flush_time = now
 
             if progress_callback:
@@ -197,17 +241,23 @@ def transcribe_video(
                 )
 
             if max_duration is not None and segment.end >= max_duration:
+                if segment.end < duration - 0.5:
+                    stopped_early = True
                 break
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Transcription cancelled")
 
         if progress_callback:
             progress_callback("Saving transcript", 100)
-        _flush_transcript()
+        _flush_transcript(is_final=True)
 
         return {
             "text_file": "transcript.txt",
             "json_file": "transcript.json",
             "segments": len(transcript_segments),
             "duration": duration,
+            "is_complete": not stopped_early,
         }
     finally:
         if temp_audio_wav and temp_audio_wav.is_file():

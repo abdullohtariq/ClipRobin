@@ -13,39 +13,76 @@ export default function JobProgress() {
     let isMounted = true;
     let timeoutId: number | undefined;
     let emptySince: number | undefined;
+    let hasActiveNow = false;
+
+    const scheduleNext = (delayMs: number) => {
+      if (!isMounted) return;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
+      timeoutId = window.setTimeout(() => void refreshJobs(), delayMs);
+    };
 
     const refreshJobs = async () => {
+      if (!isMounted) return;
+      if (typeof document !== "undefined" && document.hidden) {
+        scheduleNext(4000);
+        return;
+      }
+
       try {
         const activeJobs = await getActiveJobs();
         if (isMounted) {
           if (activeJobs.length > 0) {
+            hasActiveNow = true;
             emptySince = undefined;
             setJobs(activeJobs);
-          } else if (emptySince === undefined) {
-            emptySince = Date.now();
-          } else if (Date.now() - emptySince >= 5000) {
-            setJobs([]);
+          } else {
+            hasActiveNow = false;
+            if (emptySince === undefined) {
+              emptySince = Date.now();
+            } else if (Date.now() - emptySince >= 3500) {
+              setJobs((prev) => (prev.length === 0 ? prev : []));
+            }
           }
-          setError("");
+          setError((prev) => (prev === "" ? prev : ""));
         }
       } catch (requestError) {
         if (isMounted) {
-          setError(
-            requestError instanceof Error
-              ? requestError.message
-              : "Could not check active job progress",
-          );
+          const isNetworkErr =
+            requestError instanceof TypeError &&
+            (requestError.message.includes("fetch") ||
+              requestError.message.includes("NetworkError") ||
+              requestError.message.includes("Failed"));
+          if (!isNetworkErr) {
+            setError(
+              requestError instanceof Error
+                ? requestError.message
+                : "Could not check active job progress",
+            );
+          }
         }
       } finally {
         if (isMounted) {
-          timeoutId = window.setTimeout(() => void refreshJobs(), 700);
+          const recentlyActive = emptySince !== undefined && Date.now() - emptySince < 5000;
+          scheduleNext(hasActiveNow || recentlyActive ? 1000 : 4000);
         }
       }
     };
 
+    const handleWake = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void refreshJobs();
+    };
+
+    window.addEventListener("cliprobin:job-started", handleWake);
+    document.addEventListener("visibilitychange", handleWake);
     void refreshJobs();
+
     return () => {
       isMounted = false;
+      window.removeEventListener("cliprobin:job-started", handleWake);
+      document.removeEventListener("visibilitychange", handleWake);
       if (timeoutId !== undefined) {
         window.clearTimeout(timeoutId);
       }
@@ -137,10 +174,10 @@ export default function JobProgress() {
 
               {job.kind === "generation" && (
                 <Link
-                  href="/projects"
+                  href={`/clips?project=${encodeURIComponent(job.project_id)}`}
                   className="mt-1.5 inline-block text-xs text-emerald-400 underline hover:text-emerald-300"
                 >
-                  Go to Projects &rarr;
+                  View Clips &rarr;
                 </Link>
               )}
             </li>

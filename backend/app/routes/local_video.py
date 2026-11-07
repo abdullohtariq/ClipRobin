@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import shutil
 import threading
 from pathlib import Path
@@ -15,6 +17,7 @@ router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
 ALLOWED_EXTENSIONS = {".avi", ".mkv", ".mov", ".mp4", ".m4v", ".webm"}
 TRANSCRIPTION_JOBS: dict[str, dict[str, Any]] = {}
+TRANSCRIPTION_CANCEL_EVENTS: dict[str, threading.Event] = {}
 JOBS_LOCK = threading.Lock()
 MAX_COMPLETED_JOBS = 50
 
@@ -26,23 +29,62 @@ class LocalVideoPathRequest(BaseModel):
 def evict_old_transcription_jobs() -> None:
     completed_keys = [
         k for k, v in TRANSCRIPTION_JOBS.items()
-        if v.get("status") in {"completed", "failed"}
+        if v.get("status") in {"completed", "failed", "cancelled"}
     ]
     if len(completed_keys) > MAX_COMPLETED_JOBS:
         for key in completed_keys[: len(completed_keys) - MAX_COMPLETED_JOBS]:
             TRANSCRIPTION_JOBS.pop(key, None)
+            TRANSCRIPTION_CANCEL_EVENTS.pop(key, None)
 
 
 def update_job(project_id: str, **updates: Any) -> None:
     with JOBS_LOCK:
         job = TRANSCRIPTION_JOBS.get(project_id)
         if job is not None:
+            if job.get("status") == "cancelled" and updates.get("status") != "cancelled":
+                return
             job.update(updates)
         evict_old_transcription_jobs()
 
 
-def run_local_transcription(project_id: str, source_path: Path, project_directory: Path) -> None:
+def _save_local_metadata(project_directory: Path, title: str, duration: float) -> None:
+    if not project_directory.is_dir():
+        return
+    meta_file = project_directory / "metadata.json"
+    payload: dict[str, Any] = {}
+    if meta_file.is_file():
+        try:
+            loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = {}
+    if title and not payload.get("title"):
+        payload["title"] = title
+    payload.setdefault("source_type", "Local Video")
+    if duration > 0:
+        payload["duration"] = round(duration, 2)
+    tmp = meta_file.with_name(f".metadata.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        os.replace(tmp, meta_file)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+
+
+def run_local_transcription(
+    project_id: str,
+    source_path: Path,
+    project_directory: Path,
+    cancel_event: threading.Event | None = None,
+) -> None:
+    if cancel_event is None:
+        with JOBS_LOCK:
+            cancel_event = TRANSCRIPTION_CANCEL_EVENTS.get(project_id)
+
     def report_progress(step: str, step_progress: float) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            return
         if step == "Loading speech model":
             progress = 5
         elif step == "Transcribing audio":
@@ -61,8 +103,18 @@ def run_local_transcription(project_id: str, source_path: Path, project_director
             source_path,
             project_directory / "transcription",
             progress_callback=report_progress,
+            cancel_event=cancel_event,
         )
     except Exception as error:
+        if cancel_event is not None and cancel_event.is_set():
+            update_job(
+                project_id,
+                status="cancelled",
+                step="Transcription cancelled",
+            )
+            with JOBS_LOCK:
+                TRANSCRIPTION_CANCEL_EVENTS.pop(project_id, None)
+            return
         logger.exception("Local transcription failed for project %s", project_id)
         update_job(
             project_id,
@@ -70,8 +122,12 @@ def run_local_transcription(project_id: str, source_path: Path, project_director
             step="Transcription failed",
             error=str(error) or error.__class__.__name__,
         )
+        with JOBS_LOCK:
+            TRANSCRIPTION_CANCEL_EVENTS.pop(project_id, None)
         return
 
+    with JOBS_LOCK:
+        TRANSCRIPTION_CANCEL_EVENTS.pop(project_id, None)
     update_job(
         project_id,
         status="completed",
@@ -103,7 +159,10 @@ def transcribe_local_video(
     finally:
         video.file.close()
 
+    cancel_event = threading.Event()
     with JOBS_LOCK:
+        evict_old_transcription_jobs()
+        TRANSCRIPTION_CANCEL_EVENTS[project_id] = cancel_event
         TRANSCRIPTION_JOBS[project_id] = {
             "project_id": project_id,
             "status": "queued",
@@ -115,6 +174,7 @@ def transcribe_local_video(
         project_id,
         source_path,
         project_directory,
+        cancel_event,
     )
     dur = 0.0
     try:
@@ -122,6 +182,7 @@ def transcribe_local_video(
         dur = probe_video_duration(source_path)
     except Exception:
         pass
+    _save_local_metadata(project_directory, Path(filename).stem, dur)
 
     return JSONResponse(
         status_code=202,
@@ -160,13 +221,19 @@ def transcribe_from_path(
     source_path = project_directory / f"source{extension}"
 
     try:
-        shutil.copyfile(local_file, source_path)
+        try:
+            # Instant zero-copy hardlink when on the same NTFS/POSIX volume
+            os.link(local_file, source_path)
+        except OSError:
+            shutil.copyfile(local_file, source_path)
     except Exception as error:
         shutil.rmtree(project_directory, ignore_errors=True)
         raise HTTPException(status_code=500, detail="Could not access local video file") from error
 
+    cancel_event = threading.Event()
     with JOBS_LOCK:
         evict_old_transcription_jobs()
+        TRANSCRIPTION_CANCEL_EVENTS[project_id] = cancel_event
         TRANSCRIPTION_JOBS[project_id] = {
             "project_id": project_id,
             "status": "queued",
@@ -178,6 +245,7 @@ def transcribe_from_path(
         project_id,
         source_path,
         project_directory,
+        cancel_event,
     )
     dur = 0.0
     try:
@@ -185,6 +253,7 @@ def transcribe_from_path(
         dur = probe_video_duration(source_path)
     except Exception:
         pass
+    _save_local_metadata(project_directory, local_file.stem, dur)
 
     return JSONResponse(
         status_code=202,

@@ -4,6 +4,7 @@ import React, {
   ChangeEvent,
   DragEvent,
   FormEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -15,6 +16,7 @@ import {
   Project,
   FramingMode,
   CaptionStyle,
+  CaptionAnimation,
 } from "@/src/lib/api";
 import { DashboardProjectSkeleton } from "@/src/components/skeletons";
 import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
@@ -25,9 +27,19 @@ import { StatusPill } from "@/src/components/ui/status-pill";
 import { IconButton } from "@/src/components/ui/icon-button";
 import { OptionCard } from "@/src/components/ui/option-card";
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
+import { useSubscription } from "@/src/lib/subscription-context";
 import { useVideoQueue, QueueSource } from "@/src/lib/queue-context";
 import { VideoQueueView } from "@/src/components/video-queue-view";
 import { sanitizeProjectName, validateProjectName } from "@/src/lib/project-name-utils";
+
+const normalizeCaptionStyle = (raw: string | null | undefined): CaptionStyle => {
+  if (raw === "bold_emerald") return "robin";
+  if (raw === "clean_gold") return "clean";
+  if (raw && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(raw)) {
+    return raw as CaptionStyle;
+  }
+  return "classic";
+};
 
 type ActiveVideo =
   | { kind: "file"; file: File; name: string; size: number }
@@ -71,6 +83,7 @@ const getFileDuration = (file: File): Promise<number | null> => {
 
 export default function Home() {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
+  const { isPro, isCaptionStyleAllowed, openUpgradeModal } = useSubscription();
   const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
 
   // Global Video Queue
@@ -104,6 +117,7 @@ export default function Home() {
   const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
   const [clipCount, setClipCount] = useState<number>(3);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
+  const [captionAnimation, setCaptionAnimation] = useState<CaptionAnimation | null>(null);
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
 
@@ -114,6 +128,7 @@ export default function Home() {
   // Video Preview URL
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
   const [queueSuccessBanner, setQueueSuccessBanner] = useState<string | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Calculate dynamic max clips
@@ -140,46 +155,67 @@ export default function Home() {
     setVideoPreviewUrl(null);
   }, [activeVideo]);
 
-  // Load user preference defaults from localStorage
+  // Load user preference defaults from localStorage and enforce subscription rules
   useEffect(() => {
-    try {
-      const savedFraming = localStorage.getItem("cliprobin_framing_mode");
-      if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
-        setFramingMode(savedFraming as FramingMode);
-      }
-      const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
-      if (savedFaceTracking !== null) {
-        setFaceTracking(savedFaceTracking === "true");
-      }
-      const savedDuration = localStorage.getItem("cliprobin_clip_duration");
-      if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
-        setClipDurationSeconds(Number(savedDuration) as ClipDuration);
-      }
-      const savedCount = localStorage.getItem("cliprobin_clip_count");
-      if (savedCount && Number(savedCount) >= 1) {
-        setClipCount(Number(savedCount));
-      }
-      const savedSubs = localStorage.getItem("cliprobin_show_captions");
-      if (savedSubs !== null) {
-        setShowCaptions(savedSubs === "true");
-      }
-      const savedWm = localStorage.getItem("cliprobin_show_watermark");
-      if (savedWm !== null) {
-        setShowWatermark(savedWm === "true");
-      }
-      const savedStyle = localStorage.getItem("cliprobin_caption_style");
-      if (
-        savedStyle &&
-        ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(
-          savedStyle
-        )
-      ) {
-        setCaptionStyle(savedStyle as CaptionStyle);
-      }
-    } catch {}
-  }, []);
+    const syncPreferences = () => {
+      try {
+        const savedFraming = localStorage.getItem("cliprobin_framing_mode");
+        if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
+          setFramingMode(savedFraming as FramingMode);
+        }
+        const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
+        if (savedFaceTracking !== null) {
+          setFaceTracking(savedFaceTracking === "true");
+        }
+        const savedDuration = localStorage.getItem("cliprobin_clip_duration");
+        if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
+          setClipDurationSeconds(Number(savedDuration) as ClipDuration);
+        }
+        const savedCount = localStorage.getItem("cliprobin_clip_count");
+        if (savedCount && Number(savedCount) >= 1) {
+          setClipCount(Number(savedCount));
+        }
+        const savedMode = localStorage.getItem("cliprobin_generation_mode");
+        if (savedMode && ["random", "ai"].includes(savedMode)) {
+          setGenerationMode(isPro && savedMode === "ai" ? "ai" : "random");
+        }
+        const savedSubs = localStorage.getItem("cliprobin_show_captions");
+        if (savedSubs !== null) {
+          setShowCaptions(savedSubs === "true");
+        }
+        const savedWm = localStorage.getItem("cliprobin_show_watermark");
+        if (!isPro) {
+          setShowWatermark(true);
+        } else if (savedWm !== null) {
+          setShowWatermark(savedWm === "true");
+        }
+        const savedStyle = localStorage.getItem("cliprobin_caption_style");
+        if (savedStyle) {
+          const normalized = normalizeCaptionStyle(savedStyle);
+          setCaptionStyle(isCaptionStyleAllowed(normalized) ? normalized : "classic");
+        }
+        const savedAnim = localStorage.getItem("cliprobin_caption_animation");
+        if (savedAnim && ["pop", "grow", "sweep", "fade", "glide"].includes(savedAnim)) {
+          setCaptionAnimation(savedAnim as CaptionAnimation);
+        }
+      } catch {}
+    };
 
-  const refreshProjectsList = async () => {
+    syncPreferences();
+    window.addEventListener("cliprobin:subscription-changed", syncPreferences);
+    return () => window.removeEventListener("cliprobin:subscription-changed", syncPreferences);
+  }, [isPro, isCaptionStyleAllowed]);
+
+  useEffect(() => {
+    if (aiDeveloperStatus && !aiDeveloperStatus.ai_enabled && generationMode === "ai") {
+      setGenerationMode("random");
+      try {
+        localStorage.setItem("cliprobin_generation_mode", "random");
+      } catch {}
+    }
+  }, [aiDeveloperStatus, generationMode]);
+
+  const refreshProjectsList = useCallback(async () => {
     try {
       const data = await getProjects();
       setRecentProjects(data.projects || []);
@@ -188,11 +224,19 @@ export default function Home() {
     } finally {
       setIsLoadingProjects(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refreshProjectsList();
-  }, []);
+    const handleQueueCompleted = () => {
+      void refreshProjectsList();
+    };
+    window.addEventListener("cliprobin:queue-item-completed", handleQueueCompleted);
+    return () => {
+      window.removeEventListener("cliprobin:queue-item-completed", handleQueueCompleted);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    };
+  }, [refreshProjectsList]);
 
   // Reset the wizard to Step 1 (for "+ Add another video")
   const handleResetFlow = () => {
@@ -428,6 +472,14 @@ export default function Home() {
         ? { kind: "youtube", url: activeVideo.url, videoLabel: finalName }
         : { kind: "file", file: activeVideo.file, name: activeVideo.name, size: activeVideo.size };
 
+    const effectiveGenerationMode: "random" | "ai" =
+      isPro && aiModeEnabled && generationMode === "ai" ? "ai" : "random";
+    const normalizedStyle = normalizeCaptionStyle(captionStyle);
+    const effectiveCaptionStyle: CaptionStyle = isCaptionStyleAllowed(normalizedStyle)
+      ? normalizedStyle
+      : "classic";
+    const effectiveWatermark = isPro ? showWatermark : true;
+
     const result = addToQueue({
       projectName: finalName,
       source: queueSource,
@@ -435,17 +487,19 @@ export default function Home() {
         framingMode,
         clipDurationSeconds,
         clipCount,
-        generationMode,
-        captionStyle,
+        generationMode: effectiveGenerationMode,
+        captionStyle: effectiveCaptionStyle,
+        captionAnimation: effectiveCaptionStyle === "classic" ? null : captionAnimation,
         showCaptions,
-        showWatermark,
+        showWatermark: effectiveWatermark,
         faceTracking: framingMode === "true_9_16" ? faceTracking : false,
       },
     });
 
     if (result.success) {
       setQueueSuccessBanner(`"${finalName}" was added to the queue! Processing is running in the background.`);
-      setTimeout(() => setQueueSuccessBanner(null), 6000);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = setTimeout(() => setQueueSuccessBanner(null), 6000);
       handleResetFlow();
       void refreshProjectsList();
     } else if (result.error) {
@@ -453,8 +507,9 @@ export default function Home() {
     }
   };
 
+  const effectiveShowWatermark = isPro ? showWatermark : true;
   const activeStyleName =
-    CAPTION_STYLE_OPTIONS.find((s) => s.id === captionStyle)?.name || "Classic";
+    CAPTION_STYLE_OPTIONS.find((s) => s.id === normalizeCaptionStyle(captionStyle))?.name || "Classic";
 
   return (
     <main className="min-h-full p-4 md:p-8 xl:p-10 max-w-7xl mx-auto">
@@ -943,22 +998,63 @@ export default function Home() {
                   aiModeEnabled={aiModeEnabled}
                   aiModeDisabledReason={aiDeveloperStatus?.reason}
                   generationMode={generationMode}
-                  onGenerationModeChange={setGenerationMode}
+                  onGenerationModeChange={(mode) => {
+                    if (mode === "ai" && !isPro) {
+                      openUpgradeModal("Gemini AI Hook Finder");
+                      return;
+                    }
+                    setGenerationMode(mode);
+                    try { localStorage.setItem("cliprobin_generation_mode", mode); } catch {}
+                  }}
                   clipDurationSeconds={clipDurationSeconds}
-                  onClipDurationChange={setClipDurationSeconds}
+                  onClipDurationChange={(dur) => {
+                    setClipDurationSeconds(dur);
+                    try { localStorage.setItem("cliprobin_clip_duration", String(dur)); } catch {}
+                  }}
                   clipCount={clipCount}
-                  onClipCountChange={setClipCount}
+                  onClipCountChange={(cnt) => {
+                    setClipCount(cnt);
+                    try { localStorage.setItem("cliprobin_clip_count", String(cnt)); } catch {}
+                  }}
                   maxClips={maxClips}
                   framingMode={framingMode}
                   onFramingModeChange={handleSelectFramingMode}
                   faceTracking={faceTracking}
                   onFaceTrackingChange={handleToggleFaceTracking}
                   showCaptions={showCaptions}
-                  onShowCaptionsChange={setShowCaptions}
+                  onShowCaptionsChange={(subs) => {
+                    setShowCaptions(subs);
+                    try { localStorage.setItem("cliprobin_show_captions", String(subs)); } catch {}
+                  }}
                   captionStyle={captionStyle}
-                  onCaptionStyleChange={setCaptionStyle}
-                  showWatermark={showWatermark}
-                  onShowWatermarkChange={setShowWatermark}
+                  onCaptionStyleChange={(st) => {
+                    if (!isCaptionStyleAllowed(st)) {
+                      openUpgradeModal("Pro Subtitle Styles");
+                      return;
+                    }
+                    setCaptionStyle(st);
+                    try { localStorage.setItem("cliprobin_caption_style", st); } catch {}
+                  }}
+                  captionAnimation={captionAnimation}
+                  onCaptionAnimationChange={(anim) => {
+                    setCaptionAnimation(anim);
+                    try {
+                      if (anim) {
+                        localStorage.setItem("cliprobin_caption_animation", anim);
+                      } else {
+                        localStorage.removeItem("cliprobin_caption_animation");
+                      }
+                    } catch {}
+                  }}
+                  showWatermark={effectiveShowWatermark}
+                  onShowWatermarkChange={(wm) => {
+                    if (!wm && !isPro) {
+                      openUpgradeModal("Watermark Removal");
+                      return;
+                    }
+                    setShowWatermark(wm);
+                    try { localStorage.setItem("cliprobin_show_watermark", String(wm)); } catch {}
+                  }}
                 />
 
                 {/* Submit to Queue Button in Step 3 */}
@@ -1099,7 +1195,7 @@ export default function Home() {
                   )}
 
                   {/* Watermark Overlay Preview */}
-                  {activeVideo && showWatermark && (
+                  {activeVideo && effectiveShowWatermark && (
                     <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-xs shadow-sm">
                       <span className="size-1.5 rounded-full bg-[#10b981]" />
                       <span className="text-[8px] font-semibold text-white tracking-tight">Clip Robin</span>
@@ -1113,7 +1209,10 @@ export default function Home() {
                         framingMode === "square_rounded" ? "bottom-[18%]" : "bottom-[26.5%]"
                       }`}
                     >
-                      <LiveMovingCaptions captionStyle={captionStyle} />
+                      <LiveMovingCaptions
+                        captionStyle={captionStyle}
+                        captionAnimation={captionAnimation}
+                      />
                     </div>
                   )}
                 </div>
@@ -1139,7 +1238,7 @@ export default function Home() {
                     {showCaptions ? `${activeStyleName} subtitles` : "No subtitles"}
                   </Badge>
                   <Badge variant="neutral">
-                    {showWatermark ? "Watermark on" : "No watermark"}
+                    {effectiveShowWatermark ? "Watermark on" : "No watermark"}
                   </Badge>
                 </div>
               </div>

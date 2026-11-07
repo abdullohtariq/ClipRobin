@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { CaptionStyle } from "@/src/lib/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CaptionAnimation, CaptionStyle } from "@/src/lib/api";
 import { Badge } from "@/src/components/ui/badge";
 import { Checkbox } from "@/src/components/ui/checkbox";
 import { IconButton } from "@/src/components/ui/icon-button";
 import { useSubscription } from "@/src/lib/subscription-context";
+import { getDefaultAnimationForStyle, getEffectiveAnimation } from "./live-moving-captions";
 
 export interface StyleOption {
   id: CaptionStyle;
@@ -14,8 +15,43 @@ export interface StyleOption {
   category: "bold" | "minimal" | "boxed";
   categories: Array<"all" | "bold" | "minimal" | "boxed">;
   animationName: string;
+  defaultAnimation: CaptionAnimation;
   fontFamily: string;
 }
+
+export interface AnimationOption {
+  id: CaptionAnimation;
+  name: string;
+  description: string;
+}
+
+export const CAPTION_ANIMATION_OPTIONS: AnimationOption[] = [
+  {
+    id: "pop",
+    name: "Pop",
+    description: "Snappy active word scale pop",
+  },
+  {
+    id: "grow",
+    name: "Grow",
+    description: "Smooth active word emphasis",
+  },
+  {
+    id: "sweep",
+    name: "Sweep",
+    description: "Karaoke-style fill across words",
+  },
+  {
+    id: "fade",
+    name: "Fade",
+    description: "Soft opacity and scale transition",
+  },
+  {
+    id: "glide",
+    name: "Glide",
+    description: "Gentle upward motion into place",
+  },
+];
 
 export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
   {
@@ -25,6 +61,7 @@ export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
     category: "boxed",
     categories: ["all", "boxed", "bold"],
     animationName: "Pop",
+    defaultAnimation: "pop",
     fontFamily: "Montserrat Bold",
   },
   {
@@ -34,6 +71,7 @@ export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
     category: "bold",
     categories: ["all", "bold"],
     animationName: "Grow",
+    defaultAnimation: "grow",
     fontFamily: "Montserrat Black",
   },
   {
@@ -43,6 +81,7 @@ export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
     category: "minimal",
     categories: ["all", "minimal"],
     animationName: "Fade",
+    defaultAnimation: "fade",
     fontFamily: "Montserrat Bold",
   },
   {
@@ -52,6 +91,7 @@ export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
     category: "bold",
     categories: ["all", "bold"],
     animationName: "Pop",
+    defaultAnimation: "pop",
     fontFamily: "Anton Heavy",
   },
   {
@@ -61,6 +101,7 @@ export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
     category: "boxed",
     categories: ["all", "boxed"],
     animationName: "Pop",
+    defaultAnimation: "pop",
     fontFamily: "Poppins Bold",
   },
   {
@@ -70,14 +111,25 @@ export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
     category: "minimal",
     categories: ["all", "minimal"],
     animationName: "Sweep",
+    defaultAnimation: "sweep",
     fontFamily: "Montserrat Bold",
   },
 ];
 
-export function getPreviewUrls(styleId: CaptionStyle) {
+export function getPreviewUrls(
+  styleId: CaptionStyle,
+  animationId?: CaptionAnimation | null
+) {
+  if (styleId === "classic" || !animationId) {
+    return {
+      videoUrl: `/caption-previews/${styleId}.mp4`,
+      posterUrl: `/caption-previews/${styleId}.jpg`,
+    };
+  }
+  const effectiveAnim = getEffectiveAnimation(styleId, animationId);
   return {
-    videoUrl: `/caption-previews/${styleId}.mp4`,
-    posterUrl: `/caption-previews/${styleId}.jpg`,
+    videoUrl: `/caption-previews/${styleId}__${effectiveAnim}.mp4`,
+    posterUrl: `/caption-previews/${styleId}__${effectiveAnim}.jpg`,
   };
 }
 
@@ -215,6 +267,8 @@ export interface CaptionStylePickerProps {
   onClose: () => void;
   selectedStyle: CaptionStyle;
   onSelect: (style: CaptionStyle) => void;
+  selectedAnimation?: CaptionAnimation | null;
+  onSelectAnimation?: (animation: CaptionAnimation | null) => void;
 }
 
 export function CaptionStylePicker({
@@ -222,13 +276,17 @@ export function CaptionStylePicker({
   onClose,
   selectedStyle,
   onSelect,
+  selectedAnimation = null,
+  onSelectAnimation,
 }: CaptionStylePickerProps) {
   const { isCaptionStyleAllowed, openUpgradeModal } = useSubscription();
   const [tempStyle, setTempStyle] = useState<CaptionStyle>(selectedStyle);
+  const [tempAnimation, setTempAnimation] = useState<CaptionAnimation | null>(selectedAnimation ?? null);
   const [selectedCategory, setSelectedCategory] = useState<"all" | "bold" | "minimal" | "boxed">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [showSafeZones, setShowSafeZones] = useState<boolean>(true);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
   const [videoError, setVideoError] = useState(false);
 
@@ -241,6 +299,7 @@ export function CaptionStylePicker({
   useEffect(() => {
     if (isOpen) {
       setTempStyle(selectedStyle);
+      setTempAnimation(selectedAnimation ?? null);
       setSearchQuery("");
       setSelectedCategory("all");
 
@@ -251,7 +310,7 @@ export function CaptionStylePicker({
         }
       } catch {}
     }
-  }, [isOpen, selectedStyle]);
+  }, [isOpen, selectedStyle, selectedAnimation]);
 
   // Lock document body scroll while modal is active
   useEffect(() => {
@@ -263,19 +322,28 @@ export function CaptionStylePicker({
     };
   }, [isOpen]);
 
-  // Reduced motion detection
+  // Reduced motion & viewport media query detection (mount only one <video> decoder)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const desktopMq = window.matchMedia("(min-width: 768px)");
     setPrefersReducedMotion(mq.matches);
     setIsPlaying(!mq.matches);
+    setIsDesktopViewport(desktopMq.matches);
 
     const listener = (e: MediaQueryListEvent) => {
       setPrefersReducedMotion(e.matches);
       setIsPlaying(!e.matches);
     };
+    const desktopListener = (e: MediaQueryListEvent) => {
+      setIsDesktopViewport(e.matches);
+    };
     mq.addEventListener("change", listener);
-    return () => mq.removeEventListener("change", listener);
+    desktopMq.addEventListener("change", desktopListener);
+    return () => {
+      mq.removeEventListener("change", listener);
+      desktopMq.removeEventListener("change", desktopListener);
+    };
   }, []);
 
   const handleToggleSafeZones = (val: boolean) => {
@@ -301,6 +369,19 @@ export function CaptionStylePicker({
     });
   }, [selectedCategory, searchQuery]);
 
+  const activeStyleDef =
+    CAPTION_STYLE_OPTIONS.find((s) => s.id === tempStyle) || CAPTION_STYLE_OPTIONS[0];
+
+  const handleApply = useCallback(() => {
+    if (!isCaptionStyleAllowed(tempStyle)) {
+      openUpgradeModal(`The "${activeStyleDef.name}" Subtitle Style`);
+      return;
+    }
+    onSelect(tempStyle);
+    onSelectAnimation?.(tempStyle === "classic" ? null : tempAnimation);
+    onClose();
+  }, [isCaptionStyleAllowed, tempStyle, activeStyleDef.name, openUpgradeModal, onSelect, onSelectAnimation, tempAnimation, onClose]);
+
   // Keyboard navigation
   useEffect(() => {
     if (!isOpen) return;
@@ -312,12 +393,10 @@ export function CaptionStylePicker({
         return;
       }
 
-      // If user is focused on the search input, don't hijack left/right arrow typing
       if (document.activeElement === searchInputRef.current) {
         if (e.key === "Enter") {
           e.preventDefault();
-          onSelect(tempStyle);
-          onClose();
+          handleApply();
         }
         return;
       }
@@ -327,68 +406,67 @@ export function CaptionStylePicker({
         if (filteredStyles.length === 0) return;
         const currentIndex = filteredStyles.findIndex((s) => s.id === tempStyle);
         const nextIndex = (currentIndex + 1) % filteredStyles.length;
-        setTempStyle(filteredStyles[nextIndex].id);
+        const candidate = filteredStyles[nextIndex];
+        if (isCaptionStyleAllowed(candidate.id)) {
+          setTempStyle(candidate.id);
+        } else {
+          openUpgradeModal(`The "${candidate.name}" Subtitle Style`);
+        }
       } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
         e.preventDefault();
         if (filteredStyles.length === 0) return;
         const currentIndex = filteredStyles.findIndex((s) => s.id === tempStyle);
         const prevIndex =
           (currentIndex - 1 + filteredStyles.length) % filteredStyles.length;
-        setTempStyle(filteredStyles[prevIndex].id);
+        const candidate = filteredStyles[prevIndex];
+        if (isCaptionStyleAllowed(candidate.id)) {
+          setTempStyle(candidate.id);
+        } else {
+          openUpgradeModal(`The "${candidate.name}" Subtitle Style`);
+        }
       } else if (e.key === "Enter") {
         e.preventDefault();
-        onSelect(tempStyle);
-        onClose();
+        handleApply();
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, tempStyle, filteredStyles, onSelect, onClose]);
+  }, [isOpen, tempStyle, filteredStyles, handleApply, isCaptionStyleAllowed, openUpgradeModal, onClose]);
 
-  // Update video elements when style changes
-  const { videoUrl, posterUrl } = getPreviewUrls(tempStyle);
+  const effectiveAnimation = getEffectiveAnimation(tempStyle, tempAnimation);
+  const { videoUrl, posterUrl } = getPreviewUrls(tempStyle, tempAnimation);
 
   useEffect(() => {
     setVideoError(false);
-    const vids = [videoRefDesktop.current, videoRefMobile.current];
-    vids.forEach((v) => {
-      if (v) {
-        v.load();
-        if (!prefersReducedMotion) {
-          v.play().catch(() => {});
-        }
+    const activeVideoEl = isDesktopViewport ? videoRefDesktop.current : videoRefMobile.current;
+    if (activeVideoEl) {
+      activeVideoEl.load();
+      if (!prefersReducedMotion) {
+        activeVideoEl.play().catch(() => {});
       }
-    });
+    }
     if (!prefersReducedMotion) {
       setIsPlaying(true);
     }
-  }, [tempStyle, prefersReducedMotion]);
+  }, [tempStyle, tempAnimation, prefersReducedMotion, isDesktopViewport]);
 
   const togglePlayback = () => {
-    const vids = [videoRefDesktop.current, videoRefMobile.current];
+    const activeVideoEl = isDesktopViewport ? videoRefDesktop.current : videoRefMobile.current;
     if (isPlaying) {
-      vids.forEach((v) => v?.pause());
+      activeVideoEl?.pause();
       setIsPlaying(false);
     } else {
-      vids.forEach((v) => v?.play().catch(() => {}));
+      activeVideoEl?.play().catch(() => {});
       setIsPlaying(true);
     }
   };
 
   if (!isOpen) return null;
 
-  const activeStyleDef =
-    CAPTION_STYLE_OPTIONS.find((s) => s.id === tempStyle) || CAPTION_STYLE_OPTIONS[0];
-
-  const handleApply = () => {
-    if (!isCaptionStyleAllowed(tempStyle)) {
-      openUpgradeModal(`The "${activeStyleDef.name}" Subtitle Style`);
-      return;
-    }
-    onSelect(tempStyle);
-    onClose();
-  };
+  const activeAnimDef =
+    CAPTION_ANIMATION_OPTIONS.find((a) => a.id === effectiveAnimation) ||
+    CAPTION_ANIMATION_OPTIONS[0];
 
   const categories: Array<{ id: "all" | "bold" | "minimal" | "boxed"; label: string }> = [
     { id: "all", label: "All" },
@@ -403,6 +481,9 @@ export function CaptionStylePicker({
       aria-modal="true"
       aria-labelledby="caption-style-picker-title"
       aria-describedby="caption-style-picker-desc"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-0 sm:p-4 lg:p-6 animate-in fade-in duration-150"
     >
       <div
@@ -416,10 +497,10 @@ export function CaptionStylePicker({
               id="caption-style-picker-title"
               className="text-base sm:text-lg font-bold text-white tracking-tight truncate"
             >
-              Caption style
+              Caption style &amp; motion studio
             </h2>
             <p id="caption-style-picker-desc" className="text-[11px] sm:text-xs text-zinc-400 truncate">
-              Select a typographic look for your vertical clips
+              Preview every typography style, word animation, and platform safe zone in 9:16
             </p>
           </div>
 
@@ -449,7 +530,7 @@ export function CaptionStylePicker({
         <div className="md:hidden flex items-center gap-3.5 p-3 sm:p-4 border-b border-zinc-800 bg-[#0b0b0e] shrink-0">
           {/* Mini 9:16 Video Player */}
           <div className="relative aspect-[9/16] w-[80px] xs:w-[92px] rounded-lg overflow-hidden bg-black border border-zinc-800 shadow-md shrink-0 select-none">
-            {!videoError ? (
+            {!isDesktopViewport && !videoError ? (
               <video
                 ref={videoRefMobile}
                 src={videoUrl}
@@ -502,7 +583,7 @@ export function CaptionStylePicker({
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-[11px] font-semibold text-zinc-300">Live 9:16 Preview</span>
               <Badge variant="emerald" className="text-[10px] px-1.5 py-0">
-                {activeStyleDef.animationName}
+                {activeAnimDef.name}
               </Badge>
             </div>
             <h3 className="text-sm font-bold text-white truncate">
@@ -519,7 +600,7 @@ export function CaptionStylePicker({
 
         {/* Content Area */}
         <div className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden divide-y md:divide-y-0 md:divide-x divide-zinc-800">
-          {/* Left Pane: Search, Category Chips, and Style Cards */}
+          {/* Left Pane: Search, Category Chips, Style Cards, and Animation Selector */}
           <div className="flex-1 flex flex-col min-h-0 p-3 sm:p-4 lg:p-5 overflow-hidden">
             {/* Search and Category Filters */}
             <div className="space-y-2.5 sm:space-y-3 mb-3 sm:mb-4 shrink-0">
@@ -541,6 +622,7 @@ export function CaptionStylePicker({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search styles (e.g. Robin, Bold, Anton)..."
+                  aria-label="Search caption styles"
                   className="w-full pl-8 sm:pl-9 pr-8 sm:pr-9 py-1.5 sm:py-2 rounded-xl border border-zinc-800 bg-[#141418] text-xs text-zinc-200 placeholder-zinc-500 focus-ring"
                 />
                 {searchQuery && (
@@ -556,31 +638,33 @@ export function CaptionStylePicker({
               </div>
 
               {/* Category Chips */}
-              <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 no-scrollbar" role="tablist">
-                {categories.map((cat) => {
-                  const isActive = selectedCategory === cat.id;
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={isActive}
-                      onClick={() => setSelectedCategory(cat.id)}
-                      className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-medium transition-colors focus-ring whitespace-nowrap cursor-pointer ${
-                        isActive
-                          ? "bg-zinc-800 text-white font-semibold border border-zinc-700 shadow-sm"
-                          : "bg-transparent text-zinc-400 hover:text-white hover:bg-zinc-800/40 border border-transparent"
-                      }`}
-                    >
-                      {cat.label}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-0.5 no-scrollbar" role="tablist" aria-label="Style categories">
+                  {categories.map((cat) => {
+                    const isActive = selectedCategory === cat.id;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => setSelectedCategory(cat.id)}
+                        className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg text-xs font-medium transition-colors focus-ring whitespace-nowrap cursor-pointer ${
+                          isActive
+                            ? "bg-zinc-800 text-white font-semibold border border-zinc-700 shadow-sm"
+                            : "bg-transparent text-zinc-400 hover:text-white hover:bg-zinc-800/40 border border-transparent"
+                        }`}
+                      >
+                        {cat.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* Scrollable Grid of Styles */}
-            <div className="flex-1 overflow-y-auto pr-1 min-h-0">
+            {/* Scrollable Grid of Styles + Word Animation Selector */}
+            <div className="flex-1 overflow-y-auto pr-1 min-h-0 space-y-4">
               {filteredStyles.length > 0 ? (
                 <div
                   role="radiogroup"
@@ -618,6 +702,71 @@ export function CaptionStylePicker({
                   </button>
                 </div>
               )}
+
+              {/* Word Animation Motion Selector inside Modal */}
+              <div className="rounded-xl border border-zinc-800 bg-[#121215] p-3 sm:p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-semibold text-white">Word Animation Motion</span>
+                    <p className="text-[11px] text-zinc-400">
+                      {tempStyle === "classic"
+                        ? "Classic uses its signature fixed Pop highlight box."
+                        : `Choose how active words animate in ${activeStyleDef.name} (default: ${activeStyleDef.animationName}).`}
+                    </p>
+                  </div>
+                  {tempAnimation && tempStyle !== "classic" && (
+                    <button
+                      type="button"
+                      onClick={() => setTempAnimation(null)}
+                      className="text-[11px] font-medium text-emerald-400 hover:text-emerald-300 cursor-pointer shrink-0"
+                    >
+                      Reset to default ({activeStyleDef.animationName})
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  role="radiogroup"
+                  aria-label="Word animation motion"
+                  className="grid grid-cols-2 sm:grid-cols-5 gap-2"
+                >
+                  {CAPTION_ANIMATION_OPTIONS.map((anim) => {
+                    const isSelected = effectiveAnimation === anim.id;
+                    const isDefault = getDefaultAnimationForStyle(tempStyle) === anim.id;
+                    const isDisabled = tempStyle === "classic" && anim.id !== "pop";
+                    return (
+                      <button
+                        key={anim.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        disabled={isDisabled}
+                        onClick={() => {
+                          if (isDisabled) return;
+                          setTempAnimation(isDefault ? null : anim.id);
+                        }}
+                        className={`flex flex-col items-start rounded-lg border p-2 text-left transition-all focus-ring ${
+                          isSelected
+                            ? "border-[#10b981] bg-[#10b981]/10 text-white shadow-xs"
+                            : "border-zinc-800 bg-[#0d0d10] text-zinc-300 hover:border-zinc-700 hover:text-white"
+                        } ${isDisabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                      >
+                        <div className="flex items-center justify-between w-full gap-1">
+                          <span className="text-xs font-semibold">{anim.name}</span>
+                          {isDefault && (
+                            <span className="text-[9px] font-mono uppercase px-1 py-0.2 rounded bg-zinc-800 text-zinc-400">
+                              Default
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-zinc-400 line-clamp-1 mt-0.5">
+                          {anim.description}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -627,13 +776,13 @@ export function CaptionStylePicker({
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-zinc-300">Live 9:16 Preview</span>
                 <Badge variant="emerald" className="text-xs">
-                  {activeStyleDef.animationName}
+                  {activeAnimDef.name} Motion
                 </Badge>
               </div>
 
-              {/* 9:16 Video Container (Proportionally bounded to fit laptop heights without scrolling) */}
+              {/* 9:16 Video Container */}
               <div className="relative aspect-[9/16] max-h-[min(38vh,260px)] lg:max-h-[min(44vh,310px)] w-auto max-w-[170px] lg:max-w-[200px] mx-auto rounded-xl overflow-hidden bg-black border border-zinc-800 shadow-xl select-none">
-                {!videoError ? (
+                {isDesktopViewport && !videoError ? (
                   <video
                     ref={videoRefDesktop}
                     src={videoUrl}
@@ -703,8 +852,8 @@ export function CaptionStylePicker({
                   {activeStyleDef.description}
                 </p>
                 <div className="pt-1 border-t border-zinc-800/80 flex items-center justify-between text-[11px] text-zinc-500 font-medium">
-                  <span>ASS Subtitle Pipeline</span>
-                  <span className="capitalize">{activeStyleDef.category} Category</span>
+                  <span>Motion: {activeAnimDef.name}</span>
+                  <span className="capitalize">{activeStyleDef.category} Style</span>
                 </div>
               </div>
             </div>
@@ -716,7 +865,7 @@ export function CaptionStylePicker({
           <div className="text-xs text-zinc-400 min-w-0 truncate">
             <span className="hidden xs:inline">Selected: </span>
             <span className="text-white font-semibold">{activeStyleDef.name}</span>
-            <span className="text-zinc-500 ml-1.5 hidden sm:inline">({activeStyleDef.animationName})</span>
+            <span className="text-zinc-500 ml-1.5 hidden sm:inline">({activeAnimDef.name} motion)</span>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -732,7 +881,7 @@ export function CaptionStylePicker({
               onClick={handleApply}
               className="px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl bg-[#10b981] text-xs font-bold text-zinc-950 hover:bg-[#059669] transition-all shadow-md focus-ring cursor-pointer"
             >
-              Apply style
+              Apply style &amp; motion
             </button>
           </div>
         </div>

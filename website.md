@@ -13,14 +13,14 @@
 
 ### The Core Problem It Solves
 Creators spend hours manually scrubbing through hours of footage, finding interesting moments, cropping them to 9:16 vertical video, and typing subtitles. While cloud AI services exist to automate this, they introduce three painful friction points:
-1. **Aggressive Recurring Costs:** Cloud services charge monthly subscription fees ($15 to $79+/month) based on minute quotas, where a single 1-hour podcast consumes an entire month's allowance.
+1. **Aggressive Recurring Costs:** Cloud services charge monthly subscription fees (\$15 to \$79+/month) based on minute quotas, where a single 1-hour podcast consumes an entire month's allowance.
 2. **Loss of Privacy & Slow Uploads:** Gigabytes of private or unreleased raw video footage must be uploaded to third-party cloud servers.
 3. **Vendor Lock-in & Video Expiration:** Projects and rendered videos are often deleted or locked behind a paywall when a subscription lapses.
 
 ### Clip Robin’s Solution: "Local by Default, AI Where It Matters"
-- **Desktop Architecture:** Powered by a lightweight **Tauri v2** shell, **Next.js 16** frontend, and a high-performance **Python/FastAPI** local backend.
-- **Heavy Media Lifting Happens Locally:** Local audio extraction, local transcription using **CTranslate2 / `faster-whisper`**, smart face-detection reframing using **OpenCV YuNet ONNX**, and video rendering with **FFmpeg** all run directly on the user’s PC hardware for **$0.00**.
-- **Opt-in, Cost-Effective Cloud Intelligence:** Semantic hook scoring, title/description generation, and virality ranking can run completely offline with mock analysis, or connect to **OpenAI, DeepSeek, or Google Gemini** using the creator's own API keys (Bring Your Own Key / BYOK). This turns a $30/month bill into **$0.02** of direct API usage.
+- **Desktop Architecture:** Powered by a lightweight **Tauri v2 (`2.12.3`)** shell, **Next.js 16 (`16.3.5`)** frontend, and a high-performance **Python/FastAPI** local backend.
+- **Heavy Media Lifting Happens Locally:** Local audio extraction, local transcription using **CTranslate2 / `faster-whisper`**, smart face-detection reframing using **OpenCV YuNet ONNX**, and video rendering with **FFmpeg** all run directly on the user’s PC hardware for **\$0.00**.
+- **Opt-in, Cost-Effective Cloud Intelligence:** Semantic hook scoring, title/description generation, and virality ranking can run completely offline with Fast Interval mode, or connect to **Google Gemini (`gemini-3.8-flash`), OpenAI, or DeepSeek** using the creator's own API keys (Bring Your Own Key / BYOK). This turns a \$30/month bill into **\$0.02** of direct API usage.
 
 ---
 
@@ -96,7 +96,7 @@ flowchart TD
 ### Section-by-Section Wireframe & Copywriting Plan
 
 #### Section 1: Sticky Navigation Bar
-- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.25 Beta` badge.
+- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.29 Beta` badge.
 - **Center:** Navigation Links (`Features`, `Compare`, `Captions`, `Architecture`, `Docs`).
 - **Right:**
   - **GitHub Star Button:** Link to repository with live star count.
@@ -112,7 +112,7 @@ flowchart TD
 - **CTA Cluster:**
   - **Primary CTA:** Huge Emerald Button:  
     `⬇ Download for Windows (x64)`  
-    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.25
+    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.29
   - **Secondary CTA:** Ghost Button with GitHub Octocat:  
     `★ Star on GitHub`
 - **Zero-Friction Bullets below CTA:**
@@ -147,21 +147,21 @@ Clip Robin already ships with **6 distinctive ASS subtitle styles** and **5 anim
 
 #### Section 6: Core Features (The Engine Under the Hood)
 1. **Local Whisper Transcription:** Powered by `faster-whisper` and CTranslate2. Transcribe hours of audio in minutes with word-level accuracy without sending a byte over the internet.
-2. **AI Virality & Hook Detection:** Connect OpenAI GPT-4o, Google Gemini, or DeepSeek with your own API key to rank topics and extract viral hooks for less than a cent per video.
-3. **Smart 9:16 Vertical Reframing:** Face-tracking and speaker centering powered by OpenCV YuNet ONNX to keep the subject locked in frame.
-4. **Fast FFmpeg Batch Export:** Render in high-bitrate H.264/MP4 with burned-in subtitles, and download clips individually or as a complete `.ZIP` archive.
-5. **Direct Social Upload Modals:** Pre-configured flows for YouTube Shorts, TikTok, and Instagram Reels.
+2. **AI Virality & Hook Detection:** Connect Google Gemini (`gemini-3.8-flash`), OpenAI, or DeepSeek with your own API key via AI Developer Mode to rank topics and extract viral hooks for pennies per video.
+3. **Smart 9:16 Vertical Reframing:** Active-speaker face tracking and mouth-motion correlation powered by OpenCV YuNet ONNX + Whisper VAD, with an instant Face Tracking toggle.
+4. **Multi-Video Queue & Fast FFmpeg Export:** Queue multiple YouTube links and local files, burn in custom brand watermarks or Top-Line hooks, and export clips individually or as a complete `.ZIP` archive.
+5. **Direct Social Upload Modals:** Direct Google OAuth2 YouTube Shorts upload plus guided workflows for TikTok and Instagram Reels.
 
 #### Section 7: "How It Works" (3 Simple Steps)
-1. **Drop or Paste:** Paste any YouTube URL or drag-and-drop a local video file (MP4, MKV, MOV).
-2. **Configure & Analyze:** Select clip lengths (15s, 30s, 60s, 90s) and caption styles. Let the local engine or opt-in AI scan for viral moments.
-3. **Review & Export:** Preview clips with moving captions, tweak cut points, and export directly to your disk.
+1. **Drop or Paste:** Paste YouTube URLs or drag-and-drop local video files (MP4, MKV, MOV, WebM, AVI) into the studio or batch queue.
+2. **Configure & Analyze:** Select clip lengths (12s, 15s, 30s, 60s, 90s), framing mode, and caption style. Let the local engine or opt-in AI scan for viral moments.
+3. **Review & Export:** Preview clips with moving captions, add Top-Line hooks, and export directly to disk or YouTube Shorts.
 
 #### Section 8: Interactive Cost Savings Calculator
 - A clean interactive slider: *"How many hours of video do you clip per month?"* (1 to 20 hours).
-- **Opus Clip / Cloud Clipper cost:** Displays `$29 - $120+ / month` ($348 - $1,440 / year).
-- **Clip Robin cost:** Displays `$0.00` (or `~$0.25` in raw LLM tokens if AI hooks are enabled).
-- **Annual Savings Callout:** Displays **"You save up to $1,400+ every year"**.
+- **Opus Clip / Cloud Clipper cost:** Displays `\$29 - \$120+ / month` (\$348 - \$1,440 / year).
+- **Clip Robin cost:** Displays `\$0.00` (or `~\$0.25` in raw LLM tokens if AI hooks are enabled).
+- **Annual Savings Callout:** Displays **"You save up to \$1,400+ every year"**.
 
 #### Section 9: Frequently Asked Questions (FAQ)
 - *Do I need an expensive graphics card (GPU) to run Clip Robin?*  

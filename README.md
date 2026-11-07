@@ -2,301 +2,205 @@
 
 > Open-source, local-first video clipping for creators who want automation without surrendering their media workflow to the cloud.
 
-Clip Robin is a Windows desktop application for finding, shaping, and exporting short-form video clips. It is being built around a straightforward idea: your computer should do the heavy work, while paid AI services should be optional tools for the moments where semantic intelligence is worth paying for.
+Clip Robin (**v0.1.29**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). It is built around a straightforward principle: **your computer does the heavy media lifting locally, while cloud AI is strictly an opt-in tool for semantic intelligence when you want it.**
 
-That means lower recurring costs, more privacy, and more control over the files, models, providers, and workflow behind every clip.
+That means zero recurring minute quotas, complete local file privacy, and full control over the models, providers, and exports behind every clip.
 
 ## Why Clip Robin?
 
-Many modern clipping products upload the entire workflow to a hosted service. That can mean subscriptions for work a user's computer can already perform, sensitive recordings leaving local storage, and projects becoming dependent on a vendor's account or platform.
+Many clipping platforms upload your entire workflow to a hosted SaaS—charging monthly credit quotas for work your own PC can already perform, sending gigabytes of raw footage to third-party servers, and expiring your clips when a plan lapses.
 
 Clip Robin takes a different route:
 
-- **Local by default:** media inspection, transcription, cutting, rendering, and project storage should happen on the user's hardware whenever practical.
-- **AI where it matters:** paid APIs can help with semantic analysis, clip ranking, hooks, titles, and descriptions, but they are not required for routine media work.
-- **Explicit cloud boundaries:** cloud requests should be opt-in, understandable, limited, and replaceable.
-- **Open and inspectable:** the project, integrations, and important processing decisions should remain visible to users and contributors.
+- **Local by default:** Media inspection, audio extraction, `faster-whisper` transcription, YuNet ONNX active-speaker face tracking, FFmpeg rendering, and project storage run directly on your hardware.
+- **AI where it matters:** Opt-in **AI Hook Finder** connects to Google Gemini (`gemini-3.8-flash` / `gemini-3.1-flash-lite`), OpenAI, or DeepSeek using your own API key (BYOK)—sending only lightweight text transcripts when enabled.
+- **Explicit cloud boundaries:** Cloud requests are opt-in, transparent, and replaceable; Fast Interval clipping works 100% offline.
+- **Open and inspectable:** Architecture, endpoints, schemas, and test suites are documented in [`ai.md`](./ai.md).
 
 ## How It Fits Together
 
-Clip Robin is a desktop application made of three cooperating layers:
+Clip Robin is a three-tier hybrid desktop application:
 
-- **Next.js** provides the interface.
-- **Tauri** provides the lightweight Windows desktop shell and native integration.
-- **Python** is the planned local processing and AI backend.
+- **Next.js 16 (`16.3.5` / React `19.2.8`)** powers the responsive studio interface.
+- **Tauri v2 (`2.12.3`)** provides the lightweight Windows desktop shell, dynamic port allocation, sidecar lifecycle, and signed auto-updates.
+- **Python 3.12+ / FastAPI** runs the local media, transcription, smart-framing, and export engine.
 
 ```mermaid
 flowchart LR
-	User[User] --> UI[Next.js UI]
-	UI <--> Desktop[Tauri desktop shell]
-	Desktop <--> Local[Local processing]
-	Local --> Python[Python backend]
-	Python --> FFmpeg[FFmpeg]
-	Python --> Models[Optional local models]
-	Python --> Files[Local project files]
-	Python -. user-approved request .-> API[Paid AI API]
-	API -. result only .-> Python
+	User[Creator] --> UI[Next.js 16 Studio UI]
+	UI <--> Desktop[Tauri v2 Desktop Shell]
+	Desktop <--> Python[FastAPI Local Sidecar]
+	Python --> FFmpeg[FFmpeg + libass]
+	Python --> Models[faster-whisper + YuNet ONNX]
+	Python --> Files[Local Project Files]
+	Python -. opt-in BYOK transcript .-> API[Gemini / OpenAI / DeepSeek]
+	Python -. user-initiated OAuth2 .-> YT[YouTube Data API v3]
 ```
-
-The cloud path is intentionally narrow. Clip Robin should remain useful when a user wants to work offline or does not want to send media-derived data to a provider.
 
 ## The Clipping Flow
 
 ```mermaid
 flowchart TD
-	Start[Choose a local video] --> Inspect[Inspect media locally]
-	Inspect --> Audio[Extract audio locally]
-	Audio --> Choice{Transcription choice}
-	Choice -->|Local model| Local[Transcribe on device]
-	Choice -->|User enables API| Remote[Send selected data to provider]
-	Local --> Analyze[Analyze transcript and timeline]
-	Remote --> Analyze
-	Analyze --> Candidates[Suggest clip candidates]
-	Candidates --> Review[Review and edit]
-	Review --> Render[Render locally with FFmpeg]
-	Render --> Export[Export to local storage]
+	Start[Drop local video or paste YouTube URL] --> Queue[Single or Multi-Video Queue]
+	Queue --> Audio[Extract bounded WAV locally]
+	Audio --> Transcribe[Transcribe on device via faster-whisper]
+	Transcribe --> Choice{Analysis Mode}
+	Choice -->|Fast Interval - Offline| Mock[Local duration chunker]
+	Choice -->|AI Hook Finder - BYOK| Remote[Gemini / OpenAI / DeepSeek]
+	Mock --> Frame[Frame in 9:16 + YuNet Speaker Tracking]
+	Remote --> Frame
+	Frame --> Render[Progressive FFmpeg + ASS Caption & Watermark Render]
+	Render --> Export[Save As MP4 / Batch ZIP / Direct YouTube Shorts Upload]
 ```
-
-Each stage should make three things clear: where the work happens, what data leaves the device, and what the user can change.
 
 ## Cost and Privacy Model
 
-Clip Robin is designed to minimize unavoidable cloud spending, not to pretend that AI has no cost. The user's hardware handles the predictable, repeatable work; API spending is reserved for optional intelligence.
-
-| Capability | Preferred location | Cloud usage |
+| Capability | Execution Location | Cloud Usage |
 | --- | --- | --- |
-| Media inspection | User hardware | None |
-| Audio extraction | User hardware | None |
-| Video cutting and rendering | User hardware | None |
-| Project storage | User hardware | None |
-| Local transcription | User hardware | None |
-| Semantic clip analysis | Local model or selected API | Optional |
-| Hook, title, and description suggestions | Local model or selected API | Optional |
-| Clip ranking and refinement | Local model or selected API | Optional |
+| Media inspection & duration probing | User hardware (`ffprobe`) | None |
+| Audio extraction & video rendering | User hardware (`ffmpeg`) | None |
+| Word-level speech transcription | User hardware (`faster-whisper`) | None (one-time model download) |
+| Active-speaker face tracking (True 9:16) | User hardware (OpenCV YuNet ONNX) | None |
+| Project storage & clip exports | User hardware | None |
+| Semantic hook & virality scoring | Selected BYOK LLM API | Optional (transcript text only) |
+| Direct YouTube Shorts publishing | YouTube Data API v3 | Optional (explicit user action) |
 
-The intended privacy boundary is simple:
+## Key Features (v0.1.29)
 
-1. Source media is read from local storage.
-2. Heavy processing happens locally.
-3. Projects, exports, and metadata remain local files.
-4. API requests are opt-in and limited to a defined task.
-5. Users provide and control their own API keys.
-6. Integrations document exactly what they send.
-
-No application can make an upload private once a user chooses to send it to a provider. Clip Robin's job is to make that choice visible and avoid unnecessary transfer.
-
-## Development Status
-
-Clip Robin is in early development, but the first end-to-end filesystem pipeline is now in place.
-
-### Working now
-
-- Next.js interface scaffolded.
-- Tauri desktop project initialized inside `frontend`.
-- Windows MSVC and Windows SDK environment configured for native Rust builds.
-- FastAPI backend connected to the desktop UI with CORS support.
-- YouTube URL download flow using `yt-dlp`.
-- Local video drag-and-drop and Windows file-picker flow.
-- Background local timestamped transcription using `faster-whisper`, with upload and transcription progress.
-- Persistent transcription and clip-generation progress while navigating between pages.
-- Local-video clip generation with selectable 15-, 30-, 60-, or 90-second clips and optional burned-in captions.
-- Filesystem project storage under `backend/data/projects`.
-- Mock transcript analysis that creates `analysis.json`.
-- Background FFmpeg clip generation with progress reporting, cancellation with generated-clip cleanup, and regeneration that replaces existing clips.
-- Optional burned-in captions featuring 6 styles (Classic, Robin, Clean, Punch, Pill, Karaoke) with punchy 2-words-per-line chunking, high-contrast active word highlights, and extended gap hold times to prevent flickering during pauses. Classic retains its original word-by-word highlight on the legacy drawtext pipeline, while modern styles render via libass with bundled OFL fonts. Includes build-time pre-rendered moving 9:16 previews (<0.5 MB total) in a responsive modal picker with safe zone overlays.
-- Project-specific clip previews, playback controls, individual MP4 downloads, and a ZIP download of all clips.
-- Project listing and deletion, plus basic Settings pages.
-- OpenAI, DeepSeek, and Gemini analyzer adapters are implemented but not called by the mock clip-generation flow.
-
-### Current pipeline
-
-```text
-Source video
-	-> transcript.json
-	-> mock analysis.json
-	-> background FFmpeg clip generation (optional burned-in captions)
-	-> project-specific clips API and downloads
-	-> Next.js video preview
-```
-
-FFmpeg 9.0.1 is installed locally and the real editor smoke test successfully generated an MP4 clip. On another machine, verify the dependency with:
-
-```powershell
-ffmpeg -version
-```
-
-If FFmpeg is unavailable, the backend returns an explicit setup error instead of silently using a different processor.
-Generated MP4s use H.264 video and MP3 audio so audio is available in Clip Robin's embedded browser.
-
-### Still to do
-
-- Test the real source-video pipeline with FFmpeg now installed locally.
-- Test real source videos through download, transcription, analysis, and cutting.
-- Replace mock analysis with an opt-in provider selected from OpenAI, DeepSeek, or Gemini.
-- Connect generated clips to richer project detail/history views.
-- Add clip naming, export, and open-folder actions.
-- Add durable job tracking for long-running tasks.
-- Add automated backend tests and frontend interaction tests.
-- Connect the settings UI to persisted local preferences.
-- Expand crop and caption customization.
-- Package and distribute the Windows desktop application.
+- **Dual Intake & Multi-Video Batch Queue:** Import local files (`.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`) or download YouTube links (`yt-dlp`), queue multiple videos sequentially, and cancel or retry items cleanly at any stage.
+- **Three 9:16 Vertical Framing Modes:**
+  - **16:9 Letterbox Rounded** (`672x378` anti-aliased card on `720x1280` canvas)
+  - **1:1 Rounded Square** (`660x660` anti-aliased card)
+  - **True 9:16 Smart Framing** powered by OpenCV YuNet ONNX + Whisper VAD mouth-motion correlation, with an instant **Face Tracking** toggle (cached tracked & static timelines).
+- **Flexible Clip Durations & Counter:** Generate **12s, 15s, 30s, 60s, or 90s** clips with a dynamic clip-count stepper bounded by source duration and early-exit Whisper transcription.
+- **6 High-Impact Caption Styles & Previews:** Choose **Classic**, **Robin**, **Clean**, **Punch**, **Pill**, or **Karaoke** (2 words per line, gap bridging, bundled OFL + RTL Arabic & Devanagari fonts) inside a 2-pane live preview picker with platform safe-zone guides.
+- **Custom Top-Line Hooks & Brand Watermarks:** Burn custom `<=15`-word headline hooks onto individual clips without re-rendering the whole project, and overlay default or custom PNG/JPG/WebP brand logos with adjustable position and opacity (`20%–100%`).
+- **AI Developer Mode (BYOK):** Configure your own Gemini API key directly in **Settings** (`gemini-3.8-flash` with automatic fallback to `gemini-3.1-flash-lite`), or configure OpenAI / DeepSeek via `.env`.
+- **Native Export & Social Publishing:** Export single clips or full project `.zip` archives through native Windows File Explorer Save As dialogs, publish directly to **YouTube Shorts** via Google OAuth2 resumable upload, or use guided **TikTok** and **Instagram Reels** export modals.
 
 ## Repository Layout
 
 ```text
 ClipRobin/
-|- frontend/   Next.js UI and Tauri desktop application
-|- backend/    FastAPI routes and local processing services
-|- requirements/ Shared Python dependency lists
-|- setup.ps1   Windows dependency setup
-|- README.md   Project vision, progress, architecture, and setup
+├── frontend/       Next.js 16 Studio UI, node unit tests & Tauri v2 Windows shell
+├── backend/        FastAPI routes, media/AI services, bundled fonts/ONNX & pytest suite
+├── requirements/   Pinned Python backend dependencies
+├── docs/reports/   Engineering & UI audit archives
+├── ai.md           Exhaustive architecture, API, schema & audit handbook
+├── website.md      Landing page & product positioning blueprint
+├── setup.ps1       One-command Windows development bootstrap script
+└── README.md       Overview, local setup, testing & release workflow
 ```
 
 ## Local Development
 
-### One-time setup
+### 1. One-time setup
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-The setup script creates the root `.venv`, installs the Python packages from
-`requirements\backend.txt`, and installs the exact frontend dependencies from
-`frontend\package-lock.json`. It requires Python 3.10 or newer and Node.js
-20.9 or newer. If those runtimes are not installed yet, install them first:
+`setup.ps1` creates `.venv`, installs `requirements\backend.txt`, and runs `npm ci` in `frontend/`. Requires **Python 3.10+** (3.12 recommended), **Node.js 20.9+**, and **FFmpeg** on `PATH` (or placed in `backend/bin/`):
 
 ```powershell
 winget install --id Python.Python.3.12 --source winget
 winget install --id OpenJS.NodeJS.LTS --source winget
-```
-
-FFmpeg is required for generating clips. Install it if it is not already
-available on `PATH`:
-
-```powershell
 winget install --id Gyan.FFmpeg.Shared --source winget
 ```
 
-### Run the web app
+Optional environment variables can be placed in `backend/.env` (copied from `backend/.env.example`) and are loaded automatically on backend startup.
 
-Open two PowerShell terminals from the repository root.
+### 2. Run in Web Mode
 
-In the first terminal, start the API:
+Open two PowerShell terminals from the repository root:
 
 ```powershell
+# Terminal 1 — FastAPI Backend (http://127.0.0.1:8000)
 Set-Location backend
 ..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-In the second terminal, start the interface:
+```powershell
+# Terminal 2 — Next.js Frontend (http://localhost:3000)
+Set-Location frontend
+npm.cmd run dev
+```
+
+### 3. Run as Windows Desktop App (Tauri v2)
+
+Requires Rust `1.90+`, MSVC C++ Build Tools, and the Windows 10/11 SDK:
 
 ```powershell
 Set-Location frontend
-npm run dev
+npx.cmd tauri dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The API is available at
-[http://127.0.0.1:8000](http://127.0.0.1:8000).
-
-To run the Windows desktop application instead, use `npx.cmd tauri dev` from
-`frontend`. Tauri also requires the Rust toolchain, Visual Studio C++ build
-tools, the Windows SDK, and Rust 1.90 or newer. The shared VS Code terminal profile in
-`frontend/.vscode/settings.json` initializes the native build environment.
-
-### Desktop versions and automatic updates
-
-The frontend, Tauri config, and Rust package share one app version. From
-`frontend`, update all version manifests together before a release:
+### 4. Run Automated Tests & Static Checks
 
 ```powershell
-npm run version:set -- 0.1.18
-npm run version:check
+# Backend test suite (158 tests across 23 files)
+.\.venv\Scripts\python.exe -m pytest backend/tests -q
+
+# Frontend unit tests, TypeScript, ESLint, manifest version check & static build
+Set-Location frontend
+npm.cmd test
+npx.cmd tsc --noEmit
+npm.cmd run lint
+npm.cmd run version:check
+npm.cmd run build
 ```
 
-Commit and push the version change, then create and push its matching version
-tag from the repository root. A `v0.1.18` tag builds and publishes the signed
-Windows installer and updater metadata as a GitHub Release:
+## Versioning & Signed Desktop Releases
+
+`frontend/package.json`, `frontend/src-tauri/Cargo.toml`, and `frontend/src-tauri/tauri.conf.json` share a single synchronized version (currently **`0.1.29`**). Always bump all three together from `frontend/`:
 
 ```powershell
-git tag v0.1.18
+npm.cmd run version:set -- 0.1.29
+npm.cmd run version:check
+```
+
+Pushing a matching `v*` tag triggers `.github/workflows/release-tauri.yml` to build the PyInstaller sidecar, bundle the signed NSIS Windows installer, and publish Tauri updater metadata to GitHub Releases:
+
+```powershell
+git tag v0.1.29
 git push origin main
-git push origin v0.1.18
+git push origin v0.1.29
 ```
 
-The Tauri desktop app checks for updates when it opens and every six hours.
-When a signed update is available, it shows an in-app prompt; choosing
-**Update and restart** installs it and relaunches the app. If you leave the
-prompt without installing, it is shown again the next time the app opens and
-remains until the installed version includes that update.
-Update checks run in production desktop builds, not in the browser or the
-Tauri development build. The production desktop app has its own identifier
-(`com.cliprobin.desktop`); earlier scaffold builds using `com.tauri.dev` are
-separate installs and do not receive these updates.
+Production desktop builds (`com.cliprobin.desktop`) store projects, Whisper models, logs (`backend.log`), and local credentials inside `%APPDATA%\com.cliprobin.desktop` and check for signed updates automatically on startup and every 6 hours.
 
-Windows installers bundle and start the local Python API automatically.
-Projects and the downloaded speech model are stored in the current user's
-Clip Robin application data folder. The first transcription downloads the
-Whisper model, so it needs an internet connection and may take longer than
-later runs. Backend startup and transcription errors are logged to `backend.log` in that
-application data folder (typically
-`%APPDATA%\com.cliprobin.desktop\backend.log`).
-
-Updater releases require a signing key. Generate a keypair once from `frontend`
-and keep the private key out of the repository:
+To generate a Tauri updater signing keypair once (never commit the private key; store it in GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY`):
 
 ```powershell
 npx.cmd tauri signer generate --ci --write-keys "$env:USERPROFILE\.tauri\cliprobin.key"
 ```
 
-The checked-in Tauri configuration contains the corresponding public key. Add
-the contents of `%USERPROFILE%\.tauri\cliprobin.key` as the repository's
-`TAURI_SIGNING_PRIVATE_KEY` Actions secret under **Settings → Secrets and
-variables → Actions**. The release workflow checks that this secret exists
-before it signs and publishes installers. Never commit or share the private
-key. Releases built before signed updating is configured must be updated by
-reinstalling the signed release once; subsequent releases can update in-app.
+## API Overview
 
-### API surface
+Full request/response contracts are documented in [`ai.md`](./ai.md). Core route groups:
 
 ```text
-GET  /api/health
-POST /api/download
-POST /api/local-video/transcribe
-GET  /api/local-video/jobs/{project_id}
-POST /api/projects/{id}/transcribe
-POST /api/projects/{id}/generate-clips?show_subtitles=true
-GET  /api/projects/{id}/generation-jobs
-GET  /api/projects/{id}/generation-jobs/{job_id}
-POST /api/projects/{id}/generation-jobs/{job_id}/cancel
-GET  /api/projects/{id}/clips
-GET  /api/projects/{id}/clips/{file}
-GET  /api/projects
-DELETE /api/projects/{id}
-POST /api/analyze
+GET    /api/health
+GET    /api/caption-styles
+GET    /api/jobs/active
+POST   /api/download                          | GET /api/download/jobs/{project_id}
+POST   /api/local-video/transcribe            | POST /api/local-video/from-path | GET /api/local-video/jobs/{project_id}
+GET    /api/projects                          | PATCH /api/projects/{id}        | DELETE /api/projects/{id}
+POST   /api/projects/{id}/transcribe
+POST   /api/projects/{id}/generate-clips      | GET /api/projects/{id}/generation-jobs[/{job_id}] | POST .../cancel
+GET    /api/projects/{id}/clips[/{file}]      | POST|DELETE /api/projects/{id}/clips/{clip_id}/top-line
+POST   /api/projects/{id}/clips/{clip_id}/save-dialog | GET /clips/download-all | POST /clips/download-all-dialog
+GET    /api/ai/status                         | POST /api/ai/config             | POST /api/ai/developer-mode | POST /api/analyze
+GET    /api/watermark                         | POST /api/watermark/upload      | POST /api/watermark/settings | DELETE /api/watermark
+GET    /api/youtube/status                    | POST /api/youtube/config        | GET /api/youtube/auth-url   | POST /api/youtube/upload
+POST   /api/webhooks/paddle                   | GET /api/webhooks/paddle/status
 ```
-
-The analysis endpoint supports provider configuration through environment variables, but the current clip-generation workflow intentionally uses mock analysis. Transcription and clip-generation job status is held in backend memory, so active job state is not durable across a backend restart.
-Starting clip generation replaces the project's current generated MP4s. Cancelling a generation stops the active render and removes generated clips while preserving the source video and transcript.
 
 ## Contributing
 
-Contributions are welcome across the whole stack:
-
-- Desktop experience and accessibility
-- Next.js interface and project workflows
-- Tauri commands and Windows integration
-- Python processing services
-- FFmpeg reliability and media workflows
-- Local model integrations
-- AI provider adapters and cost controls
-- Tests, packaging, documentation, and privacy review
-
-The long-term goal is a tool that respects the user's hardware, files, budget, and choices. Read the code, run it locally, and help shape the boundaries between local processing and optional AI services.
-
-## License
-
-Clip Robin is currently in development. Licensing details will be added before the first public release.
+Contributions are welcome across the entire stack—Next.js UI/accessibility, Tauri desktop integration, FFmpeg/YuNet video pipelines, local Whisper performance, BYOK AI adapters, and automated tests. Please review [`ai.md`](./ai.md) before submitting changes.
 
 ## Links
 
-- [GitHub repository](https://github.com/abdullohtariq/ClipRobin)
+- [GitHub Repository](https://github.com/abdullohtariq/ClipRobin)
+- [AI & Engineering Handbook (`ai.md`)](./ai.md)

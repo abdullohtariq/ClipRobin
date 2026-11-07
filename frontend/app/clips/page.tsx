@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  CaptionAnimation,
   CaptionStyle,
   Clip,
   ClipGenerationJob,
@@ -32,11 +33,23 @@ import { InstagramUploadModal } from "@/src/components/instagram-upload-modal";
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 import { useSubscription } from "@/src/lib/subscription-context";
 
+const normalizeCaptionStyle = (raw: string | null | undefined): CaptionStyle => {
+  if (raw === "bold_emerald") return "robin";
+  if (raw === "clean_gold") return "clean";
+  if (raw && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(raw)) {
+    return raw as CaptionStyle;
+  }
+  return "classic";
+};
+
 interface AppliedProjectSettings {
   framingMode: FramingMode;
+  faceTracking?: boolean;
+  generationMode?: "random" | "ai";
   clipDurationSeconds: ClipDuration;
   clipCount?: number;
   captionStyle: CaptionStyle;
+  captionAnimation?: CaptionAnimation | null;
   showWatermark: boolean;
   showCaptions: boolean;
 }
@@ -48,11 +61,12 @@ const ProClipCard = memo(function ProClipCard({
   projectId,
   globalVolume,
   globalMuted,
-  activePlayingClipId,
+  isActivePlaying,
   onPlay,
   onOpenModal,
   showWatermark,
   showSubtitles,
+  defaultFaceTracking,
   onClipUpdated,
 }: {
   clip: Clip;
@@ -60,16 +74,17 @@ const ProClipCard = memo(function ProClipCard({
   projectId: string;
   globalVolume: number;
   globalMuted: boolean;
-  activePlayingClipId: string | null;
+  isActivePlaying: boolean;
   onPlay: (clipId: string | null) => void;
   onOpenModal: (clip: Clip) => void;
   showWatermark?: boolean;
   showSubtitles?: boolean;
+  defaultFaceTracking?: boolean;
   onClipUpdated?: (updatedClip: Clip) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const activePlayingClipIdRef = useRef<string | null>(activePlayingClipId);
+  const isActivePlayingRef = useRef<boolean>(isActivePlaying);
   const [isInView, setIsInView] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -83,14 +98,28 @@ const ProClipCard = memo(function ProClipCard({
   const [topLineError, setTopLineError] = useState("");
   const [hasVideoError, setHasVideoError] = useState(false);
   const hasStartedRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const retryTimeoutRef = useRef<number | null>(null);
+
+  const clipVersion =
+    clip.v ||
+    `${clip.start}_${clip.end}_${clip.framing_mode || ""}_${clip.caption_style || ""}_${clip.caption_animation || ""}_${clip.face_tracking ?? ""}_${clip.top_line || ""}`;
 
   useEffect(() => {
-    activePlayingClipIdRef.current = activePlayingClipId;
-  }, [activePlayingClipId]);
+    isActivePlayingRef.current = isActivePlaying;
+  }, [isActivePlaying]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current !== null) {
+        window.clearTimeout(retryTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const wordCount = topLineInput.trim().split(/\s+/).filter(Boolean).length;
 
-  // Lazy load video stream using IntersectionObserver
+  // Lazy load video stream using IntersectionObserver and disconnect once visible
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -98,6 +127,7 @@ const ProClipCard = memo(function ProClipCard({
       ([entry]) => {
         if (entry.isIntersecting) {
           setIsInView(true);
+          observer.disconnect();
         }
       },
       { rootMargin: "250px" },
@@ -106,13 +136,15 @@ const ProClipCard = memo(function ProClipCard({
     return () => observer.disconnect();
   }, []);
 
-  // Fetch clip streaming & download URLs
+  // Fetch clip streaming & download URLs and refresh whenever clip version changes
   useEffect(() => {
     let isActive = true;
-    if (isInView && !mediaUrls) {
+    if (isInView) {
+      setHasVideoError(false);
+      retryCountRef.current = 0;
       void Promise.all([
-        clipUrl(projectId, clip.file),
-        clipDownloadUrl(projectId, clip.file),
+        clipUrl(projectId, clip.file, clipVersion),
+        clipDownloadUrl(projectId, clip.file, clipVersion),
       ]).then(([cUrl, dUrl]) => {
         if (isActive) setMediaUrls({ clip: cUrl, download: dUrl });
       }).catch(() => {});
@@ -120,7 +152,7 @@ const ProClipCard = memo(function ProClipCard({
     return () => {
       isActive = false;
     };
-  }, [isInView, mediaUrls, clip.file, projectId]);
+  }, [isInView, clip.file, clipVersion, projectId]);
 
   // Sync global volume & mute to video
   useEffect(() => {
@@ -134,13 +166,13 @@ const ProClipCard = memo(function ProClipCard({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (activePlayingClipId !== clip.id) {
+    if (!isActivePlaying) {
       if (!video.paused) {
         video.pause();
       }
       setIsPlaying(false);
     }
-  }, [activePlayingClipId, clip.id]);
+  }, [isActivePlaying]);
 
   const togglePlayPause = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -149,7 +181,7 @@ const ProClipCard = memo(function ProClipCard({
     if (!video.paused || isPlaying) {
       video.pause();
       setIsPlaying(false);
-      if (activePlayingClipId === clip.id) {
+      if (isActivePlaying) {
         onPlay(null);
       }
     } else {
@@ -159,7 +191,7 @@ const ProClipCard = memo(function ProClipCard({
         hasStartedRef.current = true;
       }
       video.play().then(() => {
-        if (activePlayingClipIdRef.current && activePlayingClipIdRef.current !== clip.id) {
+        if (!isActivePlayingRef.current) {
           video.pause();
           setIsPlaying(false);
         } else {
@@ -204,6 +236,8 @@ const ProClipCard = memo(function ProClipCard({
         show_subtitles: showSubtitles,
         framing_mode: clip.framing_mode,
         caption_style: clip.caption_style,
+        caption_animation: clip.caption_animation,
+        face_tracking: clip.face_tracking ?? defaultFaceTracking,
       });
       setIsEditingTopLine(false);
       onClipUpdated?.(response.clip);
@@ -233,6 +267,8 @@ const ProClipCard = memo(function ProClipCard({
         show_subtitles: showSubtitles,
         framing_mode: clip.framing_mode,
         caption_style: clip.caption_style,
+        caption_animation: clip.caption_animation,
+        face_tracking: clip.face_tracking ?? defaultFaceTracking,
       });
       setIsEditingTopLine(false);
       setTopLineInput("");
@@ -322,13 +358,30 @@ const ProClipCard = memo(function ProClipCard({
         className="relative aspect-[9/16] w-full rounded-xl overflow-hidden bg-black border border-zinc-800/80 cursor-pointer group/player shadow-inner"
       >
         {hasVideoError ? (
-          <div className="size-full flex flex-col items-center justify-center bg-zinc-950 text-zinc-500 p-4 text-center">
-            <svg className="size-6 text-zinc-600 mb-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <div className="size-full flex flex-col items-center justify-center bg-zinc-950 text-zinc-500 p-4 text-center gap-2">
+            <svg className="size-6 text-zinc-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10" />
               <line x1="12" y1="8" x2="12" y2="12" />
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             <span className="text-xs text-zinc-400 font-medium">Clip unavailable</span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                retryCountRef.current = 0;
+                setHasVideoError(false);
+                void Promise.all([
+                  clipUrl(projectId, clip.file, `${clipVersion}_${Date.now()}`),
+                  clipDownloadUrl(projectId, clip.file, `${clipVersion}_${Date.now()}`),
+                ]).then(([cUrl, dUrl]) => {
+                  setMediaUrls({ clip: cUrl, download: dUrl });
+                }).catch(() => {});
+              }}
+              className="px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-[11px] font-medium text-zinc-200 transition-colors"
+            >
+              Retry
+            </button>
           </div>
         ) : mediaUrls && isInView ? (
           <video
@@ -347,6 +400,7 @@ const ProClipCard = memo(function ProClipCard({
               if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
             }}
             onLoadedMetadata={() => {
+              retryCountRef.current = 0;
               if (videoRef.current) {
                 setDuration(videoRef.current.duration);
                 if (videoRef.current.currentTime === 0 && videoRef.current.duration > 0.3) {
@@ -355,12 +409,35 @@ const ProClipCard = memo(function ProClipCard({
               }
             }}
             onError={() => {
+              if (retryCountRef.current < 2) {
+                retryCountRef.current += 1;
+                const wasPlaying = isActivePlayingRef.current;
+                if (retryTimeoutRef.current !== null) {
+                  window.clearTimeout(retryTimeoutRef.current);
+                }
+                retryTimeoutRef.current = window.setTimeout(() => {
+                  retryTimeoutRef.current = null;
+                  void Promise.all([
+                    clipUrl(projectId, clip.file, `${clipVersion}_r${retryCountRef.current}_${Date.now()}`),
+                    clipDownloadUrl(projectId, clip.file, `${clipVersion}_r${retryCountRef.current}_${Date.now()}`),
+                  ]).then(([cUrl, dUrl]) => {
+                    setMediaUrls({ clip: cUrl, download: dUrl });
+                    if (wasPlaying && videoRef.current) {
+                      videoRef.current.load();
+                      void videoRef.current.play().catch(() => {});
+                    }
+                  }).catch(() => {
+                    setHasVideoError(true);
+                  });
+                }, 300);
+                return;
+              }
               setHasVideoError(true);
             }}
             onEnded={() => {
               setIsPlaying(false);
               hasStartedRef.current = false;
-              if (activePlayingClipId === clip.id) {
+              if (isActivePlaying) {
                 onPlay(null);
               }
             }}
@@ -552,16 +629,39 @@ function ClipModalViewer({
   const [isInstagramModalOpen, setIsInstagramModalOpen] = useState(false);
   const modalVideoRef = useRef<HTMLVideoElement>(null);
 
+  const hasChildUploadModal = isYouTubeModalOpen || isTikTokModalOpen || isInstagramModalOpen;
+
   useEffect(() => {
     if (!clip) return;
     let active = true;
-    clipUrl(projectId, clip.file).then((url) => {
+    const clipVersion =
+      clip.v ||
+      `${clip.start}_${clip.end}_${clip.framing_mode || ""}_${clip.caption_style || ""}_${clip.caption_animation || ""}_${clip.face_tracking ?? ""}_${clip.top_line || ""}`;
+    clipUrl(projectId, clip.file, clipVersion).then((url) => {
       if (active) setVideoUrl(url);
     });
     return () => {
       active = false;
     };
   }, [clip, projectId]);
+
+  useEffect(() => {
+    if (!clip || hasChildUploadModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [clip, hasChildUploadModal, onClose]);
+
+  useEffect(() => {
+    if (hasChildUploadModal && modalVideoRef.current && !modalVideoRef.current.paused) {
+      modalVideoRef.current.pause();
+    }
+  }, [hasChildUploadModal]);
 
   useEffect(() => {
     const v = modalVideoRef.current;
@@ -577,6 +677,9 @@ function ClipModalViewer({
       role="dialog"
       aria-modal="true"
       aria-label={clip.title}
+      onClick={(e) => {
+        if (!hasChildUploadModal && e.target === e.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
     >
       <div className="relative flex flex-col md:flex-row items-center max-w-4xl w-full rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-2xl gap-6 overflow-y-auto md:overflow-hidden max-h-[90vh]">
@@ -744,6 +847,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   const [projectsList, setProjectsList] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(projectId));
   const [status, setStatus] = useState(projectId ? "" : "Choose a project to view its clips.");
+  const [statusTone, setStatusTone] = useState<"info" | "success" | "error">("info");
   const [generating, setGenerating] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
@@ -752,6 +856,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
   const [faceTracking, setFaceTracking] = useState<boolean>(true);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
+  const [captionAnimation, setCaptionAnimation] = useState<CaptionAnimation | null>(null);
   const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
   const [clipCount, setClipCount] = useState<number>(3);
   const [sourceDuration, setSourceDuration] = useState<number | null>(null);
@@ -789,6 +894,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   const [activePlayingClipId, setActivePlayingClipId] = useState<string | null>(null);
   const [selectedClipForModal, setSelectedClipForModal] = useState<Clip | null>(null);
   const hydratedProjectRef = useRef<string | null>(null);
+  const isManualGeneratingRef = useRef<boolean>(false);
 
   // Global document-level capture listener so at most one non-decorative video plays at a time
   useEffect(() => {
@@ -836,25 +942,35 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       }
       const savedMode = localStorage.getItem("cliprobin_generation_mode");
       if (savedMode && ["random", "ai"].includes(savedMode)) {
-        setGenerationMode(savedMode as "random" | "ai");
+        setGenerationMode(isPro && savedMode === "ai" ? "ai" : "random");
       }
       const savedSubs = localStorage.getItem("cliprobin_show_captions");
       if (savedSubs !== null) {
         setShowCaptions(savedSubs === "true");
       }
       const savedWm = localStorage.getItem("cliprobin_show_watermark");
-      if (savedWm !== null) {
+      if (!isPro) {
+        setShowWatermark(true);
+      } else if (savedWm !== null) {
         setShowWatermark(savedWm === "true");
       }
       const savedStyle = localStorage.getItem("cliprobin_caption_style");
-      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
-        setCaptionStyle(savedStyle as CaptionStyle);
+      if (savedStyle) {
+        const normalized = normalizeCaptionStyle(savedStyle);
+        setCaptionStyle(isCaptionStyleAllowed(normalized) ? normalized : "classic");
       } else {
         const storedSettings = localStorage.getItem("cliprobin.settings");
         if (storedSettings) {
           const parsed = JSON.parse(storedSettings);
-          if (parsed.defaultCaptionStyle) setCaptionStyle(parsed.defaultCaptionStyle);
+          if (parsed.defaultCaptionStyle) {
+            const normalized = normalizeCaptionStyle(parsed.defaultCaptionStyle);
+            setCaptionStyle(isCaptionStyleAllowed(normalized) ? normalized : "classic");
+          }
         }
+      }
+      const savedAnim = localStorage.getItem("cliprobin_caption_animation");
+      if (savedAnim && ["pop", "grow", "sweep", "fade", "glide"].includes(savedAnim)) {
+        setCaptionAnimation(savedAnim as CaptionAnimation);
       }
       const savedVol = localStorage.getItem("cliprobin_volume");
       if (savedVol) setGlobalVolume(parseFloat(savedVol));
@@ -871,30 +987,77 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         }
       }
     } catch {}
-  }, [projectId]);
+  }, [projectId, isPro, isCaptionStyleAllowed]);
+
+  useEffect(() => {
+    const handleSubChange = () => {
+      if (!isPro) {
+        setShowWatermark(true);
+        setGenerationMode("random");
+        setCaptionStyle((prev) => (isCaptionStyleAllowed(prev) ? prev : "classic"));
+      }
+    };
+    window.addEventListener("cliprobin:subscription-changed", handleSubChange);
+    return () => window.removeEventListener("cliprobin:subscription-changed", handleSubChange);
+  }, [isPro, isCaptionStyleAllowed]);
+
+  const effectiveShowWatermark = isPro ? showWatermark : true;
 
   // Check if current settings differ from applied generation settings (dirty state)
   const isDirty = useMemo(() => {
     if (!appliedSettings || !clips.length) return false;
+    const faceTrackChanged =
+      framingMode === "true_9_16" &&
+      appliedSettings.faceTracking !== undefined &&
+      appliedSettings.faceTracking !== faceTracking;
+    const genModeChanged =
+      appliedSettings.generationMode !== undefined &&
+      appliedSettings.generationMode !== generationMode;
+    const clipCountChanged =
+      appliedSettings.clipCount !== undefined &&
+      appliedSettings.clipCount !== clipCount;
     return (
       appliedSettings.framingMode !== framingMode ||
+      faceTrackChanged ||
+      genModeChanged ||
+      clipCountChanged ||
       appliedSettings.clipDurationSeconds !== clipDurationSeconds ||
       appliedSettings.captionStyle !== captionStyle ||
-      appliedSettings.showWatermark !== showWatermark ||
+      (appliedSettings.captionAnimation ?? null) !== (captionAnimation ?? null) ||
+      appliedSettings.showWatermark !== effectiveShowWatermark ||
       appliedSettings.showCaptions !== showCaptions
     );
-  }, [appliedSettings, clips.length, framingMode, clipDurationSeconds, captionStyle, showWatermark, showCaptions]);
+  }, [
+    appliedSettings,
+    clips.length,
+    framingMode,
+    faceTracking,
+    generationMode,
+    clipCount,
+    clipDurationSeconds,
+    captionStyle,
+    captionAnimation,
+    effectiveShowWatermark,
+    showCaptions,
+  ]);
 
   // Load clips & generation status
   useEffect(() => {
     if (!projectId) {
       setIsLoading(false);
+      setStatus("Choose a project to view its clips.");
+      setStatusTone("info");
       return;
     }
     let isCurrentRequest = true;
-    let interval: number | undefined;
+    let pollIntervalId: number | undefined;
+    let retryTimeoutId: number | undefined;
 
     const loadClipsAndStatus = async () => {
+      if (!isCurrentRequest) return;
+      if (typeof document !== "undefined" && document.hidden && pollIntervalId !== undefined) {
+        return;
+      }
       try {
         const [result, job] = await Promise.all([
           getClips(projectId),
@@ -924,26 +1087,46 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
             const firstClip = currentClips[0];
             const appliedFraming: FramingMode =
               (opts.framing_mode as FramingMode) || firstClip?.framing_mode || "standard";
-            const appliedStyle: CaptionStyle =
-              (opts.caption_style as CaptionStyle) || firstClip?.caption_style || "classic";
+            const rawStyle =
+              (opts.caption_style as string | undefined) || firstClip?.caption_style || "classic";
+            const normalizedStyle = normalizeCaptionStyle(rawStyle);
+            const appliedStyle: CaptionStyle = isCaptionStyleAllowed(normalizedStyle)
+              ? normalizedStyle
+              : "classic";
+            const appliedAnim: CaptionAnimation | null =
+              (opts.caption_animation as CaptionAnimation) || firstClip?.caption_animation || null;
             const rawDur = opts.clip_duration_seconds || (firstClip ? Math.round(firstClip.duration) : 30);
-            const appliedDur: ClipDuration = ([12, 30, 60, 90].includes(rawDur) ? rawDur : 30) as ClipDuration;
+            const appliedDur: ClipDuration = ([12, 15, 30, 60, 90].includes(rawDur) ? rawDur : 30) as ClipDuration;
             const appliedWm = typeof opts.show_watermark === "boolean" ? opts.show_watermark : false;
             const appliedSubs = typeof opts.show_subtitles === "boolean" ? opts.show_subtitles : true;
+            const appliedFt =
+              typeof opts.face_tracking === "boolean"
+                ? opts.face_tracking
+                : firstClip?.face_tracking !== undefined
+                  ? firstClip.face_tracking
+                  : true;
+            const appliedMode: "random" | "ai" =
+              opts.generation_mode === "ai" && isPro && aiModeEnabled ? "ai" : "random";
 
             const hydrated: AppliedProjectSettings = {
               framingMode: appliedFraming,
+              faceTracking: appliedFt,
+              generationMode: appliedMode,
               clipDurationSeconds: appliedDur,
               clipCount: opts.clip_count ?? undefined,
               captionStyle: appliedStyle,
+              captionAnimation: appliedAnim,
               showWatermark: appliedWm,
               showCaptions: appliedSubs,
             };
             setAppliedSettings(hydrated);
             setFramingMode(appliedFraming);
+            setFaceTracking(appliedFt);
+            setGenerationMode(appliedMode);
             setCaptionStyle(appliedStyle);
+            setCaptionAnimation(appliedAnim);
             setClipDurationSeconds(appliedDur);
-            setShowWatermark(appliedWm);
+            setShowWatermark(isPro ? appliedWm : true);
             setShowCaptions(appliedSubs);
             if (typeof opts.clip_count === "number" && opts.clip_count >= 1) {
               setClipCount(opts.clip_count);
@@ -960,40 +1143,71 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
 
         if (job?.status === "failed" && job.error) {
           setStatus(job.error);
+          setStatusTone("error");
         } else {
           // Clear transient network errors once successful
-          setStatus((prev) => (prev === "Failed to fetch" || prev === "Failed to load clips" ? "" : prev));
+          setStatus((prev) =>
+            prev === "Failed to fetch" || prev === "Failed to load clips" || prev === "Choose a project to view its clips."
+              ? ""
+              : prev
+          );
         }
 
-        if (isRunning && interval === undefined) {
-          interval = window.setInterval(() => void loadClipsAndStatus(), 1000);
-        } else if (!isRunning && interval !== undefined) {
-          window.clearInterval(interval);
-          interval = undefined;
+        if (isRunning && !isManualGeneratingRef.current && pollIntervalId === undefined) {
+          pollIntervalId = window.setInterval(() => {
+            if (!isManualGeneratingRef.current) {
+              void loadClipsAndStatus();
+            }
+          }, 1000);
+        } else if ((!isRunning || isManualGeneratingRef.current) && pollIntervalId !== undefined) {
+          window.clearInterval(pollIntervalId);
+          pollIntervalId = undefined;
         }
       } catch (err) {
         if (!isCurrentRequest) return;
         setIsLoading(false);
         const msg = err instanceof Error ? err.message : "Failed to load clips";
         setStatus(msg);
+        setStatusTone("error");
         // Automatically retry transient fetch failure after 2 seconds instead of stalling forever
-        if (interval === undefined && (msg.includes("fetch") || msg.includes("Failed"))) {
-          interval = window.setTimeout(() => void loadClipsAndStatus(), 2000) as unknown as number;
+        if (retryTimeoutId === undefined && (msg.includes("fetch") || msg.includes("Failed"))) {
+          retryTimeoutId = window.setTimeout(() => {
+            retryTimeoutId = undefined;
+            void loadClipsAndStatus();
+          }, 2000);
         }
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        void loadClipsAndStatus();
+      }
+    };
+
     void loadClipsAndStatus();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       isCurrentRequest = false;
-      if (interval !== undefined) window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (pollIntervalId !== undefined) window.clearInterval(pollIntervalId);
+      if (retryTimeoutId !== undefined) window.clearTimeout(retryTimeoutId);
     };
-  }, [projectId]);
+  }, [projectId, isCaptionStyleAllowed, isPro, aiModeEnabled]);
 
   // Regenerate clips pipeline
   const handleGenerate = async (e: FormEvent) => {
     e.preventDefault();
     if (!projectId || generating) return;
+    const normalizedStyle = normalizeCaptionStyle(captionStyle);
+    const effectiveStyle: CaptionStyle = isCaptionStyleAllowed(normalizedStyle)
+      ? normalizedStyle
+      : "classic";
+    const effectiveGenMode: "random" | "ai" =
+      isPro && aiModeEnabled && generationMode === "ai" ? "ai" : "random";
+    const effectiveFt = framingMode === "true_9_16" ? faceTracking : false;
+
+    isManualGeneratingRef.current = true;
     setGenerating(true);
     setClips([]);
     setStatus("");
@@ -1023,40 +1237,47 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
           }
         },
         clipDurationSeconds,
-        isPro ? showWatermark : true,
+        effectiveShowWatermark,
         framingMode,
-        captionStyle,
-        undefined,
+        effectiveStyle,
+        effectiveStyle === "classic" ? undefined : (captionAnimation || undefined),
         clipCount,
-        generationMode,
-        faceTracking,
+        effectiveGenMode,
+        effectiveFt,
       );
 
       setClips(result.clips);
       // Save applied settings
       const applied: AppliedProjectSettings = {
         framingMode,
+        faceTracking: effectiveFt,
+        generationMode: effectiveGenMode,
         clipDurationSeconds,
-        captionStyle,
-        showWatermark,
+        clipCount,
+        captionStyle: effectiveStyle,
+        captionAnimation: effectiveStyle === "classic" ? null : captionAnimation,
+        showWatermark: effectiveShowWatermark,
         showCaptions,
       };
       setAppliedSettings(applied);
       try {
         localStorage.setItem(`cliprobin_applied_${projectId}`, JSON.stringify(applied));
       } catch {}
+      setStatusTone(result.cancelled ? "info" : "success");
       setStatus(
         result.cancelled
           ? "Generation cancelled."
           : `${result.clips.length} clips generated successfully.`,
       );
     } catch (err) {
+      setStatusTone("error");
       setStatus(err instanceof Error ? err.message : "Clip generation failed");
       try {
         const diskClips = await getClips(projectId);
         setClips(diskClips.clips);
       } catch {}
     } finally {
+      isManualGeneratingRef.current = false;
       setGenerating(false);
     }
   };
@@ -1068,8 +1289,10 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
     try {
       const updated = await cancelClipGeneration(projectId, job.job_id);
       setGenerationProgress(updated);
+      setStatusTone("info");
       setStatus("Cancelling generation...");
     } catch (err) {
+      setStatusTone("error");
       setStatus(err instanceof Error ? err.message : "Could not cancel");
     }
   };
@@ -1080,11 +1303,25 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
     try {
       await saveAllClipsWithExplorer(projectId);
     } catch (err) {
+      setStatusTone("error");
       setStatus(err instanceof Error ? err.message : "Failed to download zip");
     } finally {
       setDownloadingAll(false);
     }
   };
+
+  const handleCardPlay = useCallback((id: string | null) => {
+    setActivePlayingClipId(id);
+  }, []);
+
+  const handleOpenClipModal = useCallback((c: Clip) => {
+    setActivePlayingClipId(null);
+    setSelectedClipForModal(c);
+  }, []);
+
+  const handleClipUpdated = useCallback((updated: Clip) => {
+    setClips((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+  }, []);
 
   // Filter & sort clips
   const filteredClips = useMemo(() => {
@@ -1135,30 +1372,61 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
               }}
               className="rounded-xl border border-zinc-800 bg-[#121215] px-3.5 py-1.5 text-xs font-semibold text-white focus-ring cursor-pointer"
             >
+              {(!projectId || !projectsList.some((p) => p.project_id === projectId)) && (
+                <option value="" disabled>
+                  {projectsList.length ? "Select a project..." : "No projects yet"}
+                </option>
+              )}
               {projectsList.map((p) => (
                 <option key={p.project_id} value={p.project_id}>
-                  {p.project_id} ({p.clips} clips)
+                  {p.title || p.project_id} ({p.clips} {p.clips === 1 ? "clip" : "clips"})
                 </option>
               ))}
             </select>
           </div>
         </header>
 
-        {/* Status / Error Alert Banner */}
+        {/* Status / Info / Error Alert Banner */}
         {status && (
-          <div className="rounded-xl border border-red-500/30 bg-red-950/20 px-4 py-3 text-xs text-red-300 flex items-center justify-between gap-3 animate-in fade-in-0 duration-150">
+          <div
+            className={`rounded-xl border px-4 py-3 text-xs flex items-center justify-between gap-3 animate-in fade-in-0 duration-150 ${
+              statusTone === "success"
+                ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-300"
+                : statusTone === "info"
+                  ? "border-zinc-700/80 bg-[#121215] text-zinc-300"
+                  : "border-red-500/30 bg-red-950/20 text-red-300"
+            }`}
+          >
             <div className="flex items-center gap-2">
-              <svg className="size-4 shrink-0 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
+              <svg
+                className={`size-4 shrink-0 ${
+                  statusTone === "success"
+                    ? "text-emerald-400"
+                    : statusTone === "info"
+                      ? "text-zinc-400"
+                      : "text-red-400"
+                }`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                {statusTone === "success" ? (
+                  <polyline points="20 6 9 17 4 12" />
+                ) : (
+                  <>
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </>
+                )}
               </svg>
               <span>{status}</span>
             </div>
             <button
               type="button"
               onClick={() => setStatus("")}
-              className="text-red-400 hover:text-white p-1 rounded-md"
+              className="text-zinc-400 hover:text-white p-1 rounded-md"
               aria-label="Dismiss alert"
             >
               ✕
@@ -1216,7 +1484,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] hover:border-zinc-700 transition-colors text-xs text-zinc-300 focus-ring"
               >
                 <span>
-                  {framingMode === "true_9_16" ? "9:16 AI" : framingMode === "square_rounded" ? "1:1 Rounded" : "16:9"} • {clipDurationSeconds}s • {showCaptions ? activeCaptionName : "No subs"} • {showWatermark ? "Watermark" : "No logo"}
+                  {framingMode === "true_9_16" ? (faceTracking ? "9:16 Face Track" : "9:16 Static") : framingMode === "square_rounded" ? "1:1 Rounded" : "16:9"} • {clipDurationSeconds}s • {showCaptions ? activeCaptionName : "No subs"} • {effectiveShowWatermark ? "Watermark" : "No logo"}
                 </span>
                 <span className="text-zinc-500">{isSettingsOpen ? "▲" : "▼"}</span>
               </button>
@@ -1329,6 +1597,17 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                   }
                   setCaptionStyle(st);
                   try { localStorage.setItem("cliprobin_caption_style", st); } catch {}
+                }}
+                captionAnimation={captionAnimation}
+                onCaptionAnimationChange={(anim) => {
+                  setCaptionAnimation(anim);
+                  try {
+                    if (anim) {
+                      localStorage.setItem("cliprobin_caption_animation", anim);
+                    } else {
+                      localStorage.removeItem("cliprobin_caption_animation");
+                    }
+                  } catch {}
                 }}
                 showWatermark={isPro ? showWatermark : true}
                 onShowWatermarkChange={(wm) => {
@@ -1473,17 +1752,13 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 projectId={projectId}
                 globalVolume={globalVolume}
                 globalMuted={globalMuted}
-                activePlayingClipId={activePlayingClipId}
-                onPlay={(id) => setActivePlayingClipId(id)}
-                onOpenModal={(c) => {
-                  setActivePlayingClipId(null);
-                  setSelectedClipForModal(c);
-                }}
-                showWatermark={appliedSettings?.showWatermark ?? showWatermark}
+                isActivePlaying={activePlayingClipId === clip.id}
+                onPlay={handleCardPlay}
+                onOpenModal={handleOpenClipModal}
+                showWatermark={appliedSettings?.showWatermark ?? effectiveShowWatermark}
                 showSubtitles={appliedSettings?.showCaptions ?? showCaptions}
-                onClipUpdated={(updated) => {
-                  setClips((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-                }}
+                defaultFaceTracking={appliedSettings?.faceTracking ?? faceTracking}
+                onClipUpdated={handleClipUpdated}
               />
             ))}
             {generating &&

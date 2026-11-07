@@ -51,8 +51,6 @@ def save_ai_config(request: GeminiKeyRequest) -> dict[str, Any]:
 @router.post("/ai/developer-mode")
 def update_developer_mode(request: DeveloperModeRequest) -> dict[str, Any]:
     status = get_ai_developer_status()
-    if request.enabled and not status["youtube_authenticated"]:
-        raise HTTPException(status_code=403, detail="Connect your YouTube account before enabling Developer Mode.")
     if request.enabled and not status["gemini_configured"]:
         raise HTTPException(status_code=400, detail="Save a Gemini API key before enabling Developer Mode.")
     set_developer_mode(request.enabled)

@@ -3,6 +3,21 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 const WEB_API_URL = "http://127.0.0.1:8000";
 let desktopApiUrl: Promise<string> | undefined;
 
+class HttpStatusError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "HttpStatusError";
+    this.status = status;
+  }
+}
+
+function dispatchWindowEvent(name: string, detail?: unknown): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(name, { detail }));
+  }
+}
+
 function getApiErrorMessage(payload: unknown, fallback: string): string {
   if (typeof payload !== "object" || payload === null || !("detail" in payload)) {
     return fallback;
@@ -38,6 +53,10 @@ async function getApiUrl(): Promise<string> {
   return desktopApiUrl;
 }
 
+export async function getApiBaseUrl(): Promise<string> {
+  return getApiUrl();
+}
+
 export type DownloadResponse = {
   project_id: string;
   status: string;
@@ -56,7 +75,7 @@ export type TranscriptionResponse = {
 
 export type LocalTranscriptionJob = {
   project_id: string;
-  status: "queued" | "processing" | "completed" | "failed";
+  status: "queued" | "processing" | "completed" | "failed" | "cancelled";
   step: string;
   progress: number;
   error?: string;
@@ -72,6 +91,7 @@ export type Clip = {
   score?: number;
   reason?: string;
   file: string;
+  v?: string;
   top_line?: string;
   framing_mode?: FramingMode;
   caption_style?: CaptionStyle;
@@ -108,7 +128,7 @@ export type ActiveJob = {
 
 export type DownloadJob = {
   project_id: string;
-  status: "queued" | "downloading" | "processing" | "completed" | "failed";
+  status: "queued" | "downloading" | "processing" | "completed" | "failed" | "cancelled";
   step: string;
   progress: number;
   file?: string;
@@ -126,19 +146,30 @@ export type Project = {
 };
 
 export async function getActiveJobs(): Promise<ActiveJob[]> {
-  const apiUrl = await getApiUrl();
-  const response = await fetch(`${apiUrl}/api/jobs/active`);
-  if (!response.ok) {
-    const payload: unknown = await response.json().catch(() => null);
-    throw new Error(getApiErrorMessage(payload, "Could not check active job progress"));
+  try {
+    const apiUrl = await getApiUrl();
+    const response = await fetch(`${apiUrl}/api/jobs/active`);
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch(() => null);
+      throw new Error(getApiErrorMessage(payload, "Could not check active job progress"));
+    }
+    const result = await response.json() as { jobs: ActiveJob[] };
+    return result.jobs || [];
+  } catch (err) {
+    // If backend is temporarily reloading or network is briefly offline, return empty list to keep polling gracefully
+    if (
+      err instanceof TypeError &&
+      (err.message.includes("fetch") || err.message.includes("NetworkError") || err.message.includes("Failed"))
+    ) {
+      return [];
+    }
+    throw err;
   }
-  const result = await response.json() as { jobs: ActiveJob[] };
-  return result.jobs;
 }
 
-export async function getDownloadJob(projectId: string): Promise<DownloadJob> {
+export async function getDownloadJob(projectId: string, signal?: AbortSignal): Promise<DownloadJob> {
   const apiUrl = await getApiUrl();
-  const response = await fetch(`${apiUrl}/api/download/${encodeURIComponent(projectId)}`);
+  const response = await fetch(`${apiUrl}/api/download/${encodeURIComponent(projectId)}`, { signal });
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Could not check download progress"));
@@ -149,6 +180,7 @@ export async function getDownloadJob(projectId: string): Promise<DownloadJob> {
 export async function downloadVideo(
   url: string,
   onProgress?: (job: DownloadJob) => void,
+  options?: { signal?: AbortSignal; onProjectCreated?: (projectId: string) => void },
 ): Promise<DownloadResponse> {
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/download`, {
@@ -157,6 +189,7 @@ export async function downloadVideo(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ url }),
+    signal: options?.signal,
   });
 
   if (!response.ok) {
@@ -165,6 +198,8 @@ export async function downloadVideo(
   }
 
   const initial = await response.json() as DownloadJob;
+  options?.onProjectCreated?.(initial.project_id);
+  dispatchWindowEvent("cliprobin:job-started");
   onProgress?.(initial);
 
   if (initial.status === "completed") {
@@ -177,12 +212,21 @@ export async function downloadVideo(
   }
 
   let job: DownloadJob = initial;
-  while (job.status !== "completed" && job.status !== "failed") {
+  while (job.status !== "completed" && job.status !== "failed" && job.status !== "cancelled") {
+    if (options?.signal?.aborted) {
+      throw new Error("Video download was cancelled");
+    }
     await new Promise((resolve) => window.setTimeout(resolve, 400));
-    job = await getDownloadJob(initial.project_id);
+    if (options?.signal?.aborted) {
+      throw new Error("Video download was cancelled");
+    }
+    job = await getDownloadJob(initial.project_id, options?.signal);
     onProgress?.(job);
   }
 
+  if (job.status === "cancelled") {
+    throw new Error("Video download was cancelled");
+  }
   if (job.status === "failed") {
     throw new Error(job.error || "Video download failed");
   }
@@ -197,11 +241,12 @@ export async function downloadVideo(
 
 export async function transcribeVideo(
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<LocalTranscriptionJob> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/transcribe`,
-    { method: "POST" },
+    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/transcribe`,
+    { method: "POST", signal },
   );
 
   if (!response.ok) {
@@ -209,12 +254,14 @@ export async function transcribeVideo(
     throw new Error(getApiErrorMessage(payload, "Video transcription failed"));
   }
 
+  dispatchWindowEvent("cliprobin:job-started");
   return response.json();
 }
 
 export async function transcribeLocalVideo(
   video: File,
   onUploadProgress: (progress: number) => void,
+  signal?: AbortSignal,
 ): Promise<LocalTranscriptionJob> {
   const apiUrl = await getApiUrl();
   const formData = new FormData();
@@ -222,6 +269,22 @@ export async function transcribeLocalVideo(
 
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
+    const handleAbort = () => {
+      request.abort();
+    };
+    if (signal) {
+      if (signal.aborted) {
+        reject(new Error("Video upload was cancelled"));
+        return;
+      }
+      signal.addEventListener("abort", handleAbort, { once: true });
+    }
+    const cleanup = () => {
+      if (signal) {
+        signal.removeEventListener("abort", handleAbort);
+      }
+    };
+
     request.open("POST", `${apiUrl}/api/local-video/transcribe`);
     request.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) {
@@ -229,6 +292,7 @@ export async function transcribeLocalVideo(
       }
     });
     request.addEventListener("load", () => {
+      cleanup();
       let result: LocalTranscriptionJob & { detail?: string };
       try {
         result = JSON.parse(request.responseText);
@@ -240,10 +304,17 @@ export async function transcribeLocalVideo(
         reject(new Error(getApiErrorMessage(result, "Local video upload failed")));
         return;
       }
+      dispatchWindowEvent("cliprobin:job-started");
       resolve(result);
     });
-    request.addEventListener("error", () => reject(new Error("Could not connect to the backend")));
-    request.addEventListener("abort", () => reject(new Error("Video upload was cancelled")));
+    request.addEventListener("error", () => {
+      cleanup();
+      reject(new Error("Could not connect to the backend"));
+    });
+    request.addEventListener("abort", () => {
+      cleanup();
+      reject(new Error("Video upload was cancelled"));
+    });
     request.send(formData);
   });
 }
@@ -261,14 +332,16 @@ export async function transcribeLocalVideoFromPath(
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Could not start transcription from file path"));
   }
+  dispatchWindowEvent("cliprobin:job-started");
   return response.json();
 }
 
 export async function getLocalTranscriptionJob(
   projectId: string,
+  signal?: AbortSignal,
 ): Promise<LocalTranscriptionJob> {
   const apiUrl = await getApiUrl();
-  const response = await fetch(`${apiUrl}/api/local-video/jobs/${projectId}`);
+  const response = await fetch(`${apiUrl}/api/local-video/jobs/${encodeURIComponent(projectId)}`, { signal });
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Could not check transcription progress"));
@@ -324,6 +397,7 @@ export async function generateClips(
   clipCount?: number,
   generationMode: "random" | "ai" = "random",
   faceTracking?: boolean,
+  options?: { signal?: AbortSignal; onJobCreated?: (jobId: string) => void },
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
   const framingQuery = framingMode ? `&framing_mode=${encodeURIComponent(framingMode)}` : "";
@@ -333,14 +407,16 @@ export async function generateClips(
   const modeQuery = `&generation_mode=${encodeURIComponent(generationMode)}`;
   const faceTrackingQuery = faceTracking !== undefined ? `&face_tracking=${faceTracking}` : "";
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}${countQuery}${modeQuery}${faceTrackingQuery}`,
-    { method: "POST" },
+    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}${countQuery}${modeQuery}${faceTrackingQuery}`,
+    { method: "POST", signal: options?.signal },
   );
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Clip generation failed"));
   }
   const { job_id: jobId } = await response.json() as { job_id: string };
+  options?.onJobCreated?.(jobId);
+  dispatchWindowEvent("cliprobin:job-started");
   onProgress?.({
     job_id: jobId,
     project_id: projectId,
@@ -353,17 +429,31 @@ export async function generateClips(
   let job: ClipGenerationJob | undefined;
   let pollFailures = 0;
   while (true) {
+    if (options?.signal?.aborted) {
+      return { clips: [], cancelled: true };
+    }
     try {
       const jobResponse = await fetch(
-        `${apiUrl}/api/projects/${projectId}/generation-jobs/${jobId}`,
+        `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(jobId)}`,
+        { signal: options?.signal },
       );
       if (!jobResponse.ok) {
         const payload: unknown = await jobResponse.json().catch(() => null);
-        throw new Error(getApiErrorMessage(payload, "Could not check clip generation progress"));
+        throw new HttpStatusError(
+          getApiErrorMessage(payload, "Could not check clip generation progress"),
+          jobResponse.status,
+        );
       }
       job = (await jobResponse.json()) as ClipGenerationJob;
       pollFailures = 0;
     } catch (pollErr) {
+      if (options?.signal?.aborted) {
+        return { clips: [], cancelled: true };
+      }
+      // Do not retry non-recoverable 4xx client errors (400, 403, 404, 422)
+      if (pollErr instanceof HttpStatusError && pollErr.status >= 400 && pollErr.status < 500) {
+        throw pollErr;
+      }
       pollFailures += 1;
       // Allow up to 15 retries (~15 seconds) for transient network drops or backend reload
       if (pollFailures > 15) {
@@ -395,7 +485,7 @@ export async function cancelClipGeneration(
 ): Promise<ClipGenerationJob> {
   const apiUrl = await getApiUrl();
   const response = await fetch(
-    `${apiUrl}/api/projects/${projectId}/generation-jobs/${jobId}/cancel`,
+    `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/generation-jobs/${encodeURIComponent(jobId)}/cancel`,
     { method: "POST" },
   );
   if (!response.ok) {
@@ -409,7 +499,7 @@ export async function getLatestClipGenerationJob(
   projectId: string,
 ): Promise<ClipGenerationJob | null> {
   const apiUrl = await getApiUrl();
-  const response = await fetch(`${apiUrl}/api/projects/${projectId}/generation-jobs`);
+  const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}/generation-jobs`);
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Could not check clip generation progress"));
@@ -419,11 +509,13 @@ export async function getLatestClipGenerationJob(
 }
 
 export type ProjectGenerationOptions = {
+  generation_mode?: "random" | "ai";
   show_subtitles?: boolean;
   show_watermark?: boolean;
   framing_mode?: FramingMode;
   caption_style?: CaptionStyle;
   caption_animation?: CaptionAnimation | null;
+  face_tracking?: boolean;
   clip_duration_seconds?: number;
   clip_count?: number | null;
 };
@@ -434,7 +526,7 @@ export async function getClips(projectId: string): Promise<{
   generation_options?: ProjectGenerationOptions;
 }> {
   const apiUrl = await getApiUrl();
-  const response = await fetch(`${apiUrl}/api/projects/${projectId}/clips`);
+  const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips`);
   if (!response.ok) {
     throw new Error("Could not load clips");
   }
@@ -452,7 +544,7 @@ export async function getProjects(): Promise<{ projects: Project[] }> {
 
 export async function deleteProject(projectId: string): Promise<void> {
   const apiUrl = await getApiUrl();
-  const response = await fetch(`${apiUrl}/api/projects/${projectId}`, {
+  const response = await fetch(`${apiUrl}/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -478,13 +570,15 @@ export async function updateProjectTitle(
   return response.json();
 }
 
-export async function clipUrl(projectId: string, filename: string): Promise<string> {
+export async function clipUrl(projectId: string, filename: string, version?: string): Promise<string> {
   const apiUrl = await getApiUrl();
-  return `${apiUrl}/api/projects/${projectId}/clips/${encodeURIComponent(filename)}`;
+  const base = `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/clips/${encodeURIComponent(filename)}`;
+  return version ? `${base}?v=${encodeURIComponent(version)}` : base;
 }
 
-export async function clipDownloadUrl(projectId: string, filename: string): Promise<string> {
-  return `${await clipUrl(projectId, filename)}?download=true`;
+export async function clipDownloadUrl(projectId: string, filename: string, version?: string): Promise<string> {
+  const base = await clipUrl(projectId, filename);
+  return version ? `${base}?download=true&v=${encodeURIComponent(version)}` : `${base}?download=true`;
 }
 
 export async function clipsArchiveDownloadUrl(projectId: string): Promise<string> {
@@ -781,6 +875,7 @@ export async function saveGeminiApiKey(apiKey: string): Promise<AIDeveloperStatu
     throw new Error(getApiErrorMessage(payload, "Failed to save Gemini API key"));
   }
   const payload = await response.json();
+  dispatchWindowEvent("cliprobin:ai-status-changed", payload.status);
   return payload.status as AIDeveloperStatus;
 }
 
@@ -796,6 +891,7 @@ export async function setAIDeveloperMode(enabled: boolean): Promise<AIDeveloperS
     throw new Error(getApiErrorMessage(payload, "Failed to update AI Developer Mode"));
   }
   const payload = await response.json();
+  dispatchWindowEvent("cliprobin:ai-status-changed", payload.status);
   return payload.status as AIDeveloperStatus;
 }
 
@@ -884,11 +980,20 @@ export async function uploadClipToYouTube(payload: YouTubeUploadPayload): Promis
 }
 
 
+export type WatermarkPosition =
+  | "top_right"
+  | "top_left"
+  | "bottom_right"
+  | "bottom_left"
+  | "center";
+
 export type WatermarkStatus = {
   has_custom_watermark: boolean;
   custom_filename: string | null;
   custom_url: string | null;
   default_available: boolean;
+  position?: WatermarkPosition;
+  opacity?: number;
 };
 
 export async function getWatermarkStatus(): Promise<WatermarkStatus> {
@@ -899,6 +1004,13 @@ export async function getWatermarkStatus(): Promise<WatermarkStatus> {
     throw new Error(getApiErrorMessage(payload, "Failed to fetch watermark status"));
   }
   return response.json();
+}
+
+export async function resolveWatermarkImageUrl(customUrl: string | null): Promise<string | null> {
+  if (!customUrl) return null;
+  if (/^https?:\/\//i.test(customUrl)) return customUrl;
+  const apiUrl = await getApiUrl();
+  return `${apiUrl}${customUrl.startsWith("/") ? "" : "/"}${customUrl}`;
 }
 
 export async function uploadCustomWatermark(file: File): Promise<{ status: string; filename: string; url: string }> {
@@ -916,6 +1028,23 @@ export async function uploadCustomWatermark(file: File): Promise<{ status: strin
   return response.json();
 }
 
+export async function updateWatermarkSettings(
+  position: WatermarkPosition,
+  opacity: number,
+): Promise<{ status: string; position: WatermarkPosition; opacity: number }> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/watermark/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ position, opacity }),
+  });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to save watermark settings"));
+  }
+  return response.json();
+}
+
 export async function deleteCustomWatermark(): Promise<{ status: string; deleted: boolean }> {
   const apiUrl = await getApiUrl();
   const response = await fetch(`${apiUrl}/api/watermark`, {
@@ -924,6 +1053,20 @@ export async function deleteCustomWatermark(): Promise<{ status: string; deleted
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
     throw new Error(getApiErrorMessage(payload, "Failed to delete custom watermark"));
+  }
+  return response.json();
+}
+
+export async function getPaddleWebhookStatus(): Promise<{
+  environment: string;
+  active_plan: "free" | "pro";
+  total_subscriptions_tracked: number;
+}> {
+  const apiUrl = await getApiUrl();
+  const response = await fetch(`${apiUrl}/api/webhooks/paddle/status`, { cache: "no-store" });
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null);
+    throw new Error(getApiErrorMessage(payload, "Failed to check Paddle subscription status"));
   }
   return response.json();
 }

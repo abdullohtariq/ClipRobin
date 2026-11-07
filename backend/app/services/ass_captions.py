@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -82,9 +83,12 @@ def stage_caption_fonts(destination_dir: Path) -> Path:
             dest_file = fonts_staging / font_file.name
             if not dest_file.exists():
                 try:
-                    shutil.copyfile(font_file, dest_file)
-                except OSError as error:
-                    logger.warning("Could not copy font %s: %s", font_file, error)
+                    os.link(font_file, dest_file)
+                except OSError:
+                    try:
+                        shutil.copyfile(font_file, dest_file)
+                    except OSError as error:
+                        logger.warning("Could not stage font %s: %s", font_file, error)
     return fonts_staging
 
 
@@ -257,10 +261,10 @@ def generate_ass_subtitles(
     outline_ass = hex_to_ass_color("#000000", alpha_fraction=0.0)
     back_ass = hex_to_ass_color("#000000", alpha_fraction=1.0 - style_def.box_opacity if style_def.border_style == 3 else 0.5)
 
-    is_karaoke = (style_def.id == "karaoke") or (anim_id == "sweep")
-    # For Karaoke: PrimaryColour in ASS is the color AFTER sweep (accent_ass), SecondaryColour is BEFORE sweep (primary_ass)
+    is_karaoke = anim_id == "sweep"
+    # For Karaoke/Sweep: PrimaryColour in ASS is the color AFTER sweep (accent_ass), SecondaryColour is BEFORE sweep (secondary_ass)
     style_primary = accent_ass if is_karaoke else primary_ass
-    style_secondary = primary_ass if is_karaoke else secondary_ass
+    style_secondary = secondary_ass
 
     # Header and V4+ Styles definition (font size 52 for high visibility with 2 words per line)
     font_size = 52
@@ -379,7 +383,7 @@ def generate_ass_subtitles(
             formatted_chunk.append({**w, "text": escape_ass_text(t)})
 
         if is_karaoke:
-            # Karaoke sweep (\kf tag) smoothly sweeping from white (\2c) to emerald highlight (\1c)
+            # Karaoke sweep (\kf tag) smoothly sweeping from secondary_ass (\2c) to accent_ass (\1c)
             phrase_parts = []
             for w in formatted_chunk:
                 w_duration_cs = max(8, int(round((w["end"] - w["start"]) * 100)))
@@ -413,14 +417,14 @@ def generate_ass_subtitles(
                         elif anim_id == "pop":
                             anim_tag = f"\\1c{accent_ass}\\fscx116\\fscy116\\t(0,120,\\fscx106\\fscy106)"
                         elif anim_id == "fade":
-                            anim_tag = f"\\1c{primary_ass}\\fscx105\\fscy105"
+                            anim_tag = f"\\1c{accent_ass}\\alpha&H60&\\fscx103\\fscy103\\t(0,140,\\alpha&H00&\\fscx106\\fscy106)"
                         elif anim_id == "glide":
-                            anim_tag = f"\\1c{accent_ass}\\fscx108\\fscy108"
+                            anim_tag = f"\\1c{accent_ass}\\fscx96\\fscy96\\t(0,140,\\fscx108\\fscy108)"
                         else:
                             anim_tag = f"\\1c{accent_ass}\\fscx112\\fscy112"
-                        line_parts.append(f"{{{anim_tag}}}{w['text']}{{\\1c{primary_ass}\\fscx100\\fscy100}}")
+                        line_parts.append(f"{{{anim_tag}}}{w['text']}{{\\1c{primary_ass}\\alpha&H00&\\fscx100\\fscy100}}")
                     else:
-                        line_parts.append(f"{{\\1c{secondary_ass}\\fscx100\\fscy100}}{w['text']}")
+                        line_parts.append(f"{{\\1c{secondary_ass}\\alpha&H00&\\fscx100\\fscy100}}{w['text']}")
 
                 line_text = " ".join(line_parts)
                 start_str = format_ass_time(w_start)

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  CaptionAnimation,
   CaptionStyle,
   FramingMode,
   ActiveJob,
@@ -24,12 +25,21 @@ import {
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 import { useSubscription } from "@/src/lib/subscription-context";
 
-const CLIP_DURATIONS = [12, 30, 60, 90] as const;
+const CLIP_DURATIONS = [12, 15, 30, 60, 90] as const;
 type ClipDuration = (typeof CLIP_DURATIONS)[number];
+
+const normalizeCaptionStyle = (raw: string | null | undefined): CaptionStyle => {
+  if (raw === "bold_emerald") return "robin";
+  if (raw === "clean_gold") return "clean";
+  if (raw && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(raw)) {
+    return raw as CaptionStyle;
+  }
+  return "classic";
+};
 
 export default function Projects() {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
-  const { isPro, openUpgradeModal } = useSubscription();
+  const { isPro, openUpgradeModal, isCaptionStyleAllowed } = useSubscription();
   const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -42,51 +52,95 @@ export default function Projects() {
   const [subtitleOptions, setSubtitleOptions] = useState<Record<string, boolean>>({});
   const [watermarkOptions, setWatermarkOptions] = useState<Record<string, boolean>>({});
   const [framingOptions, setFramingOptions] = useState<Record<string, FramingMode>>({});
+  const [faceTrackingOptions, setFaceTrackingOptions] = useState<Record<string, boolean>>({});
   const [captionStyleOptions, setCaptionStyleOptions] = useState<Record<string, CaptionStyle>>({});
+  const [captionAnimationOptions, setCaptionAnimationOptions] = useState<Record<string, CaptionAnimation | null>>({});
   const [durationOptions, setDurationOptions] = useState<Record<string, ClipDuration>>({});
   const [generationModeOptions, setGenerationModeOptions] = useState<Record<string, "random" | "ai">>({});
   const [activeModalProjectId, setActiveModalProjectId] = useState<string | null>(null);
   const [defaultFraming, setDefaultFraming] = useState<FramingMode>("standard");
+  const [defaultFaceTracking, setDefaultFaceTracking] = useState<boolean>(true);
   const [defaultCaptionStyle, setDefaultCaptionStyle] = useState<CaptionStyle>("classic");
+  const [defaultCaptionAnimation, setDefaultCaptionAnimation] = useState<CaptionAnimation | null>(null);
   const [defaultDuration, setDefaultDuration] = useState<ClipDuration>(30);
   const [defaultGenerationMode, setDefaultGenerationMode] = useState<"random" | "ai">("random");
   const [defaultSubtitles, setDefaultSubtitles] = useState<boolean>(true);
   const [defaultWatermark, setDefaultWatermark] = useState<boolean>(true);
 
   useEffect(() => {
-    try {
-      const savedFraming = localStorage.getItem("cliprobin_framing_mode");
-      if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
-        setDefaultFraming(savedFraming as FramingMode);
-      }
-      const savedDuration = localStorage.getItem("cliprobin_clip_duration");
-      if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
-        setDefaultDuration(Number(savedDuration) as ClipDuration);
-      }
-      const savedMode = localStorage.getItem("cliprobin_generation_mode");
-      if (savedMode && ["random", "ai"].includes(savedMode)) {
-        setDefaultGenerationMode(savedMode as "random" | "ai");
-      }
-      const savedSubs = localStorage.getItem("cliprobin_show_captions");
-      if (savedSubs !== null) {
-        setDefaultSubtitles(savedSubs === "true");
-      }
-      const savedWm = localStorage.getItem("cliprobin_show_watermark");
-      if (savedWm !== null) {
-        setDefaultWatermark(savedWm === "true");
-      }
-      const savedStyle = localStorage.getItem("cliprobin_caption_style");
-      if (savedStyle && ["classic", "robin", "clean", "punch", "pill", "karaoke", "bold_emerald", "clean_gold"].includes(savedStyle)) {
-        setDefaultCaptionStyle(savedStyle as CaptionStyle);
-      } else {
-        const stored = localStorage.getItem("cliprobin.settings");
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.defaultCaptionStyle) setDefaultCaptionStyle(parsed.defaultCaptionStyle);
+    const syncDefaults = () => {
+      try {
+        const savedFraming = localStorage.getItem("cliprobin_framing_mode");
+        if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
+          setDefaultFraming(savedFraming as FramingMode);
         }
+        const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
+        if (savedFaceTracking !== null) {
+          setDefaultFaceTracking(savedFaceTracking === "true");
+        }
+        const savedDuration = localStorage.getItem("cliprobin_clip_duration");
+        if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
+          setDefaultDuration(Number(savedDuration) as ClipDuration);
+        }
+        const savedMode = localStorage.getItem("cliprobin_generation_mode");
+        if (savedMode && ["random", "ai"].includes(savedMode)) {
+          setDefaultGenerationMode(isPro && savedMode === "ai" ? "ai" : "random");
+        }
+        const savedSubs = localStorage.getItem("cliprobin_show_captions");
+        if (savedSubs !== null) {
+          setDefaultSubtitles(savedSubs === "true");
+        }
+        const savedWm = localStorage.getItem("cliprobin_show_watermark");
+        if (!isPro) {
+          setDefaultWatermark(true);
+        } else if (savedWm !== null) {
+          setDefaultWatermark(savedWm === "true");
+        }
+        const savedStyle = localStorage.getItem("cliprobin_caption_style");
+        if (savedStyle) {
+          const normalized = normalizeCaptionStyle(savedStyle);
+          setDefaultCaptionStyle(isCaptionStyleAllowed(normalized) ? normalized : "classic");
+        } else {
+          const stored = localStorage.getItem("cliprobin.settings");
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed.defaultCaptionStyle) {
+              const normalized = normalizeCaptionStyle(parsed.defaultCaptionStyle);
+              setDefaultCaptionStyle(isCaptionStyleAllowed(normalized) ? normalized : "classic");
+            }
+          }
+        }
+        const savedAnim = localStorage.getItem("cliprobin_caption_animation");
+        if (savedAnim && ["pop", "grow", "sweep", "fade", "glide"].includes(savedAnim)) {
+          setDefaultCaptionAnimation(savedAnim as CaptionAnimation);
+        }
+      } catch {}
+
+      if (!isPro) {
+        setWatermarkOptions((prev) => {
+          const next = { ...prev };
+          for (const k of Object.keys(next)) next[k] = true;
+          return next;
+        });
+        setGenerationModeOptions((prev) => {
+          const next = { ...prev };
+          for (const k of Object.keys(next)) next[k] = "random";
+          return next;
+        });
+        setCaptionStyleOptions((prev) => {
+          const next = { ...prev };
+          for (const [k, st] of Object.entries(next)) {
+            if (!isCaptionStyleAllowed(st)) next[k] = "classic";
+          }
+          return next;
+        });
       }
-    } catch {}
-  }, []);
+    };
+
+    syncDefaults();
+    window.addEventListener("cliprobin:subscription-changed", syncDefaults);
+    return () => window.removeEventListener("cliprobin:subscription-changed", syncDefaults);
+  }, [isPro, isCaptionStyleAllowed]);
 
   useEffect(() => {
     if (!aiDeveloperStatus || aiDeveloperStatus.ai_enabled) return;
@@ -102,27 +156,46 @@ export default function Projects() {
   }, [aiDeveloperStatus]);
 
   useEffect(() => {
-    getProjects()
-      .then((result) => {
-        setProjects(result.projects);
-        setStatus(result.projects.length ? "" : "No projects yet.");
-      })
-      .catch((error) => setStatus(error instanceof Error ? error.message : "Could not load projects"))
-      .finally(() => setIsLoading(false));
+    const loadInitial = () => {
+      getProjects()
+        .then((result) => {
+          setProjects(result.projects);
+          setStatus(result.projects.length ? "" : "No projects yet.");
+        })
+        .catch((error) => setStatus(error instanceof Error ? error.message : "Could not load projects"))
+        .finally(() => setIsLoading(false));
+    };
+    loadInitial();
+    window.addEventListener("cliprobin:queue-item-completed", loadInitial);
+    return () => window.removeEventListener("cliprobin:queue-item-completed", loadInitial);
   }, []);
 
   useEffect(() => {
     let isCurrent = true;
     let timeoutId: number | undefined;
     let refreshCount = 0;
+    let hadActiveJobs = false;
+
+    const scheduleNext = (delayMs: number) => {
+      if (!isCurrent) return;
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+      if (typeof document !== "undefined" && document.hidden) return;
+      timeoutId = window.setTimeout(() => void refreshActiveJobs(), delayMs);
+    };
 
     const refreshActiveJobs = async () => {
+      if (!isCurrent) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      let nextDelay = 4000;
       try {
         const jobs = await getActiveJobs();
         if (isCurrent) {
-          setActiveJobs(jobs);
+          setActiveJobs((prev) => (prev.length === 0 && jobs.length === 0 ? prev : jobs));
+          const hasActive = jobs.length > 0;
+          nextDelay = hasActive ? 1000 : 4000;
           refreshCount += 1;
-          if (refreshCount % 3 === 0) {
+          // Refresh projects periodically while jobs are active, or once right when jobs finish
+          if ((hasActive && refreshCount % 3 === 0) || (hadActiveJobs && !hasActive)) {
             const result = await getProjects();
             if (isCurrent) {
               setProjects((current) => (
@@ -132,19 +205,38 @@ export default function Projects() {
               ));
             }
           }
+          hadActiveJobs = hasActive;
         }
       } catch (error) {
-        console.error("Could not refresh project status", error);
-      } finally {
-        if (isCurrent) {
-          timeoutId = window.setTimeout(() => void refreshActiveJobs(), 1000);
+        const isNetworkErr =
+          error instanceof TypeError &&
+          (error.message.includes("fetch") || error.message.includes("NetworkError") || error.message.includes("Failed"));
+        if (!isNetworkErr) {
+          console.error("Could not refresh project status", error);
         }
+      } finally {
+        scheduleNext(nextDelay);
       }
     };
 
+    const handleVisibilityOrWake = () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        if (timeoutId !== undefined) {
+          window.clearTimeout(timeoutId);
+          timeoutId = undefined;
+        }
+        return;
+      }
+      void refreshActiveJobs();
+    };
+
     void refreshActiveJobs();
+    document.addEventListener("visibilitychange", handleVisibilityOrWake);
+    window.addEventListener("cliprobin:job-started", handleVisibilityOrWake);
     return () => {
       isCurrent = false;
+      document.removeEventListener("visibilitychange", handleVisibilityOrWake);
+      window.removeEventListener("cliprobin:job-started", handleVisibilityOrWake);
       if (timeoutId !== undefined) {
         window.clearTimeout(timeoutId);
       }
@@ -178,6 +270,18 @@ export default function Projects() {
   };
 
   const handleGenerate = async (projectId: string) => {
+    const projectLabel = projects.find((p) => p.project_id === projectId)?.title || projectId;
+    const chosenFraming = framingOptions[projectId] ?? defaultFraming;
+    const rawStyle = normalizeCaptionStyle(captionStyleOptions[projectId] ?? defaultCaptionStyle);
+    const effectiveStyle: CaptionStyle = isCaptionStyleAllowed(rawStyle) ? rawStyle : "classic";
+    const rawGenMode = generationModeOptions[projectId] ?? defaultGenerationMode;
+    const effectiveGenMode: "random" | "ai" =
+      isPro && aiModeEnabled && rawGenMode === "ai" ? "ai" : "random";
+    const effectiveFaceTracking =
+      chosenFraming === "true_9_16"
+        ? (faceTrackingOptions[projectId] ?? defaultFaceTracking)
+        : false;
+
     setGeneratingProject(projectId);
     setProjects((current) => current.map((project) => project.project_id === projectId
       ? { ...project, clips: 0 }
@@ -192,7 +296,7 @@ export default function Projects() {
       total_clips: 0,
       ready_clips: [],
     });
-    setStatus(`Generating clips for ${projectId}...`);
+    setStatus(`Generating clips for ${projectLabel}...`);
     try {
       const result = await generateClips(
         projectId,
@@ -207,23 +311,26 @@ export default function Projects() {
         },
         durationOptions[projectId] ?? defaultDuration,
         isPro ? (watermarkOptions[projectId] ?? defaultWatermark) : true,
-        framingOptions[projectId] ?? defaultFraming,
-        captionStyleOptions[projectId] ?? defaultCaptionStyle,
+        chosenFraming,
+        effectiveStyle,
+        effectiveStyle === "classic"
+          ? undefined
+          : ((captionAnimationOptions[projectId] ?? defaultCaptionAnimation) || undefined),
         undefined,
-        undefined,
-        generationModeOptions[projectId] ?? defaultGenerationMode,
+        effectiveGenMode,
+        effectiveFaceTracking,
       );
       setProjects((current) => current.map((project) => project.project_id === projectId
         ? { ...project, clips: result.clips.length }
         : project));
       if (result.cancelled) {
-        setStatus(`Generation cancelled. Clips for ${projectId} were removed.`);
+        setStatus(`Generation cancelled. Clips for ${projectLabel} were removed.`);
       } else {
-        setStatus(`${result.clips.length} clips generated for ${projectId}.`);
+        setStatus(`${result.clips.length} clips generated for ${projectLabel}.`);
         router.push(`/clips?project=${encodeURIComponent(projectId)}`);
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : `Could not generate clips for ${projectId}`);
+      setStatus(error instanceof Error ? error.message : `Could not generate clips for ${projectLabel}`);
       setGenerationProgress((current) => current
         ? { ...current, status: "failed", step: "Clip generation failed" }
         : null);
@@ -324,8 +431,15 @@ export default function Projects() {
                 >
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <div className="flex items-center gap-2.5">
-                        <h2 className="text-lg font-semibold font-mono text-white">{project.project_id}</h2>
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <h2 className="text-lg font-semibold text-white">
+                          {project.title || project.project_id}
+                        </h2>
+                        {project.title && project.title !== project.project_id && (
+                          <span className="text-xs font-mono text-zinc-500">
+                            ({project.project_id})
+                          </span>
+                        )}
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                           project.status === "Ready" ? "bg-[#10b981]/15 text-[#10b981]" : "bg-amber-400/15 text-amber-300"
                         }`}>
@@ -348,14 +462,20 @@ export default function Projects() {
 
                   {(() => {
                     const currentFraming = framingOptions[project.project_id] ?? defaultFraming;
-                    const currentCaptionStyle = captionStyleOptions[project.project_id] ?? defaultCaptionStyle;
+                    const currentFaceTracking = faceTrackingOptions[project.project_id] ?? defaultFaceTracking;
+                    const rawCaptionStyle = normalizeCaptionStyle(
+                      captionStyleOptions[project.project_id] ?? defaultCaptionStyle
+                    );
+                    const currentCaptionStyle: CaptionStyle = isCaptionStyleAllowed(rawCaptionStyle)
+                      ? rawCaptionStyle
+                      : "classic";
                     const currentDuration = durationOptions[project.project_id] ?? defaultDuration;
                     const currentGenMode = generationModeOptions[project.project_id] ?? defaultGenerationMode;
                     const activeStyleOption =
                       CAPTION_STYLE_OPTIONS.find((s) => s.id === currentCaptionStyle) || CAPTION_STYLE_OPTIONS[0];
                     const previewUrls = getPreviewUrls(currentCaptionStyle);
                     const showSubs = subtitleOptions[project.project_id] ?? defaultSubtitles;
-                    const showWm = watermarkOptions[project.project_id] ?? defaultWatermark;
+                    const showWm = isPro ? (watermarkOptions[project.project_id] ?? defaultWatermark) : true;
 
                     return (
                       <>
@@ -424,6 +544,39 @@ export default function Projects() {
                                 <span className="text-xs text-purple-400 mt-0.5">Full 9:16</span>
                               </button>
                             </div>
+                            {currentFraming === "true_9_16" && (
+                              <div className="mt-2 flex items-center justify-between rounded-[10px] border border-purple-500/30 bg-purple-950/20 px-3 py-2">
+                                <span className="text-xs font-medium text-purple-200">
+                                  Smooth Face Tracking
+                                </span>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-label="Toggle smooth face tracking in 9:16"
+                                  aria-checked={currentFaceTracking}
+                                  disabled={isGenerating || isTranscribing}
+                                  onClick={() => {
+                                    const nextFt = !currentFaceTracking;
+                                    setFaceTrackingOptions((prev) => ({
+                                      ...prev,
+                                      [project.project_id]: nextFt,
+                                    }));
+                                    try {
+                                      localStorage.setItem("cliprobin_face_tracking", String(nextFt));
+                                    } catch {}
+                                  }}
+                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 ${
+                                    currentFaceTracking ? "bg-purple-600" : "bg-zinc-700"
+                                  }`}
+                                >
+                                  <span
+                                    className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                                      currentFaceTracking ? "translate-x-4" : "translate-x-0"
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+                            )}
                           </div>
 
                           {/* Captions Style Selector */}
@@ -519,8 +672,8 @@ export default function Projects() {
                                 <button
                                   type="button"
                                   disabled={!aiModeEnabled || isGenerating || isTranscribing}
-                                  title={aiModeEnabled ? "AI clip selection is enabled in Developer Mode" : aiDeveloperStatus?.reason || "Connect YouTube and enable AI Developer Mode to unlock AI clip selection"}
-                                  aria-label={aiModeEnabled ? "Select AI generation mode" : "AI mode is available after YouTube sign-in and Developer Mode setup"}
+                                  title={aiModeEnabled ? "AI clip selection is enabled in Developer Mode" : aiDeveloperStatus?.reason || "Add a Gemini API key and enable AI Developer Mode in Settings to unlock AI clip selection"}
+                                  aria-label={aiModeEnabled ? "Select AI generation mode" : "AI mode requires a Gemini API key and Developer Mode in Settings"}
                                   onClick={() => {
                                     if (!isPro) {
                                       openUpgradeModal("Gemini AI Hook Finder");
@@ -542,47 +695,47 @@ export default function Projects() {
                                     {aiModeEnabled ? "Developer" : "Soon"}
                                   </span>
                                 </button>
-                                {/* Hover tooltip */}
-                                <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
-                                  {aiModeEnabled ? "AI DEVELOPER MODE" : aiDeveloperStatus?.reason || "COMING SOON"}
-                                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
+                                  {/* Hover tooltip */}
+                                  <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
+                                    {aiModeEnabled ? "AI DEVELOPER MODE" : aiDeveloperStatus?.reason || "COMING SOON"}
+                                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
+                                  </div>
                                 </div>
                               </div>
                             </div>
-                          </div>
 
-                          {/* Clip Duration Selector */}
-                          <div className="space-y-1.5">
-                            <label className="block text-xs font-medium text-zinc-400">
-                              Clip duration
-                            </label>
-                            <div className="grid grid-cols-4 gap-2">
-                              {CLIP_DURATIONS.map((seconds) => {
-                                const isSelected = currentDuration === seconds;
-                                return (
-                                  <button
-                                    key={seconds}
-                                    type="button"
-                                    disabled={isGenerating || isTranscribing}
-                                    onClick={() => {
-                                      setDurationOptions((prev) => ({ ...prev, [project.project_id]: seconds }));
-                                      try {
-                                        localStorage.setItem("cliprobin_clip_duration", String(seconds));
-                                      } catch {}
-                                    }}
-                                    className={`rounded-[10px] border py-2 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                                      isSelected
-                                        ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
-                                        : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
-                                    }`}
-                                  >
-                                    {seconds}s
-                                  </button>
-                                );
-                              })}
+                            {/* Clip Duration Selector */}
+                            <div className="space-y-1.5">
+                              <label className="block text-xs font-medium text-zinc-400">
+                                Clip duration
+                              </label>
+                              <div className="grid grid-cols-5 gap-1.5">
+                                {CLIP_DURATIONS.map((seconds) => {
+                                  const isSelected = currentDuration === seconds;
+                                  return (
+                                    <button
+                                      key={seconds}
+                                      type="button"
+                                      disabled={isGenerating || isTranscribing}
+                                      onClick={() => {
+                                        setDurationOptions((prev) => ({ ...prev, [project.project_id]: seconds }));
+                                        try {
+                                          localStorage.setItem("cliprobin_clip_duration", String(seconds));
+                                        } catch {}
+                                      }}
+                                      className={`rounded-[10px] border py-2 text-xs font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                                        isSelected
+                                          ? "border-zinc-500 bg-zinc-800 text-white font-semibold"
+                                          : "border-[#232326] bg-[#0a0a0a] text-zinc-400 hover:border-zinc-700 hover:text-white"
+                                      }`}
+                                    >
+                                      {seconds}s
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           </div>
-                        </div>
 
                         {/* Watermark Toggle Row */}
                         <div className="mt-3 flex items-center justify-between rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3">
@@ -791,6 +944,26 @@ export default function Projects() {
               }));
               try {
                 localStorage.setItem("cliprobin_caption_style", style);
+              } catch {}
+            }
+          }}
+          selectedAnimation={
+            activeModalProjectId
+              ? (captionAnimationOptions[activeModalProjectId] ?? defaultCaptionAnimation)
+              : defaultCaptionAnimation
+          }
+          onSelectAnimation={(anim) => {
+            if (activeModalProjectId) {
+              setCaptionAnimationOptions((prev) => ({
+                ...prev,
+                [activeModalProjectId]: anim,
+              }));
+              try {
+                if (anim) {
+                  localStorage.setItem("cliprobin_caption_animation", anim);
+                } else {
+                  localStorage.removeItem("cliprobin_caption_animation");
+                }
               } catch {}
             }
           }}

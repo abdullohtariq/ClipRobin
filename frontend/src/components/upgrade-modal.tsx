@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useSubscription, PLAN_FEATURES } from "@/src/lib/subscription-context";
 import { PaddleSandboxModal } from "./paddle-sandbox-modal";
 import { openPaddleCheckout } from "@/src/lib/paddle";
@@ -22,6 +22,17 @@ export function UpgradeModal() {
   const [activationSuccess, setActivationSuccess] = useState(false);
   const [isPaddleModalOpen, setIsPaddleModalOpen] = useState(false);
 
+  useEffect(() => {
+    if (!upgradeModalOpen || isPaddleModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeUpgradeModal();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [upgradeModalOpen, isPaddleModalOpen, closeUpgradeModal]);
+
   if (!upgradeModalOpen) return null;
 
   const handleInstantUpgrade = async () => {
@@ -30,13 +41,19 @@ export function UpgradeModal() {
       planType: billingCycle,
       userEmail: "creator@cliprobin.test",
       onSuccess: (txnId) => {
-        upgradeToPro(`ROBIN-PRO-${txnId.toUpperCase()}`);
+        void upgradeToPro(`ROBIN-PRO-${txnId.toUpperCase()}`);
         setIsUpgrading(false);
         setActivationSuccess(true);
         setTimeout(() => {
           setActivationSuccess(false);
           closeUpgradeModal();
         }, 1200);
+      },
+      onClose: () => {
+        setIsUpgrading(false);
+      },
+      onError: () => {
+        setIsUpgrading(false);
       },
     });
     if (!opened) {
@@ -76,6 +93,7 @@ export function UpgradeModal() {
       role="dialog"
       aria-modal="true"
       aria-labelledby="upgrade-modal-title"
+      onClick={closeUpgradeModal}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md animate-fade-in"
     >
       <div

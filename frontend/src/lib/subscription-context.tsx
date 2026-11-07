@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from "react";
+import { getPaddleWebhookStatus } from "@/src/lib/api";
 
 export type SubscriptionTier = "free" | "pro";
 
@@ -100,10 +101,13 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const [upgradeReason, setUpgradeReason] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    let initialTier: SubscriptionTier = "free";
     try {
       const savedTier = localStorage.getItem(STORAGE_TIER_KEY) as SubscriptionTier | null;
       const savedKey = localStorage.getItem(STORAGE_LICENSE_KEY);
       if (savedTier === "pro") {
+        initialTier = "pro";
         setTier("pro");
       } else {
         setTier("free");
@@ -114,6 +118,27 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     } catch {
       // ignore
     }
+
+    // Reconcile with backend Paddle webhook state if a subscription was activated server-side
+    void getPaddleWebhookStatus()
+      .then((status) => {
+        if (cancelled) return;
+        if (status.active_plan === "pro" && initialTier !== "pro") {
+          try {
+            localStorage.setItem(STORAGE_TIER_KEY, "pro");
+          } catch {
+            // ignore
+          }
+          setTier("pro");
+        }
+      })
+      .catch(() => {
+        // Backend may still be starting up; local state remains authoritative
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const openUpgradeModal = useCallback((reason?: string) => {
@@ -134,6 +159,9 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       setTier("pro");
       setLicenseKey(activeKey);
       closeUpgradeModal();
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("cliprobin:subscription-changed", { detail: { tier: "pro" } }));
+      }
       return true;
     } catch {
       return false;
@@ -144,8 +172,19 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     try {
       localStorage.setItem(STORAGE_TIER_KEY, "free");
       localStorage.removeItem(STORAGE_LICENSE_KEY);
+      // Reset Pro-gated preferences so Free tier does not retain Pro settings
+      localStorage.setItem("cliprobin_generation_mode", "random");
+      localStorage.setItem("cliprobin_show_watermark", "true");
+      const savedStyle = localStorage.getItem("cliprobin_caption_style");
+      if (savedStyle && !(FREE_ALLOWED_CAPTION_STYLES as readonly string[]).includes(savedStyle)) {
+        localStorage.setItem("cliprobin_caption_style", "classic");
+      }
+      localStorage.removeItem("cliprobin_caption_animation");
       setTier("free");
       setLicenseKey(null);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("cliprobin:subscription-changed", { detail: { tier: "free" } }));
+      }
     } catch {
       // ignore
     }

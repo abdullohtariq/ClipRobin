@@ -23,8 +23,11 @@ export default function SubscriptionPage() {
       planType: "yearly",
       userEmail: "creator@cliprobin.test",
       onSuccess: (txnId) => {
-        upgradeToPro(`ROBIN-PRO-${txnId.toUpperCase()}`);
+        void upgradeToPro(`ROBIN-PRO-${txnId.toUpperCase()}`);
         setStatusMessage("🎉 Paddle Sandbox checkout successful! Pro unlocked.");
+      },
+      onClose: () => {
+        setStatusMessage(null);
       },
     });
     if (!opened) {

@@ -23,6 +23,10 @@ export const DEFAULT_PADDLE_CONFIG: PaddleConfig = {
 
 let paddleInstance: Paddle | null = null;
 let initPromise: Promise<Paddle | null> | null = null;
+let activeCheckoutCallbacks: {
+  onSuccess?: (transactionId: string) => void;
+  onClose?: () => void;
+} | null = null;
 
 export function getPaddleConfig(): PaddleConfig {
   if (typeof window === "undefined") return DEFAULT_PADDLE_CONFIG;
@@ -67,11 +71,29 @@ export async function getPaddleInstance(): Promise<Paddle | null> {
       const p = await initializePaddle({
         environment: config.environment,
         token: token,
+        eventCallback: (event) => {
+          if (!event || !activeCheckoutCallbacks) return;
+          if (event.name === "checkout.completed") {
+            const data = event.data as { transaction_id?: string; id?: string } | undefined;
+            const txnId =
+              data?.transaction_id ||
+              data?.id ||
+              `txn_${Math.random().toString(36).substring(2, 10)}`;
+            const cb = activeCheckoutCallbacks.onSuccess;
+            activeCheckoutCallbacks = null;
+            cb?.(txnId);
+          } else if (event.name === "checkout.closed") {
+            const cb = activeCheckoutCallbacks.onClose;
+            activeCheckoutCallbacks = null;
+            cb?.();
+          }
+        },
       });
       paddleInstance = p || null;
       return paddleInstance;
     } catch (err) {
       console.warn("Failed to initialize Paddle SDK:", err);
+      initPromise = null;
       return null;
     }
   })();
@@ -83,6 +105,7 @@ export interface CheckoutOptions {
   planType: "monthly" | "yearly" | "lifetime";
   userEmail?: string;
   onSuccess?: (transactionId: string) => void;
+  onClose?: () => void;
   onError?: (error: Error) => void;
 }
 
@@ -100,6 +123,10 @@ export async function openPaddleCheckout(options: CheckoutOptions): Promise<bool
   // If Paddle SDK is loaded and we have a valid priceId, open native Paddle Checkout overlay
   if (paddle && priceId.trim()) {
     try {
+      activeCheckoutCallbacks = {
+        onSuccess: options.onSuccess,
+        onClose: options.onClose,
+      };
       paddle.Checkout.open({
         items: [{ priceId: priceId.trim(), quantity: 1 }],
         customer: options.userEmail ? { email: options.userEmail } : undefined,
@@ -111,6 +138,7 @@ export async function openPaddleCheckout(options: CheckoutOptions): Promise<bool
       });
       return true;
     } catch (err) {
+      activeCheckoutCallbacks = null;
       console.error("Paddle checkout open error:", err);
       options.onError?.(err instanceof Error ? err : new Error(String(err)));
       return false;

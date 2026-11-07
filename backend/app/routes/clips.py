@@ -1,8 +1,11 @@
 import json
 import logging
+import os
 import shutil
+import sys
 import tempfile
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -13,11 +16,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from app.services.caption_styles import ANIMATIONS, CAPTION_STYLES, STYLE_ALIASES
 from app.services.ai_developer_mode import get_ai_developer_status
+from app.services.caption_styles import ANIMATIONS, CAPTION_STYLES, STYLE_ALIASES
 from app.services.clip_generator import generate_clips, render_single_clip
-from app.services.project_manager import get_clips_directory, get_project_directory
 from app.services.process_utils import get_no_window_subprocess_kwargs
+from app.services.project_manager import get_clips_directory, get_project_directory
 from app.services.video_editor import (
     ClipGenerationCancelled,
     VideoEditorError,
@@ -42,6 +45,62 @@ GENERATION_JOBS: dict[str, dict[str, Any]] = {}
 CANCEL_EVENTS: dict[str, threading.Event] = {}
 JOBS_LOCK = threading.Lock()
 MAX_COMPLETED_JOBS = 50
+_JOB_SEQ = 0
+
+
+def _snapshot_job(job: dict[str, Any]) -> dict[str, Any]:
+    snap = dict(job)
+    if "ready_clips" in snap and isinstance(snap["ready_clips"], list):
+        snap["ready_clips"] = list(snap["ready_clips"])
+    if "clips" in snap and isinstance(snap["clips"], list):
+        snap["clips"] = list(snap["clips"])
+    return snap
+
+
+def _clip_version_token(path: Path) -> str:
+    try:
+        st = path.stat()
+        return f"{st.st_mtime_ns}_{st.st_size}"
+    except OSError:
+        return str(int(time.time() * 1000))
+
+
+def _validate_clip_stem(clip_id: str) -> str:
+    raw = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
+    if (
+        not raw
+        or raw in {".", ".."}
+        or "/" in raw
+        or "\\" in raw
+        or ".." in raw
+        or Path(raw).name != raw
+        or any(ch in raw for ch in "*?[]:<>|\"")
+    ):
+        raise HTTPException(status_code=400, detail="Invalid clip identifier")
+    return raw
+
+
+def _validate_render_options(
+    framing_mode: str | None,
+    caption_style: str | None,
+    caption_animation: str | None,
+) -> None:
+    if framing_mode is not None and framing_mode not in {"standard", "square_rounded", "true_9_16"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Framing mode must be 'standard', 'square_rounded', or 'true_9_16'",
+        )
+    allowed_styles = set(CAPTION_STYLES.keys()).union(STYLE_ALIASES.keys())
+    if caption_style is not None and caption_style not in allowed_styles:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Caption style must be one of: {sorted(allowed_styles)}",
+        )
+    if caption_animation is not None and caption_animation not in ANIMATIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Caption animation must be one of: {sorted(ANIMATIONS.keys())}",
+        )
 
 
 def evict_old_generation_jobs() -> None:
@@ -55,10 +114,84 @@ def evict_old_generation_jobs() -> None:
             CANCEL_EVENTS.pop(key, None)
 
 
+def _ask_save_path_dialog_windows(default_filename: str, file_type: str = "mp4") -> Path | None:
+    import ctypes
+    from ctypes import wintypes
+
+    class OPENFILENAMEW(ctypes.Structure):
+        _fields_ = [
+            ("lStructSize", wintypes.DWORD),
+            ("hwndOwner", wintypes.HWND),
+            ("hInstance", wintypes.HINSTANCE),
+            ("lpstrFilter", wintypes.LPCWSTR),
+            ("lpstrCustomFilter", wintypes.LPWSTR),
+            ("nMaxCustFilter", wintypes.DWORD),
+            ("nFilterIndex", wintypes.DWORD),
+            ("lpstrFile", wintypes.LPWSTR),
+            ("nMaxFile", wintypes.DWORD),
+            ("lpstrFileTitle", wintypes.LPWSTR),
+            ("nMaxFileTitle", wintypes.DWORD),
+            ("lpstrInitialDir", wintypes.LPCWSTR),
+            ("lpstrTitle", wintypes.LPCWSTR),
+            ("Flags", wintypes.DWORD),
+            ("nFileOffset", wintypes.WORD),
+            ("nFileExtension", wintypes.WORD),
+            ("lpstrDefExt", wintypes.LPCWSTR),
+            ("lCustData", wintypes.LPARAM),
+            ("lpfnHook", ctypes.c_void_p),
+            ("lpTemplateName", wintypes.LPCWSTR),
+            ("pvReserved", ctypes.c_void_p),
+            ("dwReserved", wintypes.DWORD),
+            ("FlagsEx", wintypes.DWORD),
+        ]
+
+    safe_default = Path(default_filename).name or ("clips.zip" if file_type == "zip" else "clip.mp4")
+    file_buffer = ctypes.create_unicode_buffer(safe_default, 4096)
+    if file_type == "zip":
+        filter_str = "ZIP Archive (*.zip)\0*.zip\0All Files (*.*)\0*.*\0\0"
+        def_ext = "zip"
+    else:
+        filter_str = "MP4 Video (*.mp4)\0*.mp4\0All Files (*.*)\0*.*\0\0"
+        def_ext = "mp4"
+
+    OFN_OVERWRITEPROMPT = 0x00000002
+    OFN_NOCHANGEDIR = 0x00000008
+    OFN_PATHMUSTEXIST = 0x00000800
+    OFN_EXPLORER = 0x00080000
+
+    ofn = OPENFILENAMEW()
+    ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)
+    try:
+        ofn.hwndOwner = ctypes.windll.user32.GetForegroundWindow()
+    except Exception:
+        ofn.hwndOwner = None
+    ofn.lpstrFilter = filter_str
+    ofn.nFilterIndex = 1
+    ofn.lpstrFile = ctypes.cast(file_buffer, wintypes.LPWSTR)
+    ofn.nMaxFile = len(file_buffer)
+    ofn.lpstrTitle = "Save As"
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | OFN_EXPLORER
+    ofn.lpstrDefExt = def_ext
+
+    get_save_file_name = ctypes.windll.comdlg32.GetSaveFileNameW
+    get_save_file_name.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
+    get_save_file_name.restype = wintypes.BOOL
+
+    if get_save_file_name(ctypes.byref(ofn)):
+        chosen = file_buffer.value.strip()
+        return Path(chosen) if chosen else None
+    return None
+
+
 def ask_save_path_dialog(default_filename: str, file_type: str = "mp4") -> Path | None:
     try:
+        if os.name == "nt":
+            return _ask_save_path_dialog_windows(default_filename, file_type=file_type)
+
+        if getattr(sys, "frozen", False):
+            return None
+
         import subprocess
-        import sys
 
         script = (
             "import tkinter as tk, sys\n"
@@ -109,25 +242,31 @@ def finish_cancelled_job(job_id: str, project_id: str) -> None:
                 partial_clip.unlink()
             except OSError:
                 pass
+    except FileNotFoundError:
+        pass
     except OSError as error:
         logger.exception("Could not remove generated clips after cancelling project %s", project_id)
         with JOBS_LOCK:
-            GENERATION_JOBS[job_id].update({
-                "status": "failed",
-                "step": "Cancellation cleanup failed",
-                "error": str(error) or error.__class__.__name__,
-                "ready_clips": [],
-                "completed_clips": 0,
-            })
+            job = GENERATION_JOBS.get(job_id)
+            if job is not None:
+                job.update({
+                    "status": "failed",
+                    "step": "Cancellation cleanup failed",
+                    "error": str(error) or error.__class__.__name__,
+                    "ready_clips": [],
+                    "completed_clips": 0,
+                })
             CANCEL_EVENTS.pop(job_id, None)
         return
     with JOBS_LOCK:
-        GENERATION_JOBS[job_id].update({
-            "status": "cancelled",
-            "step": "Cancelled; generated clips removed",
-            "ready_clips": [],
-            "completed_clips": 0,
-        })
+        job = GENERATION_JOBS.get(job_id)
+        if job is not None:
+            job.update({
+                "status": "cancelled",
+                "step": "Cancelled; generated clips removed",
+                "ready_clips": [],
+                "completed_clips": 0,
+            })
         CANCEL_EVENTS.pop(job_id, None)
         evict_old_generation_jobs()
 
@@ -162,24 +301,11 @@ def generate_project_clips(
             status_code=422,
             detail="Clip count must be at least 1",
         )
-    if framing_mode is not None and framing_mode not in {"standard", "square_rounded", "true_9_16"}:
-        raise HTTPException(
-            status_code=422,
-            detail="Framing mode must be 'standard', 'square_rounded', or 'true_9_16'",
-        )
-    allowed_styles = set(CAPTION_STYLES.keys()).union(STYLE_ALIASES.keys())
-    if caption_style is not None and caption_style not in allowed_styles:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Caption style must be one of: {sorted(allowed_styles)}",
-        )
-    if caption_animation is not None and caption_animation not in ANIMATIONS:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Caption animation must be one of: {sorted(ANIMATIONS.keys())}",
-        )
+    _validate_render_options(framing_mode, caption_style, caption_animation)
+
     project_directory = project_or_404(project_id)
     job_id = uuid.uuid4().hex
+    global _JOB_SEQ
     with JOBS_LOCK:
         active_job = next(
             (
@@ -195,6 +321,7 @@ def generate_project_clips(
                 detail="Clip generation is already running for this project",
             )
         evict_old_generation_jobs()
+        _JOB_SEQ += 1
         cancel_event = threading.Event()
         GENERATION_JOBS[job_id] = {
             "job_id": job_id,
@@ -205,6 +332,8 @@ def generate_project_clips(
             "completed_clips": 0,
             "total_clips": 0,
             "ready_clips": [],
+            "created_seq": _JOB_SEQ,
+            "created_at": time.monotonic(),
         }
         CANCEL_EVENTS[job_id] = cancel_event
 
@@ -314,13 +443,15 @@ def run_clip_generation(
             return
         logger.exception("Clip generation failed for project %s", project_id)
         with JOBS_LOCK:
-            GENERATION_JOBS[job_id].update({
-                "status": "failed",
-                "step": "Clip generation failed",
-                "error": str(error) or error.__class__.__name__,
-                "ready_clips": [],
-                "completed_clips": 0,
-            })
+            job = GENERATION_JOBS.get(job_id)
+            if job is not None:
+                job.update({
+                    "status": "failed",
+                    "step": "Clip generation failed",
+                    "error": str(error) or error.__class__.__name__,
+                    "ready_clips": [],
+                    "completed_clips": 0,
+                })
             CANCEL_EVENTS.pop(job_id, None)
             evict_old_generation_jobs()
         return
@@ -330,15 +461,17 @@ def run_clip_generation(
             was_cancelled = True
         else:
             was_cancelled = False
-            GENERATION_JOBS[job_id].update({
-                "status": "completed",
-                "step": "Complete",
-                "progress": 100,
-                "completed_clips": len(clips),
-                "total_clips": len(clips),
-                "clips": clips,
-                "ready_clips": clips,
-            })
+            job = GENERATION_JOBS.get(job_id)
+            if job is not None:
+                job.update({
+                    "status": "completed",
+                    "step": "Complete",
+                    "progress": 100,
+                    "completed_clips": len(clips),
+                    "total_clips": len(clips),
+                    "clips": clips,
+                    "ready_clips": clips,
+                })
             CANCEL_EVENTS.pop(job_id, None)
             evict_old_generation_jobs()
     if was_cancelled:
@@ -352,7 +485,7 @@ def get_clip_generation_job(project_id: str, job_id: str) -> dict[str, Any]:
         job = GENERATION_JOBS.get(job_id)
         if job is None or job["project_id"] != project_id:
             raise HTTPException(status_code=404, detail="Clip generation job not found")
-        return dict(job)
+        return _snapshot_job(job)
 
 
 @router.post("/{project_id}/generation-jobs/{job_id}/cancel")
@@ -363,7 +496,7 @@ def cancel_clip_generation(project_id: str, job_id: str) -> dict[str, Any]:
         if job is None or job["project_id"] != project_id:
             raise HTTPException(status_code=404, detail="Clip generation job not found")
         if job["status"] not in {"queued", "processing", "cancelling"}:
-            return dict(job)
+            return _snapshot_job(job)
         cancel_event = CANCEL_EVENTS.get(job_id)
         if cancel_event is None:
             raise HTTPException(status_code=409, detail="Clip generation can no longer be cancelled")
@@ -372,7 +505,7 @@ def cancel_clip_generation(project_id: str, job_id: str) -> dict[str, Any]:
             "status": "cancelling",
             "step": "Cancelling and removing generated clips",
         })
-        return dict(job)
+        return _snapshot_job(job)
 
 
 @router.get("/{project_id}/generation-jobs")
@@ -383,8 +516,18 @@ def get_latest_clip_generation_job(project_id: str) -> dict[str, Any]:
             job for job in GENERATION_JOBS.values()
             if job["project_id"] == project_id
         ]
-        job = max(project_jobs, key=lambda item: item["job_id"], default=None)
-        return {"job": dict(job) if job is not None else None}
+        if not project_jobs:
+            return {"job": None}
+        latest_idx, latest_job = max(
+            enumerate(project_jobs),
+            key=lambda pair: (
+                int(pair[1].get("created_seq", 0)),
+                float(pair[1].get("created_at", 0.0)),
+                pair[0],
+            ),
+        )
+        _ = latest_idx
+        return {"job": _snapshot_job(latest_job)}
 
 
 @router.get("/{project_id}/clips")
@@ -397,14 +540,16 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
     framing_mode = "standard"
     caption_style = "classic"
     caption_animation = None
+    face_tracking = True
     if analysis_path.is_file():
         try:
             analysis_data = json.loads(analysis_path.read_text(encoding="utf-8"))
-            analysis_clips = {clip["id"]: clip for clip in analysis_data.get("clips", [])}
-            generation_options = analysis_data.get("generation_options", {})
+            analysis_clips = {clip["id"]: clip for clip in analysis_data.get("clips", []) if isinstance(clip, dict) and "id" in clip}
+            generation_options = analysis_data.get("generation_options", {}) if isinstance(analysis_data.get("generation_options"), dict) else {}
             framing_mode = generation_options.get("framing_mode", "standard")
             caption_style = generation_options.get("caption_style", "classic")
             caption_animation = generation_options.get("caption_animation")
+            face_tracking = bool(generation_options.get("face_tracking", True))
         except json.JSONDecodeError:
             analysis_clips = {}
 
@@ -420,20 +565,43 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "id": path.stem,
             "duration": round(end - start, 3),
             "file": path.name,
+            "v": _clip_version_token(path),
             "top_line": metadata.get("top_line", ""),
             "framing_mode": metadata.get("framing_mode", framing_mode),
             "caption_style": metadata.get("caption_style", caption_style),
             "caption_animation": metadata.get("caption_animation", caption_animation),
+            "face_tracking": bool(metadata.get("face_tracking", face_tracking)),
             "status": "ready",
         })
+
     source_duration = 0.0
-    source_files = list(project_directory.glob("source.*"))
-    if source_files:
-        try:
-            from app.services.video_editor import probe_video_duration
-            source_duration = probe_video_duration(source_files[0])
-        except Exception:
-            source_duration = 0.0
+    for meta_candidate in (
+        project_directory / "metadata.json",
+        project_directory / "transcription" / "transcript.json",
+        project_directory / "transcript.json",
+    ):
+        if meta_candidate.is_file():
+            try:
+                meta_obj = json.loads(meta_candidate.read_text(encoding="utf-8"))
+                if isinstance(meta_obj, dict):
+                    dur_val = float(meta_obj.get("duration", 0.0) or 0.0)
+                    if dur_val > 0:
+                        source_duration = dur_val
+                        break
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+
+    if source_duration <= 0:
+        source_files = [
+            p for p in project_directory.glob("source.*")
+            if p.is_file() and not p.name.lower().endswith((".part", ".ytdl", ".json", ".txt", ".tmp"))
+        ]
+        if source_files:
+            try:
+                from app.services.video_editor import probe_video_duration
+                source_duration = probe_video_duration(source_files[0])
+            except Exception:
+                source_duration = 0.0
 
     return {
         "clips": clips,
@@ -449,7 +617,8 @@ def update_clip_top_line(
     payload: TopLineRequest,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
-    raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
+    raw_clip_id = _validate_clip_stem(clip_id)
+    _validate_render_options(payload.framing_mode, payload.caption_style, payload.caption_animation)
     try:
         updated_clip = render_single_clip(
             project_directory=project_directory,
@@ -483,7 +652,8 @@ def delete_clip_top_line(
     face_tracking: bool | None = None,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
-    raw_clip_id = clip_id[:-4] if clip_id.endswith(".mp4") else clip_id
+    raw_clip_id = _validate_clip_stem(clip_id)
+    _validate_render_options(framing_mode, caption_style, caption_animation)
     try:
         updated_clip = render_single_clip(
             project_directory=project_directory,
@@ -535,21 +705,26 @@ def serve_clip(project_id: str, clip_id: str, download: bool = False) -> FileRes
     project_or_404(project_id)
     if not clip_id.endswith(".mp4") or Path(clip_id).name != clip_id:
         raise HTTPException(status_code=400, detail="Invalid clip filename")
+    _validate_clip_stem(clip_id)
     clip_path = get_clips_directory(project_id) / clip_id
     if not clip_path.is_file():
         raise HTTPException(status_code=404, detail="Clip not found")
+    response_headers = {"Cache-Control": "no-cache"}
+    if not download:
+        response_headers["Content-Disposition"] = f'inline; filename="{clip_path.name}"'
     return FileResponse(
         clip_path,
         media_type="video/mp4",
         filename=clip_path.name if download else None,
-        headers={} if download else {"Content-Disposition": f'inline; filename="{clip_path.name}"'},
+        headers=response_headers,
     )
 
 
 @router.post("/{project_id}/clips/{clip_id}/save-dialog")
 def export_clip_with_dialog(project_id: str, clip_id: str) -> dict[str, Any]:
-    project_directory = project_or_404(project_id)
-    raw_clip_id = clip_id if clip_id.endswith(".mp4") else f"{clip_id}.mp4"
+    project_or_404(project_id)
+    stem = _validate_clip_stem(clip_id)
+    raw_clip_id = f"{stem}.mp4"
     clip_path = get_clips_directory(project_id) / raw_clip_id
     if not clip_path.is_file():
         raise HTTPException(status_code=404, detail="Clip not found")
@@ -568,7 +743,7 @@ def export_clip_with_dialog(project_id: str, clip_id: str) -> dict[str, Any]:
 
 @router.post("/{project_id}/clips/download-all-dialog")
 def export_all_clips_with_dialog(project_id: str) -> dict[str, Any]:
-    project_directory = project_or_404(project_id)
+    project_or_404(project_id)
     clip_paths = [p for p in sorted(get_clips_directory(project_id).glob("*.mp4")) if not p.name.startswith(".")]
     if not clip_paths:
         raise HTTPException(status_code=404, detail="No clips are available to download")

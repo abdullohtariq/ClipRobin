@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
+  CaptionStyle,
   getYouTubeStatus,
   saveYouTubeConfig,
   getYouTubeAuthUrl,
@@ -39,7 +40,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export default function SettingsPage() {
   const { status: aiDevStatus, refresh: refreshAiStatus } = useAIDeveloperStatus();
-  const { isPro, openUpgradeModal, upgradeToPro, downgradeToFree, licenseKey } = useSubscription();
+  const { isPro, openUpgradeModal, upgradeToPro, downgradeToFree, licenseKey, isCaptionStyleAllowed } = useSubscription();
   const [settingsLicenseInput, setSettingsLicenseInput] = useState("");
   const [settingsLicenseMsg, setSettingsLicenseMsg] = useState<string | null>(null);
   const [isPaddleModalOpen, setIsPaddleModalOpen] = useState(false);
@@ -152,7 +153,14 @@ export default function SettingsPage() {
       const { auth_url } = await getYouTubeAuthUrl();
       const popup = window.open(auth_url, "cliprobin_yt_oauth", "width=600,height=700");
       if (ytPollRef.current) clearInterval(ytPollRef.current);
+      let pollTicks = 0;
       ytPollRef.current = setInterval(async () => {
+        pollTicks += 1;
+        if (pollTicks > 200) {
+          setYtConnecting(false);
+          if (ytPollRef.current) clearInterval(ytPollRef.current);
+          return;
+        }
         try {
           const s = await getYouTubeStatus();
           if (s.authenticated) {
@@ -188,19 +196,40 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
-      const parsed = stored ? JSON.parse(stored) : {};
-      const activeStyle = localStorage.getItem("cliprobin_caption_style");
-      setSettings({
-        ...DEFAULT_SETTINGS,
-        ...parsed,
-        defaultCaptionStyle: parsed.defaultCaptionStyle || activeStyle || DEFAULT_SETTINGS.defaultCaptionStyle,
-      });
-    } catch {
-      // Ignore JSON parse errors
-    }
-  }, []);
+    const normalizeStyle = (raw?: string | null): CaptionStyle => {
+      if (raw === "bold_emerald") return "robin";
+      if (raw === "clean_gold") return "clean";
+      if (raw && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(raw)) {
+        return raw as CaptionStyle;
+      }
+      return "classic";
+    };
+
+    const syncFromStorage = () => {
+      try {
+        const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
+        const parsed = stored ? JSON.parse(stored) : {};
+        const activeStyle = localStorage.getItem("cliprobin_caption_style");
+        const candidate = normalizeStyle(parsed.defaultCaptionStyle || activeStyle);
+        const safeStyle = isCaptionStyleAllowed(candidate) ? candidate : "classic";
+        const nextSettings: AppSettings = {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          defaultCaptionStyle: safeStyle,
+        };
+        setSettings(nextSettings);
+        if (parsed.defaultCaptionStyle && parsed.defaultCaptionStyle !== safeStyle) {
+          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextSettings));
+        }
+      } catch {
+        // Ignore JSON parse errors
+      }
+    };
+
+    syncFromStorage();
+    window.addEventListener("cliprobin:subscription-changed", syncFromStorage);
+    return () => window.removeEventListener("cliprobin:subscription-changed", syncFromStorage);
+  }, [isCaptionStyleAllowed]);
 
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     setSettings((prev) => {
@@ -438,15 +467,22 @@ export default function SettingsPage() {
               <select
                 id="settings-caption-style-select"
                 value={defaultCaptionStyle}
-                onChange={(e) => updateSetting("defaultCaptionStyle", e.target.value)}
+                onChange={(e) => {
+                  const nextVal = e.target.value as CaptionStyle;
+                  if (!isCaptionStyleAllowed(nextVal)) {
+                    openUpgradeModal("Pro Subtitle Styles");
+                    return;
+                  }
+                  updateSetting("defaultCaptionStyle", nextVal);
+                }}
                 className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
               >
                 <option value="classic">Classic (Original Clip Robin word-by-word)</option>
-                <option value="robin">Robin (Signature viral all-caps)</option>
-                <option value="punch">Punch (High-impact Anton all-caps)</option>
                 <option value="clean">Clean (Minimalist Montserrat Bold)</option>
-                <option value="pill">Pill (Translucent dark box)</option>
-                <option value="karaoke">Karaoke (Smooth sweep fill)</option>
+                <option value="robin">{isPro ? "Robin (Signature viral all-caps)" : "Robin (Signature viral all-caps) — PRO"}</option>
+                <option value="punch">{isPro ? "Punch (High-impact Anton all-caps)" : "Punch (High-impact Anton all-caps) — PRO"}</option>
+                <option value="pill">{isPro ? "Pill (Translucent dark box)" : "Pill (Translucent dark box) — PRO"}</option>
+                <option value="karaoke">{isPro ? "Karaoke (Smooth sweep fill)" : "Karaoke (Smooth sweep fill) — PRO"}</option>
               </select>
             </div>
           </section>
@@ -464,7 +500,7 @@ export default function SettingsPage() {
             </div>
 
             <p className="text-xs text-zinc-400">
-              Gemini finds clip moments from your transcript. Developer Mode unlocks AI clip generation only while YouTube is connected. The Gemini key stays on this computer and is used by the backend.
+              Gemini finds high-engagement clip moments from your transcript. Your Gemini API key stays on this computer and is used locally by the backend.
             </p>
 
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -475,9 +511,9 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                <div className="text-zinc-500">YouTube account</div>
-                <div className={aiDevStatus?.youtube_authenticated ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-zinc-300"}>
-                  {aiDevStatus?.youtube_authenticated ? "Connected" : "Sign in required"}
+                <div className="text-zinc-500">AI Hook Finder</div>
+                <div className={aiDevStatus?.ai_enabled ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-zinc-300"}>
+                  {aiDevStatus?.ai_enabled ? "Active & Ready" : "Disabled"}
                 </div>
               </div>
             </div>
@@ -505,7 +541,7 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={handleDeveloperModeToggle}
-                  disabled={developerModeSaving || (!aiDevStatus?.developer_mode && (!aiDevStatus?.gemini_configured || !aiDevStatus?.youtube_authenticated))}
+                  disabled={developerModeSaving || (!aiDevStatus?.developer_mode && !aiDevStatus?.gemini_configured)}
                   className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${aiDevStatus?.developer_mode ? "border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200" : "border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300"}`}
                 >
                   {developerModeSaving ? "Updating..." : aiDevStatus?.developer_mode ? "Disable Developer Mode" : "Enable Developer Mode"}
@@ -514,8 +550,8 @@ export default function SettingsPage() {
             </form>
 
             {aiSettingsError && <p role="alert" className="text-xs text-rose-400">{aiSettingsError}</p>}
-            {!aiSettingsError && !aiDevStatus?.ai_enabled && <p className="text-xs text-amber-300/90">{aiDevStatus?.reason || "Checking Gemini and YouTube status..."}</p>}
-            {aiDevStatus?.ai_enabled && <p className="text-xs text-emerald-300">AI generation is unlocked. The AI option will be available in clip settings.</p>}
+            {!aiSettingsError && !aiDevStatus?.ai_enabled && <p className="text-xs text-amber-300/90">{aiDevStatus?.reason || "Checking Gemini status..."}</p>}
+            {aiDevStatus?.ai_enabled && <p className="text-xs text-emerald-300">AI generation is unlocked. The AI Hook Finder option is available in clip settings.</p>}
           </section>
 
           {/* YouTube Integration Section */}

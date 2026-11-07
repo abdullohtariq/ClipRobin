@@ -3,7 +3,8 @@
  */
 
 // Characters forbidden in filenames across Windows, macOS, and Linux
-const ILLEGAL_CHARS_REGEX = /[/\\:*?"<>|]/g;
+const ILLEGAL_CHARS_REPLACE_REGEX = /[/\\:*?"<>|]/g;
+const ILLEGAL_CHARS_TEST_REGEX = /[/\\:*?"<>|]/;
 
 /**
  * Strips file extensions, removes illegal filename characters,
@@ -19,7 +20,7 @@ export function sanitizeProjectName(
   let clean = rawName.replace(/\.(mp4|mov|mkv|webm|avi|m4v|flv|wmv)$/i, "");
 
   // 2. Strip characters illegal in filesystem names
-  clean = clean.replace(ILLEGAL_CHARS_REGEX, " ");
+  clean = clean.replace(ILLEGAL_CHARS_REPLACE_REGEX, " ");
 
   // 3. Normalize whitespace (collapse multiple spaces to single)
   clean = clean.replace(/\s+/g, " ").trim();
@@ -34,11 +35,11 @@ export function sanitizeProjectName(
   }
 
   // 6. Deduplicate against existing project names (case-insensitive)
-  const normalizedExisting = existingNames.map((n) => n.toLowerCase().trim());
+  const normalizedExisting = new Set(existingNames.map((n) => n.toLowerCase().trim()));
   let candidate = clean;
   let counter = 2;
 
-  while (normalizedExisting.includes(candidate.toLowerCase().trim())) {
+  while (normalizedExisting.has(candidate.toLowerCase().trim())) {
     const suffix = ` (${counter})`;
     const maxBaseLen = MAX_LEN - suffix.length;
     const base = clean.length > maxBaseLen ? clean.slice(0, maxBaseLen).trim() : clean;
@@ -57,7 +58,7 @@ export function validateProjectName(name: string): { valid: boolean; error?: str
   if (!trimmed) {
     return { valid: false, error: "Project name cannot be empty." };
   }
-  if (ILLEGAL_CHARS_REGEX.test(trimmed)) {
+  if (ILLEGAL_CHARS_TEST_REGEX.test(trimmed)) {
     return {
       valid: false,
       error: 'Project name cannot contain illegal characters: / \\ : * ? " < > |',
@@ -68,4 +69,3 @@ export function validateProjectName(name: string): { valid: boolean; error?: str
   }
   return { valid: true };
 }
-

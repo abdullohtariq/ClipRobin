@@ -1,8 +1,10 @@
+import json
 import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
 
 def get_projects_dir() -> Path:
     return Path(
@@ -20,7 +22,17 @@ PROJECT_ID_PATTERN = re.compile(r"^project_\d+$")
 def create_project() -> tuple[str, Path]:
     projects_dir = get_projects_dir()
     projects_dir.mkdir(parents=True, exist_ok=True)
-    number = 1
+    max_num = 0
+    try:
+        with os.scandir(projects_dir) as entries:
+            for entry in entries:
+                if entry.is_dir() and entry.name.startswith("project_"):
+                    suffix = entry.name[len("project_"):]
+                    if suffix.isdigit():
+                        max_num = max(max_num, int(suffix))
+    except OSError:
+        pass
+    number = max_num + 1
     while True:
         project_id = f"project_{number:03d}"
         directory = projects_dir / project_id
@@ -54,15 +66,25 @@ def list_projects() -> list[dict[str, Any]]:
     for directory in sorted(projects_dir.glob("project_*")):
         if not directory.is_dir() or not PROJECT_ID_PATTERN.fullmatch(directory.name):
             continue
-        source_files = list(directory.glob("source.*"))
-        clips = list((directory / "clips").glob("*.mp4")) if (directory / "clips").is_dir() else []
+        source_files = [
+            p for p in directory.glob("source.*")
+            if p.is_file() and not p.name.endswith((".part", ".ytdl", ".tmp"))
+        ]
+        clips = (
+            [p for p in (directory / "clips").glob("*.mp4") if not p.name.startswith(".")]
+            if (directory / "clips").is_dir()
+            else []
+        )
         meta_file = directory / "metadata.json"
         title = None
+        source_type = None
         if meta_file.is_file():
             try:
-                import json
                 with open(meta_file, "r", encoding="utf-8") as f:
-                    title = json.load(f).get("title")
+                    meta = json.load(f)
+                    if isinstance(meta, dict):
+                        title = meta.get("title")
+                        source_type = meta.get("source_type")
             except Exception:
                 pass
         projects.append({
@@ -71,7 +93,7 @@ def list_projects() -> list[dict[str, Any]]:
             "created_at": datetime.fromtimestamp(
                 directory.stat().st_ctime, tz=timezone.utc
             ).isoformat(),
-            "source_type": "Local Video" if source_files else "Unknown",
+            "source_type": source_type or ("Local Video" if source_files else "Unknown"),
             "clips": len(clips),
             "status": "Ready" if clips else "Created",
         })

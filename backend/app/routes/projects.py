@@ -1,14 +1,21 @@
+import json
 import os
 import shutil
+import threading
 import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from app.routes.clips import CANCEL_EVENTS, GENERATION_JOBS, JOBS_LOCK as CLIPS_LOCK
-from app.routes.download import DOWNLOAD_JOBS, DOWNLOAD_JOBS_LOCK
-from app.routes.local_video import JOBS_LOCK as TRANSCRIPTION_LOCK, TRANSCRIPTION_JOBS
+from app.routes.download import DOWNLOAD_CANCEL_EVENTS, DOWNLOAD_JOBS, DOWNLOAD_JOBS_LOCK
+from app.routes.local_video import (
+    JOBS_LOCK as TRANSCRIPTION_LOCK,
+    TRANSCRIPTION_CANCEL_EVENTS,
+    TRANSCRIPTION_JOBS,
+)
 from app.services.project_manager import get_project_directory, list_projects
 
 router = APIRouter(prefix="/api/projects")
@@ -26,6 +33,9 @@ def _cancel_active_jobs(project_id: str) -> None:
 
     # 2. Cancel transcription jobs
     with TRANSCRIPTION_LOCK:
+        t_event = TRANSCRIPTION_CANCEL_EVENTS.get(project_id)
+        if t_event:
+            t_event.set()
         if project_id in TRANSCRIPTION_JOBS:
             TRANSCRIPTION_JOBS[project_id].update({
                 "status": "cancelled",
@@ -34,6 +44,9 @@ def _cancel_active_jobs(project_id: str) -> None:
 
     # 3. Cancel download jobs
     with DOWNLOAD_JOBS_LOCK:
+        d_event = DOWNLOAD_CANCEL_EVENTS.get(project_id)
+        if d_event:
+            d_event.set()
         if project_id in DOWNLOAD_JOBS:
             DOWNLOAD_JOBS[project_id].update({
                 "status": "cancelled",
@@ -79,9 +92,6 @@ def delete_project(project_id: str) -> Response:
     return Response(status_code=204)
 
 
-from pydantic import BaseModel
-import json
-
 class UpdateProjectPayload(BaseModel):
     title: str
 
@@ -96,14 +106,22 @@ def update_project(project_id: str, payload: UpdateProjectPayload) -> dict[str, 
         raise HTTPException(status_code=404, detail=str(error)) from error
 
     meta_file = project_directory / "metadata.json"
-    meta = {}
+    meta: dict[str, Any] = {}
     if meta_file.is_file():
         try:
             with open(meta_file, "r", encoding="utf-8") as f:
-                meta = json.load(f)
+                loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    meta = loaded
         except Exception:
-            pass
-    meta["title"] = payload.title.strip()
-    with open(meta_file, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2)
-    return {"project_id": project_id, "title": payload.title.strip()}
+            meta = {}
+    cleaned_title = payload.title.strip()
+    meta["title"] = cleaned_title
+    tmp = meta_file.with_name(f".metadata.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        os.replace(tmp, meta_file)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return {"project_id": project_id, "title": cleaned_title}

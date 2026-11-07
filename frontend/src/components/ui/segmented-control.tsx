@@ -43,7 +43,7 @@ export function SegmentedControl<T extends string | number>({
     >
       {options.map((option) => {
         const isSelected = value === option.value;
-        const isDisabled = disabled || option.disabled;
+        const isDisabled = Boolean(disabled || option.disabled);
 
         return (
           <button
@@ -51,6 +51,7 @@ export function SegmentedControl<T extends string | number>({
             type="button"
             role="radio"
             aria-checked={isSelected}
+            aria-disabled={isDisabled}
             disabled={isDisabled}
             title={option.tooltip}
             onClick={() => {
@@ -59,8 +60,10 @@ export function SegmentedControl<T extends string | number>({
             className={`relative flex flex-col items-center justify-center rounded-lg font-medium transition-all duration-150 tabular-nums focus-ring ${heightClass} ${
               isSelected
                 ? "border border-zinc-700 bg-zinc-800 text-white font-semibold shadow-sm"
-                : "border border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
-            } ${isDisabled ? "cursor-not-allowed opacity-45 pointer-events-none" : "cursor-pointer"}`}
+                : isDisabled
+                  ? "border border-transparent text-zinc-400"
+                  : "border border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40"
+            } ${isDisabled ? "cursor-not-allowed opacity-45" : "cursor-pointer"}`}
           >
             <span className="flex items-center gap-1.5 leading-none">
               <span>{option.label}</span>

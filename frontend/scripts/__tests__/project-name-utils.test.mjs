@@ -1,5 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const sourceTsPath = path.resolve(__dirname, "../../src/lib/project-name-utils.ts");
+const sourceTs = fs.readFileSync(sourceTsPath, "utf8");
 
 function sanitizeProjectName(rawName, existingNames = []) {
   if (!rawName) return "Untitled Project";
@@ -11,10 +18,10 @@ function sanitizeProjectName(rawName, existingNames = []) {
   if (clean.length > MAX_LEN) {
     clean = clean.slice(0, MAX_LEN).trim();
   }
-  const normalizedExisting = existingNames.map((n) => n.toLowerCase().trim());
+  const normalizedExisting = new Set(existingNames.map((n) => n.toLowerCase().trim()));
   let candidate = clean;
   let counter = 2;
-  while (normalizedExisting.includes(candidate.toLowerCase().trim())) {
+  while (normalizedExisting.has(candidate.toLowerCase().trim())) {
     const suffix = ` (${counter})`;
     const maxBaseLen = MAX_LEN - suffix.length;
     const base = clean.length > maxBaseLen ? clean.slice(0, maxBaseLen).trim() : clean;
@@ -22,6 +29,25 @@ function sanitizeProjectName(rawName, existingNames = []) {
     counter++;
   }
   return candidate;
+}
+
+const ILLEGAL_CHARS_TEST_REGEX = /[/\\:*?"<>|]/;
+
+function validateProjectName(name) {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    return { valid: false, error: "Project name cannot be empty." };
+  }
+  if (ILLEGAL_CHARS_TEST_REGEX.test(trimmed)) {
+    return {
+      valid: false,
+      error: 'Project name cannot contain illegal characters: / \\ : * ? " < > |',
+    };
+  }
+  if (trimmed.length > 60) {
+    return { valid: false, error: "Project name must be 60 characters or less." };
+  }
+  return { valid: true };
 }
 
 test("sanitizeProjectName strips extensions and illegal characters", () => {
@@ -41,3 +67,13 @@ test("sanitizeProjectName enforces max 60 length", () => {
   assert.equal(result.length, 60);
 });
 
+test("project-name-utils.ts uses stateless regex for validateProjectName.test()", () => {
+  assert.ok(
+    sourceTs.includes("ILLEGAL_CHARS_TEST_REGEX = /[/\\\\:*?\"<>|]/;"),
+    "validateProjectName must use a non-global regex so repeated .test() calls do not alternate"
+  );
+  for (let i = 0; i < 6; i++) {
+    assert.equal(validateProjectName("Bad:Name").valid, false);
+  }
+  assert.equal(validateProjectName("Clean Project Name").valid, true);
+});

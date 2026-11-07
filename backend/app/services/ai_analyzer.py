@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -39,9 +40,10 @@ SYSTEM_PROMPT = """You are an elite short-form video editor and viral hook speci
 
 CRITERIA FOR CHOOSING GREAT VIRAL CLIPS:
 1. Irresistible Hook: The first 3 to 5 seconds must immediately grab attention with a surprising statement, intriguing question, punchy claim, controversial take, or emotional high point. Avoid boring pleasantries ("hello everyone", "welcome back") and awkward pauses.
-2. High Retention & Value: The segment must be engaging throughout—delivering a key insight, shocking revelation, funny moment, or dramatic story. Every second counts.
-3. Natural & Complete Ending: Always verify where the clip ends and ensure it makes complete sense! The clip MUST NOT cut off mid-sentence, mid-word, or right before a punchline. End on a completed sentence with a satisfying takeaway, punchline, or clear resolution.
-4. Hook Quality & Viral Potential Rating: Rate each clip on viral potential from 1 to 10 (where 10 is an exceptional, viral-ready clip).
+2. Complete Context & Substantial Length: Every clip must be a self-contained story, framework, or argument with full context (setup, core insight, and payoff). NEVER pick a tiny 3 to 8 second isolated sentence fragment. Each clip should be at least 20 to 30 seconds long (or at least 50% of the requested target duration).
+3. Avoid Intro Teaser Montages: Long-form podcasts and videos often begin (in the first 0 to 90 seconds) with a rapid-fire highlight montage of disconnected 4-second soundbites. Do NOT select those brief intro teaser fragments—always locate and select the full, uninterrupted conversation later in the transcript where the topic is actually discussed in depth.
+4. Natural & Complete Ending: Always verify where the clip ends and ensure it makes complete sense! The clip MUST NOT cut off mid-sentence, mid-word, on a dangling preposition/conjunction ("on", "and", "but", "so"), or right before a punchline. End on a completed sentence with a satisfying takeaway, punchline, or clear resolution.
+5. Hook Quality & Viral Potential Rating: Rate each clip on viral potential from 1 to 10 (where 10 is an exceptional, viral-ready clip).
 
 For each clip, provide:
 - "id": A unique identifier (e.g. "clip_001")
@@ -78,7 +80,7 @@ def analyze_transcript(
     prompt = build_user_prompt(segments, max_clip_seconds=max_clip_seconds, max_clips=max_clips)
     raw_response = request_provider(selected_provider, prompt)
     analysis = parse_analysis(raw_response)
-    return validate_analysis(analysis, segments)
+    return validate_analysis(analysis, segments, max_clip_seconds=max_clip_seconds)
 
 
 def validate_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
@@ -89,6 +91,7 @@ def validate_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
     if not segments:
         raise AIAnalyzerError("Transcript must contain at least one segment")
 
+    normalized: list[dict[str, Any]] = []
     previous_end = -1.0
     for segment in segments:
         if not isinstance(segment, dict):
@@ -98,20 +101,21 @@ def validate_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
         text = segment.get("text")
         if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
             raise AIAnalyzerError("Transcript timestamps must be numbers")
-        if start < 0 or start >= end:
+        start_val = float(start)
+        end_val = float(end)
+        if start_val < 0 or start_val >= end_val:
             raise AIAnalyzerError("Transcript timestamps must be ordered and valid")
-        if start < previous_end:
-            # Clamp slight overlaps between consecutive speech segments
-            start = previous_end
-            if start >= end:
-                end = start + 0.05
-            segment["start"] = start
-            segment["end"] = end
+        if start_val < previous_end:
+            # Clamp slight overlaps between consecutive speech segments without mutating caller input
+            start_val = previous_end
+            if start_val >= end_val:
+                end_val = start_val + 0.05
         if not isinstance(text, str) or not text.strip():
             raise AIAnalyzerError("Transcript segment text must be non-empty")
-        previous_end = end
+        previous_end = end_val
+        normalized.append({**segment, "start": start_val, "end": end_val, "text": text})
 
-    return segments
+    return normalized
 
 
 def build_user_prompt(
@@ -125,7 +129,11 @@ def build_user_prompt(
     )
     constraints = []
     if max_clip_seconds is not None:
-        constraints.append(f"Each clip must be no longer than {max_clip_seconds} seconds.")
+        min_recommended = max(10, min(25, int(max_clip_seconds * 0.5)))
+        constraints.append(
+            f"Each clip must be between {min_recommended} and {max_clip_seconds} seconds long "
+            f"(no longer than {max_clip_seconds} seconds, with complete setup and conclusion context)."
+        )
     if max_clips is not None:
         constraints.append(f"Return no more than {max_clips} clips.")
     constraint_text = "\n".join(constraints)
@@ -173,68 +181,84 @@ def request_openai_compatible(config: dict[str, str], api_key: str, user_prompt:
         raise AIAnalyzerError("AI provider returned an unexpected response") from error
 
 
+def _extract_gemini_text(payload: dict[str, Any]) -> str:
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise KeyError("candidates")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    if not isinstance(parts, list) or not parts:
+        raise KeyError("parts")
+    for part in parts:
+        if isinstance(part, dict) and not part.get("thought") and isinstance(part.get("text"), str) and part["text"].strip():
+            return part["text"]
+    first_text = parts[0].get("text") if isinstance(parts[0], dict) else None
+    if isinstance(first_text, str):
+        return first_text
+    raise KeyError("text")
+
+
 def request_gemini(config: dict[str, str], api_key: str, user_prompt: str) -> str:
     primary_model = os.getenv(config["model_env"], config["default_model"])
     base_url = os.getenv(config["base_url_env"], config["default_base_url"])
 
     candidate_models = [primary_model]
-    for alt in ["gemini-3.1-flash-lite", "gemini-flash-lite-latest"]:
+    for alt in ["gemini-3.8-flash", "gemini-3.1-flash-lite"]:
         if alt not in candidate_models:
             candidate_models.append(alt)
 
     max_retries = 3
     last_error: Exception | None = None
 
-    for model_idx, model in enumerate(candidate_models):
-        for attempt in range(1, max_retries + 1):
-            try:
-                response = httpx.post(
-                    f"{base_url}/{model}:generateContent",
-                    params={"key": api_key},
-                    json={
-                        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-                        "contents": [{"parts": [{"text": user_prompt}]}],
-                        "generationConfig": {
-                            "temperature": 0.2,
-                            "responseMimeType": "application/json",
-                        },
-                    },
-                    timeout=120.0,
-                )
-                response.raise_for_status()
+    with httpx.Client(timeout=120.0) as client:
+        for model_idx, model in enumerate(candidate_models):
+            for attempt in range(1, max_retries + 1):
                 try:
-                    return response.json()["candidates"][0]["content"]["parts"][0]["text"]
-                except (KeyError, IndexError, TypeError) as error:
-                    raise AIAnalyzerError("AI provider returned an unexpected response") from error
-            except httpx.HTTPStatusError as error:
-                last_error = error
-                status = error.response.status_code
-                if status in {429, 500, 502, 503, 504} and attempt < max_retries:
-                    backoff = 1.5 * (2 ** (attempt - 1))
-                    logger.warning(
-                        "Gemini API returned status %d on model %s. Retrying in %.1fs (attempt %d/%d)...",
-                        status, model, backoff, attempt, max_retries
+                    response = client.post(
+                        f"{base_url}/{model}:generateContent",
+                        params={"key": api_key},
+                        json={
+                            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                            "contents": [{"parts": [{"text": user_prompt}]}],
+                            "generationConfig": {
+                                "temperature": 0.2,
+                                "responseMimeType": "application/json",
+                            },
+                        },
                     )
-                    time.sleep(backoff)
-                    continue
-                if status in {429, 500, 502, 503, 504} and model_idx + 1 < len(candidate_models):
-                    logger.warning(
-                        "Model %s returned status %d. Falling back to next candidate %s...",
-                        model, status, candidate_models[model_idx + 1]
-                    )
-                    break
-                raise
-            except (httpx.TimeoutException, httpx.NetworkError) as error:
-                last_error = error
-                if attempt < max_retries:
-                    backoff = 1.5 * (2 ** (attempt - 1))
-                    logger.warning(
-                        "Gemini API network error on %s: %s. Retrying in %.1fs (attempt %d/%d)...",
-                        model, error, backoff, attempt, max_retries
-                    )
-                    time.sleep(backoff)
-                    continue
-                raise
+                    response.raise_for_status()
+                    try:
+                        return _extract_gemini_text(response.json())
+                    except (KeyError, IndexError, TypeError, ValueError) as error:
+                        raise AIAnalyzerError("AI provider returned an unexpected response") from error
+                except httpx.HTTPStatusError as error:
+                    last_error = error
+                    status = error.response.status_code
+                    if status in {429, 500, 502, 503, 504} and attempt < max_retries:
+                        backoff = 1.5 * (2 ** (attempt - 1))
+                        logger.warning(
+                            "Gemini API returned status %d on model %s. Retrying in %.1fs (attempt %d/%d)...",
+                            status, model, backoff, attempt, max_retries
+                        )
+                        time.sleep(backoff)
+                        continue
+                    if status in {429, 500, 502, 503, 504} and model_idx + 1 < len(candidate_models):
+                        logger.warning(
+                            "Model %s returned status %d. Falling back to next candidate %s...",
+                            model, status, candidate_models[model_idx + 1]
+                        )
+                        break
+                    raise
+                except (httpx.TimeoutException, httpx.NetworkError) as error:
+                    last_error = error
+                    if attempt < max_retries:
+                        backoff = 1.5 * (2 ** (attempt - 1))
+                        logger.warning(
+                            "Gemini API network error on %s: %s. Retrying in %.1fs (attempt %d/%d)...",
+                            model, error, backoff, attempt, max_retries
+                        )
+                        time.sleep(backoff)
+                        continue
+                    raise
 
     if last_error:
         raise last_error
@@ -247,7 +271,15 @@ def parse_analysis(raw_response: str) -> dict[str, Any]:
 
     cleaned_response = raw_response.strip()
     if cleaned_response.startswith("```"):
-        cleaned_response = cleaned_response.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        body = cleaned_response[3:]
+        if body.lower().startswith("json"):
+            body = body[4:]
+        cleaned_response = body.rsplit("```", 1)[0].strip()
+    elif not cleaned_response.startswith("{"):
+        brace_start = cleaned_response.find("{")
+        brace_end = cleaned_response.rfind("}")
+        if brace_start != -1 and brace_end > brace_start:
+            cleaned_response = cleaned_response[brace_start : brace_end + 1]
 
     try:
         analysis = json.loads(cleaned_response)
@@ -259,7 +291,152 @@ def parse_analysis(raw_response: str) -> dict[str, Any]:
     return analysis
 
 
-def validate_analysis(analysis: dict[str, Any], segments: list[dict[str, Any]]) -> dict[str, Any]:
+_DANGLING_END_WORDS = {
+    "a", "an", "the", "and", "or", "but", "nor", "so", "yet",
+    "on", "in", "at", "to", "for", "with", "by", "from", "of", "about", "into", "onto",
+    "that", "which", "who", "whom", "whose", "because", "if", "when", "while", "where", "like",
+}
+
+
+def _normalize_words(text: str) -> list[str]:
+    cleaned = "".join(c.lower() if c.isalnum() else " " for c in text)
+    return [w for w in cleaned.split() if len(w) >= 3]
+
+
+def _ends_with_dangling_word(text: str) -> bool:
+    stripped = text.strip()
+    if not stripped or stripped[-1] in ".?!\"')":
+        return False
+    words = stripped.split()
+    if not words:
+        return False
+    last_word = "".join(c.lower() for c in words[-1] if c.isalpha())
+    return last_word in _DANGLING_END_WORDS
+
+
+def _relocate_and_expand_clip_bounds(
+    snapped_start: float,
+    snapped_end: float,
+    segments: list[dict[str, Any]],
+    max_clip_seconds: int | None,
+) -> tuple[float, float]:
+    """
+    If a clip selected by the LLM is a tiny fragment (e.g., < 14s in a long video) or ends on a
+    dangling mid-sentence word:
+    1. Check if it is an intro teaser soundbite (start < 120s in a > 300s video) that repeats
+       later in the main body of the transcript; if so, relocate to the main conversation.
+    2. Expand across adjacent transcript segments so the clip has complete context (setup + payoff)
+       within max_clip_seconds.
+    """
+    if not segments:
+        return snapped_start, snapped_end
+
+    total_span = float(segments[-1]["end"]) - float(segments[0]["start"])
+    if total_span < 35.0:
+        return snapped_start, snapped_end
+
+    eff_max = float(max_clip_seconds) if max_clip_seconds is not None and max_clip_seconds > 0 else 60.0
+    min_viable = max(10.0, min(20.0, eff_max * 0.45))
+    target_fill = max(min_viable + 6.0, min(eff_max * 0.92, 55.0))
+
+    # Locate segment index range [lo_idx, hi_idx] for [snapped_start, snapped_end]
+    lo_idx = 0
+    hi_idx = len(segments) - 1
+    for i, seg in enumerate(segments):
+        if abs(float(seg["start"]) - snapped_start) < 1e-3:
+            lo_idx = i
+            break
+    for i in range(lo_idx, len(segments)):
+        if abs(float(segments[i]["end"]) - snapped_end) < 1e-3:
+            hi_idx = i
+            break
+
+    orig_lo_idx, orig_hi_idx = lo_idx, hi_idx
+    cur_dur = snapped_end - snapped_start
+
+    # 1. If this is a short intro teaser (< 14s in the first 120s of a > 300s video),
+    # search for the actual conversation later in the transcript (> 120s).
+    if cur_dur < 14.0 and snapped_start < 120.0 and total_span > 300.0:
+        teaser_text = " ".join(str(segments[i]["text"]) for i in range(lo_idx, hi_idx + 1))
+        teaser_words = _normalize_words(teaser_text)
+        if len(teaser_words) >= 4:
+            teaser_ngrams = {
+                tuple(teaser_words[k : k + 4]) for k in range(len(teaser_words) - 3)
+            }
+            teaser_word_set = {w for w in teaser_words if len(w) >= 4}
+            best_match_idx: int | None = None
+            best_score = 0.0
+            for i, seg in enumerate(segments):
+                if float(seg["start"]) <= 120.0:
+                    continue
+                window_text = str(seg["text"])
+                if i + 1 < len(segments):
+                    window_text += " " + str(segments[i + 1]["text"])
+                cand_words = _normalize_words(window_text)
+                if len(cand_words) < 4:
+                    continue
+                cand_ngrams = {
+                    tuple(cand_words[k : k + 4]) for k in range(len(cand_words) - 3)
+                }
+                ngram_hits = len(teaser_ngrams & cand_ngrams)
+                word_overlap = (
+                    len(teaser_word_set & set(cand_words)) / max(1, len(teaser_word_set))
+                    if teaser_word_set
+                    else 0.0
+                )
+                score = ngram_hits * 2.0 + word_overlap
+                if (ngram_hits >= 1 or word_overlap >= 0.65) and score > best_score:
+                    best_score = score
+                    best_match_idx = i
+            if best_match_idx is not None:
+                lo_idx = best_match_idx
+                hi_idx = best_match_idx
+
+    # 2. Expand short clips so they have full setup and payoff context
+    cur_start = float(segments[lo_idx]["start"])
+    cur_end = float(segments[hi_idx]["end"])
+    if (cur_end - cur_start) < min_viable:
+        # First include up to ~65% of target_fill as setup before the anchor hook if relocated,
+        # or ~35% before if expanding in place
+        max_pre_budget = target_fill * 0.72
+        while lo_idx > 0:
+            prev_seg = segments[lo_idx - 1]
+            cand_start = float(prev_seg["start"])
+            if (cur_end - cand_start) > target_fill or (float(segments[hi_idx]["start"]) - cand_start) > max_pre_budget:
+                break
+            lo_idx -= 1
+            cur_start = cand_start
+
+        # Then expand forward to reach at least min_viable (up to target_fill) and a clean sentence ending
+        while hi_idx + 1 < len(segments):
+            next_seg = segments[hi_idx + 1]
+            cand_end = float(next_seg["end"])
+            if (cand_end - cur_start) > eff_max:
+                break
+            if (cur_end - cur_start) >= min_viable and not _ends_with_dangling_word(str(segments[hi_idx]["text"])):
+                if (cand_end - cur_start) > target_fill:
+                    break
+            hi_idx += 1
+            cur_end = cand_end
+
+    # 3. Even if already >= min_viable, never leave the last segment ending on a dangling word ("on", "and", etc.)
+    while hi_idx + 1 < len(segments) and _ends_with_dangling_word(str(segments[hi_idx]["text"])):
+        next_end = float(segments[hi_idx + 1]["end"])
+        if (next_end - cur_start) > eff_max + 6.0:
+            break
+        hi_idx += 1
+        cur_end = next_end
+
+    if lo_idx == orig_lo_idx and hi_idx == orig_hi_idx:
+        return snapped_start, snapped_end
+    return float(segments[lo_idx]["start"]), float(segments[hi_idx]["end"])
+
+
+def validate_analysis(
+    analysis: dict[str, Any],
+    segments: list[dict[str, Any]],
+    max_clip_seconds: int | None = None,
+) -> dict[str, Any]:
     clips = analysis.get("clips")
     if not isinstance(clips, list):
         raise AIAnalyzerError("AI response must contain a clips array")
@@ -274,6 +451,7 @@ def validate_analysis(analysis: dict[str, Any], segments: list[dict[str, Any]]) 
             return closest
         return timestamp
 
+    valid_boundaries_set = {round(b, 3) for b in sorted_boundaries} | set(sorted_boundaries)
     validated_clips = []
     for index, clip in enumerate(clips, start=1):
         if not isinstance(clip, dict):
@@ -293,11 +471,23 @@ def validate_analysis(analysis: dict[str, Any], segments: list[dict[str, Any]]) 
         if snapped_start >= snapped_end:
             raise AIAnalyzerError("Clip timestamps must have a valid positive duration")
 
-        valid_boundaries_set = set(sorted_boundaries)
-        if snapped_start not in valid_boundaries_set or snapped_end not in valid_boundaries_set:
+        if (
+            snapped_start not in valid_boundaries_set
+            and round(snapped_start, 3) not in valid_boundaries_set
+        ) or (
+            snapped_end not in valid_boundaries_set
+            and round(snapped_end, 3) not in valid_boundaries_set
+        ):
             raise AIAnalyzerError("Clip timestamps must match transcript boundaries")
         if not isinstance(reason, str) or not reason.strip():
             raise AIAnalyzerError("Each clip needs a reason")
+
+        snapped_start, snapped_end = _relocate_and_expand_clip_bounds(
+            snapped_start,
+            snapped_end,
+            segments,
+            max_clip_seconds=max_clip_seconds,
+        )
 
         # Extract and validate score out of 10
         raw_score = clip.get("score")
@@ -316,12 +506,20 @@ def validate_analysis(analysis: dict[str, Any], segments: list[dict[str, Any]]) 
             "reason": reason.strip(),
         })
 
+    if not validated_clips:
+        raise AIAnalyzerError("AI response contained no valid clips")
+
     return {"clips": validated_clips}
 
 
 def save_analysis(project_directory: Path, analysis: dict[str, Any]) -> None:
     project_directory.mkdir(parents=True, exist_ok=True)
-    (project_directory / "analysis.json").write_text(
-        json.dumps(analysis, indent=2),
-        encoding="utf-8",
-    )
+    target = project_directory / "analysis.json"
+    serialized = json.dumps(analysis, indent=2)
+    tmp = target.with_name(f".analysis.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(serialized, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        target.write_text(serialized, encoding="utf-8")

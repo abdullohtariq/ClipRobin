@@ -265,6 +265,7 @@ def _load_speech_utterances(project_directory: Path) -> list[dict[str, Any]]:
             "duration": round(duration, 3),
             "text": text,
             "is_backchannel": is_backchannel,
+            "words": seg.get("words") if isinstance(seg.get("words"), list) else [],
         })
 
     utterances.sort(key=lambda u: u["start"])
@@ -347,7 +348,7 @@ def _compute_iou(box1: tuple[float, float, float, float], box2: tuple[float, flo
 # ---------------------------------------------------------------------------
 # Bump whenever the analysis algorithm changes so stale tracking_analysis.json
 # caches produced by older code are recomputed instead of silently reused.
-ANALYSIS_VERSION = 4
+ANALYSIS_VERSION = 5
 
 SAMPLE_FPS = 4.0             # face sampling cadence (250 ms) - enough for lip-motion cues
 SAMPLE_WIDTH = 640           # detector input width; faces >= ~20px here are reliable for YuNet
@@ -359,13 +360,13 @@ REID_SECONDS = 4.0           # a lost track can be re-identified (same id) withi
 HOLD_SECONDS = 2.5           # keep framing a speaker this long after their face disappears
 SWITCH_FRACTION = 0.35       # target moves > 35% of crop width => hard cut
 DEAD_ZONE_FRACTION = 0.08    # target moves < 8% of crop width => ignore (micro jitter)
-TWO_SHOT_ENTER = 0.85        # enter two-shot when both faces span <= 85% of the crop
-TWO_SHOT_EXIT = 0.92         # leave two-shot only when span grows past 92% (hysteresis)
+TWO_SHOT_ENTER = 0.85        # kept for legacy reference; 9:16 framing centers active speaker
+TWO_SHOT_EXIT = 0.92         # kept for legacy reference
 MIN_SHOT_SECONDS = 1.6       # no shot shorter than this survives (anti strobe-cut)
 PAN_SECONDS = 0.6            # same-subject re-framing eases over this long instead of jumping
 J_CUT_LEAD = 0.15            # cut to the new speaker 150 ms before their first word
-SPEECH_SCORE_FLOOR = 0.02    # minimum lip-motion score to call someone the active speaker
-SPEAKER_MARGIN = 1.3         # winner must beat the runner-up by 30% or we keep the current speaker
+SPEECH_SCORE_FLOOR = 0.012   # minimum lip-motion score to call someone the active speaker
+SPEAKER_MARGIN = 1.2         # winner must beat the runner-up by 20% or we keep the current speaker
 
 _VIDEO_SUFFIXES = {
     ".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v", ".flv", ".ts", ".mpg", ".mpeg", ".wmv",
@@ -393,6 +394,18 @@ def _patch_motion(current: np.ndarray | None, previous: np.ndarray | None) -> fl
     return max(raw_diff, min(1.0, norm_diff))
 
 
+def _compute_jaw_ratio(landmarks: np.ndarray | None) -> float | None:
+    """Compute vertical mouth-to-nose distance normalized by inter-ocular distance."""
+    if landmarks is None or landmarks.shape != (5, 2) or not np.any(landmarks != 0):
+        return None
+    reye, leye, nose, rm, lm = landmarks
+    eye_dist = float(np.hypot(*(leye - reye)))
+    if eye_dist < 4.0:
+        return None
+    mouth_cy = (float(rm[1]) + float(lm[1])) / 2.0
+    return (mouth_cy - float(nose[1])) / eye_dist
+
+
 class _FaceTrack:
     def __init__(
         self,
@@ -411,6 +424,7 @@ class _FaceTrack:
         self.frame_count = 1
         self.last_mouth_patch: np.ndarray | None = None
         self.last_nose_patch: np.ndarray | None = None
+        self.last_jaw_ratio: float | None = _compute_jaw_ratio(landmarks)
         # Full-length histories (no caps): Pass 2 needs scores/positions for the whole video.
         self.timestamps: list[float] = [t]
         self.centers: list[float] = [center_x_orig]
@@ -438,15 +452,19 @@ class _FaceTrack:
         self.centers.append(center_x_orig)
         self.widths.append(float(width_orig if width_orig is not None else bbox[2]))
 
+        cur_jaw_ratio = _compute_jaw_ratio(landmarks)
+
         # Patches more than ~1 s apart are not comparable (head turned, re-identified track):
         # comparing them would produce fake "mouth motion".
         if gap <= 1.0:
             motion = _patch_motion(mouth_patch, self.last_mouth_patch)
             if nose_patch is not None and self.last_nose_patch is not None:
-                # The nose region is rigid: its change measures head motion / nodding / camera
-                # shake. Subtracting it isolates genuine mouth articulation, so nodding
-                # listeners are not mistaken for speakers.
-                motion = max(0.0, motion - _patch_motion(nose_patch, self.last_nose_patch))
+                # Subtract a damped fraction of rigid nose motion so nodding listeners are
+                # suppressed without zeroing out an active speaker who moves their head while talking.
+                motion = max(0.0, motion - 0.45 * _patch_motion(nose_patch, self.last_nose_patch))
+            if cur_jaw_ratio is not None and self.last_jaw_ratio is not None:
+                jaw_delta = min(0.25, abs(cur_jaw_ratio - self.last_jaw_ratio) * 1.2)
+                motion = motion + jaw_delta
             speech_score = motion * (1.5 if is_speaking_audio else 0.1)
             self.score_times.append(t)
             self.scores.append(speech_score)
@@ -455,6 +473,8 @@ class _FaceTrack:
             self.last_mouth_patch = mouth_patch
         if nose_patch is not None:
             self.last_nose_patch = nose_patch
+        if cur_jaw_ratio is not None:
+            self.last_jaw_ratio = cur_jaw_ratio
 
     def recent_speech_score(self, window_seconds: float = 1.0) -> float:
         if not self.scores:
@@ -496,6 +516,24 @@ class _FaceTrack:
         if abs(self.timestamps[best_idx] - target_t) > max_gap:
             return None
         return self.centers[best_idx]
+
+    def interpolated_center_x_at_time(self, target_t: float, max_gap: float = 3.0) -> float | None:
+        """Linearly interpolate center X across brief detection dropouts when bracketed within max_gap."""
+        if not self.timestamps:
+            return float(self.last_bbox[0] + self.last_bbox[2] / 2.0)
+        import bisect
+        n = len(self.timestamps)
+        idx = bisect.bisect_left(self.timestamps, target_t)
+        if idx == 0:
+            return self.centers[0] if abs(self.timestamps[0] - target_t) <= max_gap else None
+        if idx >= n:
+            return self.centers[-1] if abs(target_t - self.timestamps[-1]) <= max_gap else None
+        t0, t1 = self.timestamps[idx - 1], self.timestamps[idx]
+        x0, x1 = self.centers[idx - 1], self.centers[idx]
+        if (target_t - t0) <= max_gap and (t1 - target_t) <= max_gap and (t1 - t0) <= max_gap * 1.5:
+            alpha = (target_t - t0) / max(1e-6, t1 - t0)
+            return float(x0 + alpha * (x1 - x0))
+        return self.center_x_at_time(target_t, max_gap=max_gap)
 
 
 # A visible face in one sampled frame: (track_id, center_x_orig, width_orig)
@@ -594,6 +632,30 @@ class _FaceTracker:
         return visible
 
 
+def _clamp_split_screen_target(
+    target_cx: float,
+    visible: list[_Visible],
+    orig_w: int,
+    crop_w: int,
+) -> float:
+    """
+    When two faces are simultaneously visible on opposite halves of a horizontal frame
+    (e.g., a 50/50 podcast split-screen with a center divider at orig_w / 2), keep the
+    9:16 crop window strictly on the active speaker's side of the center seam so the
+    vertical divider bar is never visible in the output.
+    """
+    if len(visible) < 2 or crop_w > (orig_w // 2) - 4:
+        return target_cx
+    cxs = [v[1] for v in visible]
+    if min(cxs) < orig_w * 0.48 and max(cxs) > orig_w * 0.52:
+        mid_x = orig_w / 2.0
+        half_crop = crop_w / 2.0
+        if target_cx < mid_x:
+            return min(target_cx, mid_x - half_crop - 2.0)
+        return max(target_cx, mid_x + half_crop + 2.0)
+    return target_cx
+
+
 class _Pass1Director:
     """Real-time fallback framing used when no transcript/speaker assignment applies."""
 
@@ -603,6 +665,7 @@ class _Pass1Director:
         self.last_cx: float | None = None
         self.last_face_t = -1e9
         self.speaker_id: int | None = None
+        self.last_switch_t = -1e9
 
     def choose(self, t: float, visible: list[_Visible], tracks: dict[int, _FaceTrack], is_speech: bool) -> float:
         if not visible:
@@ -615,46 +678,102 @@ class _Pass1Director:
 
         if len(visible) == 1:
             tid, cx, _ = visible[0]
+            if self.speaker_id is not None and tid != self.speaker_id:
+                # If the active speaker just blinked/turned away for a moment, keep holding on them
+                # rather than snapping to a bystander on a 1-frame dropout.
+                prev_tr = tracks.get(self.speaker_id)
+                if prev_tr is not None and (t - prev_tr.last_t) <= HOLD_SECONDS and (t - self.last_switch_t) < MIN_SHOT_SECONDS:
+                    held_cx = prev_tr.center_x_at_time(t, max_gap=HOLD_SECONDS)
+                    if held_cx is not None:
+                        self.last_cx = held_cx
+                        return held_cx
+                self.last_switch_t = t
             self.speaker_id = tid
             self.last_cx = cx
             return cx
 
-        # Two largest faces (not just the first two found) decide the two-shot.
-        top2 = sorted(visible, key=lambda v: v[2], reverse=True)[:2]
-        left = min(cx - w / 2.0 for _, cx, w in top2)
-        right = max(cx + w / 2.0 for _, cx, w in top2)
-        if right - left <= TWO_SHOT_ENTER * self.crop_w:
-            self.last_cx = (left + right) / 2.0
-            return self.last_cx
-
         scored = sorted(((tracks[v[0]].recent_speech_score(), v) for v in visible), key=lambda s: s[0], reverse=True)
         (best, best_v), (second, _) = scored[0], scored[1]
-        if is_speech and best >= SPEECH_SCORE_FLOOR and best >= SPEAKER_MARGIN * second:
+        can_switch = (t - self.last_switch_t) >= MIN_SHOT_SECONDS or self.speaker_id is None
+
+        if is_speech and best >= SPEECH_SCORE_FLOOR and best >= SPEAKER_MARGIN * second and can_switch:
             chosen = best_v
         else:
-            chosen = next((v for v in visible if v[0] == self.speaker_id), None) or max(visible, key=lambda v: v[2])
+            current_v = next((v for v in visible if v[0] == self.speaker_id), None)
+            if current_v is not None:
+                chosen = current_v
+            else:
+                # Active speaker temporarily missing from `visible` while other faces are present:
+                # hold on the active speaker's last known position during HOLD_SECONDS!
+                prev_tr = tracks.get(self.speaker_id) if self.speaker_id is not None else None
+                held_cx = prev_tr.center_x_at_time(t, max_gap=HOLD_SECONDS) if prev_tr is not None else None
+                if held_cx is not None:
+                    self.last_cx = held_cx
+                    return held_cx
+                chosen = max(visible, key=lambda v: v[2])
+
+        if chosen[0] != self.speaker_id:
+            self.last_switch_t = t
         self.speaker_id = chosen[0]
-        self.last_cx = chosen[1]
-        return chosen[1]
+        clamped_cx = _clamp_split_screen_target(chosen[1], visible, int(self.frame_center * 2), self.crop_w)
+        self.last_cx = clamped_cx
+        return clamped_cx
+
+
+def _expand_utterance_windows(utterances: list[dict[str, Any]], target_chunk: float = 1.6) -> list[dict[str, Any]]:
+    """Split long substantive utterances into ~1.6s sub-windows so speaker changes mid-segment are caught."""
+    expanded: list[dict[str, Any]] = []
+    for u in utterances:
+        if u.get("is_backchannel", False):
+            continue
+        s, e = float(u["start"]), float(u["end"])
+        dur = e - s
+        if dur <= target_chunk * 1.5:
+            expanded.append({"start": s, "end": e})
+            continue
+
+        words = u.get("words") or []
+        valid_words = [
+            (float(w["start"]), float(w["end"]))
+            for w in words
+            if isinstance(w, dict) and "start" in w and "end" in w and float(w["end"]) > float(w["start"])
+        ]
+        if valid_words:
+            win_s = valid_words[0][0]
+            win_e = valid_words[0][1]
+            for ws, we in valid_words[1:]:
+                if (we - win_s) >= target_chunk and (win_e - win_s) >= 0.8:
+                    expanded.append({"start": win_s, "end": win_e})
+                    win_s = ws
+                win_e = we
+            if win_e > win_s:
+                expanded.append({"start": win_s, "end": win_e})
+        else:
+            n_chunks = max(1, int(round(dur / target_chunk)))
+            step = dur / n_chunks
+            for i in range(n_chunks):
+                expanded.append({"start": s + i * step, "end": s + (i + 1) * step})
+    return expanded
 
 
 def _assign_speakers(
     utterances: list[dict[str, Any]],
     tracks: dict[int, _FaceTrack],
+    start_offset: float = 0.0,
 ) -> list[tuple[float, int]]:
     """Map substantive utterances to face tracks.
 
     Returns speaker changes as (start_time, track_id). The first entry always starts at
-    0.0 so a clip opens on its first speaker immediately (no hunting during the hook).
+    start_offset (0.0 for full scans) so a clip opens on its first speaker immediately.
     """
     eligible = [tr for tr in tracks.values() if tr.frame_count >= MIN_TRACK_FRAMES]
     assignments: list[tuple[float, int]] = []
     prev_id: int | None = None
+    last_switch_t: float = -1e9
 
-    for u in utterances:
-        if u.get("is_backchannel", False):
-            continue
-        s, e = float(u["start"]), float(u["end"])
+    windows = _expand_utterance_windows(utterances)
+    for w in windows:
+        s, e = float(w["start"]), float(w["end"])
         cands = [
             tr for tr in eligible
             if tr.first_t <= e + 0.6 and tr.last_t >= s - 0.6 and tr.samples_in_window(s - 0.6, e + 0.6) > 0
@@ -675,11 +794,16 @@ def _assign_speakers(
                     cands, key=lambda tr: tr.mean_width_in_window(s, e)
                 )
         if best.track_id != prev_id:
-            assignments.append((max(0.0, s - J_CUT_LEAD), best.track_id))
+            cut_t = max(start_offset, s - J_CUT_LEAD)
+            if prev_id is not None and (cut_t - last_switch_t) < MIN_SHOT_SECONDS:
+                # Suppress rapid ping-pong switches shorter than MIN_SHOT_SECONDS
+                continue
+            assignments.append((cut_t, best.track_id))
             prev_id = best.track_id
+            last_switch_t = cut_t
 
     if assignments:
-        assignments[0] = (0.0, assignments[0][1])
+        assignments[0] = (start_offset, assignments[0][1])
     return assignments
 
 
@@ -688,18 +812,27 @@ def _build_target_timeline(
     tracks: dict[int, _FaceTrack],
     assignments: list[tuple[float, int]],
     crop_w: int,
+    orig_w: int = 1280,
 ) -> list[tuple[float, float, bool]]:
     """Per-sample desired crop center: [(t, center_x, is_speaker_switch)].
 
+    Always centers on a single speaker's face (never the empty midpoint between two faces).
     Speaker switches are emitted at their exact J-cut time (not snapped to the sample grid).
     """
+    switch_px = SWITCH_FRACTION * crop_w
     if not assignments:
-        return [(t, p1, False) for t, _, p1 in frames]
+        timeline_p1: list[tuple[float, float, bool]] = []
+        prev_p1: float | None = None
+        for t, _, p1 in frames:
+            is_cut = prev_p1 is not None and abs(p1 - prev_p1) > switch_px
+            timeline_p1.append((t, p1, is_cut))
+            prev_p1 = p1
+        return timeline_p1
 
     eligible_ids = {tid for tid, tr in tracks.items() if tr.frame_count >= MIN_TRACK_FRAMES}
     timeline: list[tuple[float, float, bool]] = []
     ai = 0
-    in_two_shot = False
+    prev_target: float | None = None
 
     for t, visible, pass1_cx in frames:
         switched = False
@@ -710,29 +843,23 @@ def _build_target_timeline(
 
         vis = {tid: (cx, w) for tid, cx, w in visible if tid in eligible_ids or tid == speaker}
         if speaker in vis:
-            scx, sw = vis[speaker]
-            target = scx
-            others = sorted(((abs(cx - scx), cx, w) for tid, (cx, w) in vis.items() if tid != speaker))
-            if others:
-                _, ocx, ow = others[0]
-                left = min(scx - sw / 2.0, ocx - ow / 2.0)
-                right = max(scx + sw / 2.0, ocx + ow / 2.0)
-                limit = (TWO_SHOT_EXIT if in_two_shot else TWO_SHOT_ENTER) * crop_w
-                in_two_shot = (right - left) <= limit
-                if in_two_shot:
-                    target = (left + right) / 2.0
-            else:
-                in_two_shot = False
+            scx, _ = vis[speaker]
+            target = _clamp_split_screen_target(scx, visible, orig_w, crop_w)
         else:
-            in_two_shot = False
-            held = tracks[speaker].center_x_at_time(t, max_gap=HOLD_SECONDS) if speaker in tracks else None
-            # Speaker briefly off-screen: hold on them. Long gone (B-roll): Pass 1 framing.
-            target = held if held is not None else pass1_cx
+            held = tracks[speaker].interpolated_center_x_at_time(t, max_gap=HOLD_SECONDS) if speaker in tracks else None
+            # Speaker briefly off-screen: hold/interpolate on them. Long gone (B-roll): Pass 1 framing.
+            raw_target = held if held is not None else pass1_cx
+            target = _clamp_split_screen_target(raw_target, visible, orig_w, crop_w)
+
+        # If target jumps across the frame (e.g. fallback switch or speaker change), mark as hard cut
+        if prev_target is not None and abs(target - prev_target) > switch_px:
+            switched = True
+        prev_target = target
 
         if switched:
-            cut_t = assignments[ai][0]
+            cut_t = assignments[ai][0] if assignments[ai][0] <= t else t
             prev_t = timeline[-1][0] if timeline else -1.0
-            if prev_t < cut_t < t:
+            if prev_t < cut_t < t and (t - cut_t) <= 0.5:
                 timeline.append((cut_t, target, True))
                 timeline.append((t, target, False))
                 continue
@@ -758,7 +885,7 @@ def _build_shots(
     dead_px = DEAD_ZONE_FRACTION * crop_w
 
     shots: list[dict[str, Any]] = []
-    start = 0.0
+    start = timeline[0][0]
     anchor = timeline[0][1]
     pending = 0
     for t, cx, is_switch in timeline[1:]:
@@ -799,6 +926,132 @@ def _build_shots(
             shot["pan_seconds"] = round(min(PAN_SECONDS, (shot["end"] - shot["start"]) / 2.0), 3)
     return consolidated
 
+
+def _rdp_indices(points: list[tuple[float, float]], eps: float) -> list[int]:
+    """Ramer-Douglas-Peucker simplification returning sorted keyframe indices."""
+    n = len(points)
+    if n <= 2:
+        return list(range(n))
+
+    keep = [False] * n
+    keep[0] = True
+    keep[-1] = True
+    stack: list[tuple[int, int]] = [(0, n - 1)]
+
+    # Normalize time axis so 1.0s has comparable weight to ~40px of horizontal movement
+    t_scale = 40.0
+    while stack:
+        i0, i1 = stack.pop()
+        if i1 - i0 <= 1:
+            continue
+        t0, x0 = points[i0][0] * t_scale, points[i0][1]
+        t1, x1 = points[i1][0] * t_scale, points[i1][1]
+        dt = t1 - t0
+        dx = x1 - x0
+        norm = (dt * dt + dx * dx) ** 0.5
+
+        max_d = -1.0
+        best_k = -1
+        for k in range(i0 + 1, i1):
+            tk, xk = points[k][0] * t_scale, points[k][1]
+            if norm < 1e-6:
+                d = abs(xk - x0)
+            else:
+                d = abs(dx * (t0 - tk) - (x0 - xk) * dt) / norm
+            if d > max_d:
+                max_d = d
+                best_k = k
+
+        if max_d > eps and best_k != -1:
+            keep[best_k] = True
+            stack.append((i0, best_k))
+            stack.append((best_k, i1))
+
+    return [idx for idx, flag in enumerate(keep) if flag]
+
+
+def _smooth_and_simplify_segment(
+    seg: list[tuple[float, int]],
+    crop_w: int,
+    max_left: int,
+) -> list[tuple[float, int]]:
+    """Convert raw 4 Hz single-speaker samples into smooth, low-count camera keyframes."""
+    n = len(seg)
+    if n <= 1:
+        return list(seg)
+
+    times = [p[0] for p in seg]
+    xs = [float(p[1]) for p in seg]
+
+    # 1. 3-point median filter to strip single-frame detector glitches
+    med_xs = list(xs)
+    if n >= 3:
+        med_xs[0] = sorted([xs[0], xs[1], xs[2]])[1]
+        for i in range(1, n - 1):
+            med_xs[i] = sorted([xs[i - 1], xs[i], xs[i + 1]])[1]
+        med_xs[-1] = sorted([xs[-3], xs[-2], xs[-1]])[1]
+
+    # 2. Zero-phase Gaussian low-pass filter (sigma = 0.65s) for lag-free trajectory smoothing
+    import bisect
+
+    sigma = 0.65
+    inv_two_sigma_sq = -0.5 / (sigma * sigma)
+    smooth_xs: list[float] = []
+    for i in range(n):
+        ti = times[i]
+        lo = bisect.bisect_left(times, ti - 2.0)
+        hi = bisect.bisect_right(times, ti + 2.0)
+        w_sum = 0.0
+        x_sum = 0.0
+        for j in range(lo, hi):
+            dt = times[j] - ti
+            if abs(dt) > 2.0:
+                continue
+            w = float(np.exp(inv_two_sigma_sq * (dt * dt)))
+            w_sum += w
+            x_sum += w * med_xs[j]
+        val = x_sum / w_sum if w_sum > 0 else med_xs[i]
+        smooth_xs.append(max(0.0, min(float(max_left), val)))
+
+    deadzone = max(18.0, 0.06 * crop_w)
+    span = max(smooth_xs) - min(smooth_xs)
+
+    # 3. If the speaker stays within the comfort deadzone for the whole segment, lock the tripod
+    if span <= deadzone * 1.25:
+        steady_x = int(round(float(np.median(smooth_xs)))) & ~1
+        steady_x = max(0, min(max_left, steady_x))
+        return [(times[0], steady_x), (times[-1], steady_x)]
+
+    # 4. Simplify trajectory into inflection-point keyframes via Ramer-Douglas-Peucker
+    pts = list(zip(times, smooth_xs))
+    rdp_eps = max(16.0, 0.04 * crop_w)
+    kf_indices = _rdp_indices(pts, rdp_eps)
+
+    # 5. Enforce minimum pan duration (>= 0.8s) between consecutive keyframes to prevent stepping
+    min_pan_dt = 0.8
+    filtered_indices = [kf_indices[0]]
+    for idx in kf_indices[1:-1]:
+        if (times[idx] - times[filtered_indices[-1]]) >= min_pan_dt:
+            filtered_indices.append(idx)
+    if kf_indices[-1] != filtered_indices[-1]:
+        if len(filtered_indices) > 1 and (times[kf_indices[-1]] - times[filtered_indices[-1]]) < 0.4:
+            filtered_indices[-1] = kf_indices[-1]
+        else:
+            filtered_indices.append(kf_indices[-1])
+
+    waypoints: list[tuple[float, int]] = []
+    snap_px = max(18, int(round(0.055 * crop_w)))
+    for idx in filtered_indices:
+        t = times[idx]
+        x = max(0, min(max_left, int(round(smooth_xs[idx])) & ~1))
+        if waypoints and abs(x - waypoints[-1][1]) <= snap_px:
+            # Snap micro-drifts to the previous waypoint so stationary holds are completely still
+            x = waypoints[-1][1]
+        waypoints.append((t, x))
+
+    return waypoints
+
+
 def _build_smooth_tracking_shots(
     timeline: list[tuple[float, float, bool]],
     crop_w: int,
@@ -807,19 +1060,19 @@ def _build_smooth_tracking_shots(
 ) -> list[dict[str, Any]]:
     """Build smooth tracking shots with continuous camera gliding for speaker face tracking in 9:16.
 
-    - Hard cuts on speaker switches when the target is far across the frame (> 35% of crop_w).
-    - Smooth camera panning (EMA + deadband) as the active speaker moves or shifts posture.
-    - Smoothstep (3u^2 - 2u^3) easing between waypoints for professional gimbal-like follow.
-    - Adjacent static holds are consolidated.
+    - Hard cuts on speaker switches or large cross-frame jumps (> 35% of crop_w).
+    - Absorbs short transient segments (< MIN_SHOT_SECONDS) to prevent whip-pans and strobe cuts.
+    - Zero-phase Gaussian smoothing + Ramer-Douglas-Peucker keyframe simplification within each shot.
+    - Smoothstep (3u^2 - 2u^3) easing between inflection keyframes for continuous gimbal-like follow.
     """
     if not timeline:
         return [{"start": 0.0, "end": 999999.0, "x": _even_left(orig_w / 2.0, crop_w, orig_w)}]
 
     max_left = max(0, orig_w - crop_w)
-    deadzone = max(16.0, 0.035 * crop_w)
     switch_px = SWITCH_FRACTION * crop_w
 
-    segments: list[list[tuple[float, int]]] = []
+    # 1. Partition timeline into continuous single-subject segments
+    raw_segments: list[list[tuple[float, int]]] = []
     current_seg: list[tuple[float, int]] = []
     prev_left: int | None = None
 
@@ -827,45 +1080,81 @@ def _build_smooth_tracking_shots(
         raw_left = max(0.0, min(float(max_left), cx - crop_w / 2.0))
         even_left = int(round(raw_left)) & ~1
 
-        if current_seg and is_switch and prev_left is not None and abs(even_left - prev_left) > switch_px:
-            segments.append(current_seg)
+        if current_seg and prev_left is not None and (
+            (is_switch and abs(even_left - prev_left) > switch_px * 0.5)
+            or abs(even_left - prev_left) > switch_px
+        ):
+            raw_segments.append(current_seg)
             current_seg = []
 
         current_seg.append((t, even_left))
         prev_left = even_left
 
     if current_seg:
-        segments.append(current_seg)
+        raw_segments.append(current_seg)
 
+    # 2. Absorb short segments (< MIN_SHOT_SECONDS) into adjacent segments so 1-2 frame glitches
+    # never cause the camera to cut or whip across the room and back.
+    segments = [list(s) for s in raw_segments if s]
+    changed = True
+    while changed and len(segments) > 1:
+        changed = False
+        for i in range(len(segments)):
+            seg = segments[i]
+            seg_start = seg[0][0]
+            seg_end = segments[i + 1][0][0] if i + 1 < len(segments) else (seg[-1][0] + frame_interval)
+            dur = seg_end - seg_start
+            if dur < MIN_SHOT_SECONDS:
+                if i == 0:
+                    next_seg = segments[1]
+                    fill_x = next_seg[0][1]
+                    segments[1] = [(t, fill_x) for t, _ in seg] + next_seg
+                    segments.pop(0)
+                elif i == len(segments) - 1:
+                    prev_seg = segments[i - 1]
+                    fill_x = prev_seg[-1][1]
+                    segments[i - 1] = prev_seg + [(t, fill_x) for t, _ in seg]
+                    segments.pop(i)
+                else:
+                    prev_seg = segments[i - 1]
+                    next_seg = segments[i + 1]
+                    prev_med = float(np.median([x for _, x in prev_seg]))
+                    next_med = float(np.median([x for _, x in next_seg]))
+                    if abs(prev_med - next_med) <= switch_px:
+                        fill_x = int(round(prev_med)) & ~1
+                        segments[i - 1] = prev_seg + [(t, fill_x) for t, _ in seg] + next_seg
+                        segments.pop(i + 1)
+                        segments.pop(i)
+                    else:
+                        seg_med = float(np.median([x for _, x in seg]))
+                        if abs(seg_med - prev_med) <= abs(seg_med - next_med):
+                            fill_x = prev_seg[-1][1]
+                            segments[i - 1] = prev_seg + [(t, fill_x) for t, _ in seg]
+                            segments.pop(i)
+                        else:
+                            fill_x = next_seg[0][1]
+                            segments[i + 1] = [(t, fill_x) for t, _ in seg] + next_seg
+                            segments.pop(i)
+                changed = True
+                break
+
+    # 3. Smooth and simplify each continuous segment into clean camera shots
     all_shots: list[dict[str, Any]] = []
-
-    for seg in segments:
+    for seg_idx, seg in enumerate(segments):
         if not seg:
             continue
+        waypoints = _smooth_and_simplify_segment(seg, crop_w, max_left)
+        # Extend the final waypoint of this segment to the start of the next segment
+        if seg_idx + 1 < len(segments) and segments[seg_idx + 1]:
+            next_start_t = segments[seg_idx + 1][0][0]
+            if waypoints[-1][0] < next_start_t:
+                waypoints[-1] = (next_start_t, waypoints[-1][1])
 
-        smoothed: list[tuple[float, int]] = []
-        cur_filtered = float(seg[0][1])
-        smoothed.append((seg[0][0], int(round(cur_filtered)) & ~1))
-
-        alpha = 0.25
-        for t, target_x in seg[1:]:
-            diff = target_x - cur_filtered
-            if abs(diff) > deadzone:
-                step = diff - (deadzone if diff > 0 else -deadzone)
-                cur_filtered += alpha * step
-                cur_filtered = max(0.0, min(float(max_left), cur_filtered))
-            smoothed.append((t, int(round(cur_filtered)) & ~1))
-
-        waypoints: list[tuple[float, int]] = [smoothed[0]]
-        anchor_t, anchor_x = smoothed[0]
-        for t, x in smoothed[1:-1]:
-            dx = abs(x - anchor_x)
-            dt = t - anchor_t
-            if dx >= 10 or dt >= 1.0:
-                waypoints.append((t, x))
-                anchor_t, anchor_x = t, x
-        if len(smoothed) > 1 and waypoints[-1] != smoothed[-1]:
-            waypoints.append(smoothed[-1])
+        if len(waypoints) == 1:
+            t_a, x_a = waypoints[0]
+            t_b = segments[seg_idx + 1][0][0] if seg_idx + 1 < len(segments) else (t_a + frame_interval)
+            all_shots.append({"start": round(t_a, 3), "end": round(t_b, 3), "x": x_a})
+            continue
 
         for i in range(len(waypoints) - 1):
             t_a, x_a = waypoints[i]
@@ -878,7 +1167,8 @@ def _build_smooth_tracking_shots(
             }
             if x_a != x_b and dt > 0.08:
                 shot["pan_from"] = x_a
-                shot["pan_seconds"] = dt
+                # Glide at a natural gimbal speed (~30 px/s minimum) so long holds don't creep for 20s
+                shot["pan_seconds"] = round(min(dt, max(0.8, abs(x_b - x_a) / 30.0)), 3)
             all_shots.append(shot)
 
     consolidated: list[dict[str, Any]] = []
@@ -954,6 +1244,7 @@ def _scan_faces(
     cancel_event: threading.Event | None,
     progress_callback: Any | None,
     max_duration: float | None = None,
+    start_offset: float = 0.0,
 ) -> tuple[list[tuple[float, list[_Visible], float]], dict[int, _FaceTrack], float]:
     """Decode sampled frames, detect faces, track them and record Pass 1 targets."""
     import cv2
@@ -975,11 +1266,19 @@ def _scan_faces(
 
     frame_interval = 1.0 / SAMPLE_FPS
     frame_bytes = sample_w * sample_h * 3
+    seek_args = ["-ss", f"{start_offset:.2f}"] if start_offset > 0.0 else []
+    duration_args = (
+        ["-t", f"{max(1.0, max_duration - start_offset + 1.0):.2f}"]
+        if (max_duration is not None and max_duration > 0)
+        else []
+    )
     ffmpeg_cmd = [
         ffmpeg_path,
         "-hide_banner", "-loglevel", "error",
         "-threads", "0",
+        *seek_args,
         "-i", str(source_path),
+        *duration_args,
         "-an", "-sn", "-dn",  # never demux/decode audio, subs or data for this pass
         "-vf", f"fps={SAMPLE_FPS:g},scale={sample_w}:{sample_h}:flags=area",
         "-f", "rawvideo",
@@ -1009,7 +1308,7 @@ def _scan_faces(
             if len(raw) < frame_bytes:
                 break
 
-            t = frame_idx * frame_interval
+            t = start_offset + frame_idx * frame_interval
             if max_duration is not None and t >= max_duration:
                 process.terminate()
                 break
@@ -1056,6 +1355,39 @@ def _scan_faces(
     return frames, tracker.all_tracks, frame_interval
 
 
+def _stitch_shot_lists(
+    prefix_shots: list[dict[str, Any]],
+    tail_shots: list[dict[str, Any]],
+    seam_time: float,
+) -> list[dict[str, Any]]:
+    if not prefix_shots:
+        return tail_shots
+    if not tail_shots:
+        return prefix_shots
+    stitched: list[dict[str, Any]] = []
+    for s in prefix_shots:
+        s_start = float(s.get("start", 0.0))
+        s_end = float(s.get("end", 0.0))
+        if s_start >= seam_time:
+            continue
+        clipped = dict(s)
+        if s_end > seam_time:
+            clipped["end"] = round(seam_time, 3)
+        if clipped["end"] > clipped["start"]:
+            stitched.append(clipped)
+    for idx, s in enumerate(tail_shots):
+        s_start = float(s.get("start", 0.0))
+        s_end = float(s.get("end", 0.0))
+        if s_end <= seam_time:
+            continue
+        clipped = dict(s)
+        if idx == 0 or s_start < seam_time:
+            clipped["start"] = round(seam_time, 3)
+        if clipped["end"] > clipped["start"]:
+            stitched.append(clipped)
+    return stitched
+
+
 def analyze_speaker_tracking(
     project_directory: Path,
     ffmpeg_path: str,
@@ -1088,18 +1420,54 @@ def _analyze_speaker_tracking_locked(
     source_path = _find_source_video(project_directory)
     signature = _source_signature(source_path)
     analysis_cache = project_directory / "tracking_analysis.json"
+    partial_cached: dict[str, Any] | None = None
+    partial_scanned_dur: float = 0.0
     if analysis_cache.is_file():
         try:
             cached = json.loads(analysis_cache.read_text(encoding="utf-8"))
             if (
                 isinstance(cached, dict)
-                and "shots" in cached
                 and cached.get("version") == ANALYSIS_VERSION
                 and cached.get("source") == signature
-                and cached.get("face_tracking", True) == face_tracking
                 and not cached.get("fallback_reason")
             ):
-                return cached
+                if cached.get("already_vertical") and "shots" in cached:
+                    return cached
+
+                scanned_val = float(cached.get("scanned_duration", 0.0) or 0.0)
+                if scanned_val <= 0.0:
+                    raw_shots = cached.get("shots") or cached.get("shots_tracked") or []
+                    scanned_val = max(
+                        (
+                            float(s.get("end", 0.0))
+                            for s in raw_shots
+                            if isinstance(s, dict) and float(s.get("end", 0.0)) < 900000.0
+                        ),
+                        default=0.0,
+                    )
+                if cached.get("is_full_scan"):
+                    duration_ok = True
+                else:
+                    cached_vid_dur = float(cached.get("video_duration", 0.0) or 0.0)
+                    if max_duration is None:
+                        duration_ok = cached_vid_dur > 0 and scanned_val >= cached_vid_dur - 0.5
+                    else:
+                        needed = min(cached_vid_dur, max_duration) if cached_vid_dur > 0 else max_duration
+                        duration_ok = scanned_val >= needed - 0.5
+
+                if duration_ok:
+                    if "shots_tracked" in cached and "shots_static" in cached:
+                        selected_shots = cached["shots_tracked" if face_tracking else "shots_static"]
+                        return {
+                            **cached,
+                            "face_tracking": face_tracking,
+                            "shots": selected_shots,
+                        }
+                    if "shots" in cached and cached.get("face_tracking", True) == face_tracking:
+                        return cached
+                elif scanned_val >= 30.0 and ("shots" in cached or "shots_tracked" in cached):
+                    partial_cached = cached
+                    partial_scanned_dur = scanned_val
         except Exception:
             pass
 
@@ -1146,12 +1514,15 @@ def _analyze_speaker_tracking_locked(
         pass
 
     from app.services.video_editor import ClipGenerationCancelled
+    resume_seam = round(max(0.0, partial_scanned_dur - 10.0), 3) if partial_cached is not None else 0.0
+    scan_start_offset = max(0.0, resume_seam - 2.0) if resume_seam > 0.0 else 0.0
     try:
         effective_duration = min(video_duration, max_duration) if max_duration is not None else video_duration
         frames, tracks, frame_interval = _scan_faces(
             source_path, ffmpeg_path, orig_w, orig_h, crop_w,
             speech_windows, effective_duration, cancel_event, progress_callback,
             max_duration=max_duration,
+            start_offset=scan_start_offset,
         )
     except ClipGenerationCancelled:
         raise
@@ -1170,27 +1541,49 @@ def _analyze_speaker_tracking_locked(
         progress_callback("Optimizing camera cuts and speaker alignment...", int(video_duration), int(video_duration))
 
     if not frames:
+        if partial_cached is not None:
+            return partial_cached
         result = {**center_fallback, "fallback_reason": "no frames decoded"}
         _write_cache(analysis_cache, result)
         return result
 
-    assignments = _assign_speakers(speech_utterances, tracks)
-    timeline = _build_target_timeline(frames, tracks, assignments, crop_w)
-    if face_tracking:
-        shots = _build_smooth_tracking_shots(timeline, crop_w, orig_w, frame_interval)
-    else:
-        shots = _build_shots(timeline, crop_w, orig_w, frame_interval)
+    relevant_utterances = (
+        [u for u in speech_utterances if float(u.get("end", 0.0)) >= scan_start_offset]
+        if scan_start_offset > 0.0
+        else speech_utterances
+    )
+    assignments = _assign_speakers(relevant_utterances, tracks, start_offset=scan_start_offset)
+    timeline = _build_target_timeline(frames, tracks, assignments, crop_w, orig_w=orig_w)
+    shots_tracked = _build_smooth_tracking_shots(timeline, crop_w, orig_w, frame_interval)
+    shots_static = _build_shots(timeline, crop_w, orig_w, frame_interval)
+    if partial_cached is not None and resume_seam > 0.0:
+        prev_tracked = partial_cached.get("shots_tracked") or partial_cached.get("shots") or []
+        prev_static = partial_cached.get("shots_static") or partial_cached.get("shots") or []
+        shots_tracked = _stitch_shot_lists(prev_tracked, shots_tracked, resume_seam)
+        shots_static = _stitch_shot_lists(prev_static, shots_static, resume_seam)
+    shots = shots_tracked if face_tracking else shots_static
+    is_full_scan = bool(max_duration is None or max_duration >= video_duration - 0.5)
 
-    result = {**base, "face_tracking": face_tracking, "shots": shots}
+    result = {
+        **base,
+        "face_tracking": face_tracking,
+        "scanned_duration": round(effective_duration, 3),
+        "video_duration": round(video_duration, 3),
+        "is_full_scan": is_full_scan,
+        "shots_tracked": shots_tracked,
+        "shots_static": shots_static,
+        "shots": shots,
+    }
     _write_cache(analysis_cache, result)
     return result
 
 
 def _shot_value_expr(rel_start: float, rel_end: float, x: int, pan_from: int | None, pan_seconds: float) -> str:
-    """FFmpeg expression for one shot's x: constant, or a smoothstep ease from pan_from."""
+    """FFmpeg expression for one shot's x: constant, or a clamped smoothstep ease from pan_from."""
     if pan_from is None or pan_from == x or pan_seconds <= 0 or rel_start + pan_seconds <= 0:
         return str(x)
-    u = f"((t-({rel_start:.3f}))/{pan_seconds:.3f})"
+    # Clamp u in [0, 1] so out-of-window evaluation can never overshoot [pan_from, x]
+    u = f"clip((t-({rel_start:.3f}))/{pan_seconds:.3f},0,1)"
     ease_expr = f"{pan_from}+({x - pan_from})*{u}*{u}*(3-2*{u})"
     if rel_start + pan_seconds < rel_end - 0.02:
         return f"if(lt(t,{rel_start + pan_seconds:.3f}),{ease_expr},{x})"
@@ -1216,9 +1609,9 @@ def get_crop_filter_for_clip(
     if not shots:
         return crop_w, crop_h, "(in_w-out_w)/2"
 
-    # Filter shots overlapping [clip_start, clip_end]
-    relevant: list[tuple[float, str, int, bool]] = []  # (rel_end, value_expr, x, is_static)
+    # Filter shots overlapping [clip_start, clip_end] BEFORE building expressions
     clip_duration = clip_end - clip_start
+    clip_shots: list[dict[str, Any]] = []
 
     for s in shots:
         s_start = float(s.get("start", 0.0))
@@ -1226,29 +1619,66 @@ def get_crop_filter_for_clip(
         x = int(s.get("x", 0))
 
         if s_end > clip_start and s_start < clip_end:
+            rel_start = max(0.0, s_start - clip_start)
             rel_end = min(clip_duration, s_end - clip_start)
             pan_from = s.get("pan_from")
-            value = _shot_value_expr(
-                s_start - clip_start, rel_end, x,
-                int(pan_from) if pan_from is not None else None,
-                float(s.get("pan_seconds", PAN_SECONDS)),
-            )
-            relevant.append((rel_end, value, x, value == str(x)))
+            pan_sec = float(s.get("pan_seconds", PAN_SECONDS))
+            # If the shot started before clip_start while panning, interpolate pan_from at clip_start
+            if pan_from is not None and s_start < clip_start:
+                elapsed = clip_start - s_start
+                if elapsed >= pan_sec or pan_sec <= 0:
+                    pan_from = None
+                else:
+                    u0 = max(0.0, min(1.0, elapsed / pan_sec))
+                    s0 = u0 * u0 * (3.0 - 2.0 * u0)
+                    pan_from = int(round(int(pan_from) + (x - int(pan_from)) * s0)) & ~1
+                    pan_sec = max(0.05, pan_sec - elapsed)
 
-    if not relevant:
-        return crop_w, crop_h, str(shots[0].get("x", "(in_w-out_w)/2"))
+            clip_shots.append({
+                "rel_start": rel_start,
+                "rel_end": rel_end,
+                "x": x,
+                "pan_from": int(pan_from) if pan_from is not None else None,
+                "pan_seconds": pan_sec,
+            })
 
-    # Guard against exceeding FFmpeg expression parser depth limits on long clips
+    if not clip_shots:
+        fallback_shot = shots[-1] if float(shots[-1].get("end", 0.0)) <= clip_start else shots[0]
+        return crop_w, crop_h, str(fallback_shot.get("x", "(in_w-out_w)/2"))
+
+    # Guard against exceeding FFmpeg expression parser depth limits on long clips:
+    # Merge adjacent shots with the smallest movement and recompute rel_start / pan_from / pan_seconds
+    # so the merged shot smoothly spans the combined time window.
     max_safe_segments = 25
-    while len(relevant) > max_safe_segments:
+    switch_px = SWITCH_FRACTION * crop_w
+    while len(clip_shots) > max_safe_segments:
         best_idx = 0
         min_move = float("inf")
-        for i in range(len(relevant) - 1):
-            move = abs(relevant[i+1][2] - relevant[i][2])
+        for i in range(len(clip_shots) - 1):
+            move = abs(clip_shots[i + 1]["x"] - clip_shots[i]["x"])
             if move < min_move:
                 min_move = move
                 best_idx = i
-        relevant.pop(best_idx)
+        dropped = clip_shots.pop(best_idx)
+        nxt = clip_shots[best_idx]
+        nxt["rel_start"] = dropped["rel_start"]
+        start_x = dropped["pan_from"] if dropped["pan_from"] is not None else dropped["x"]
+        if start_x != nxt["x"] and abs(nxt["x"] - start_x) <= switch_px:
+            nxt["pan_from"] = start_x
+            nxt["pan_seconds"] = max(0.05, round(nxt["rel_end"] - nxt["rel_start"], 3))
+        else:
+            nxt["pan_from"] = None
+
+    relevant: list[tuple[float, str, int, bool]] = []
+    for cs in clip_shots:
+        value = _shot_value_expr(
+            cs["rel_start"],
+            cs["rel_end"],
+            cs["x"],
+            cs["pan_from"],
+            cs["pan_seconds"],
+        )
+        relevant.append((cs["rel_end"], value, cs["x"], value == str(cs["x"])))
 
     # If only 1 shot or all relevant shots have the same static x
     if all(r[3] for r in relevant) and len({r[2] for r in relevant}) == 1:

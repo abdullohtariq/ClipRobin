@@ -1,14 +1,23 @@
+import threading
 from pathlib import Path
 from typing import Any, Callable
 
 import yt_dlp
 
 
+class DownloadCancelled(Exception):
+    """Raised when a YouTube video download is cancelled."""
+
+
 def download_video(
     url: str,
     output_path: Path,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
+    if cancel_event is not None and cancel_event.is_set():
+        raise DownloadCancelled("Download cancelled")
+
     if progress_callback:
         progress_callback({
             "status": "downloading",
@@ -17,6 +26,8 @@ def download_video(
         })
 
     def progress_hook(d: dict[str, Any]) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise DownloadCancelled("Download cancelled")
         if not progress_callback:
             return
         status = d.get("status")
@@ -66,6 +77,8 @@ def download_video(
             })
 
     def postprocessor_hook(d: dict[str, Any]) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise DownloadCancelled("Download cancelled")
         if not progress_callback:
             return
         post_status = d.get("status")
@@ -82,7 +95,7 @@ def download_video(
                 "progress": 100.0,
             })
 
-    options = {
+    options: dict[str, Any] = {
         "format": "bestvideo*+bestaudio/best",
         "merge_output_format": "mp4",
         "noplaylist": True,
@@ -92,6 +105,14 @@ def download_video(
         "progress_hooks": [progress_hook],
         "postprocessor_hooks": [postprocessor_hook],
     }
+
+    try:
+        from app.services.video_editor import find_ffmpeg
+        ffmpeg_bin = find_ffmpeg(auto_download=False)
+        if ffmpeg_bin:
+            options["ffmpeg_location"] = str(Path(ffmpeg_bin).parent)
+    except Exception:
+        pass
 
     with yt_dlp.YoutubeDL(options) as downloader:
         info = downloader.extract_info(url, download=True)

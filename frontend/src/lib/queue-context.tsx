@@ -5,10 +5,12 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 import {
+  cancelClipGeneration,
   downloadVideo,
   generateClips,
   getLocalTranscriptionJob,
@@ -19,6 +21,7 @@ import {
   Clip,
   FramingMode,
   CaptionStyle,
+  CaptionAnimation,
 } from "@/src/lib/api";
 import { ClipDuration } from "@/src/components/clip-settings";
 import { sanitizeProjectName } from "@/src/lib/project-name-utils";
@@ -33,6 +36,7 @@ export interface QueueSettings {
   clipCount: number;
   generationMode: "random" | "ai";
   captionStyle: CaptionStyle;
+  captionAnimation?: CaptionAnimation | null;
   showCaptions: boolean;
   showWatermark: boolean;
   faceTracking?: boolean;
@@ -86,7 +90,14 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
 
   const isWorkerRunningRef = useRef(false);
   const isMountedRef = useRef(true);
-  const activeAbortRef = useRef<(() => void) | null>(null);
+  const lastPersistedSnapshotRef = useRef<string>("");
+  const activeRunStateRef = useRef<{
+    itemId: string;
+    abortController: AbortController;
+    getProjectId: () => string | null;
+    getGenerationJobId: () => string | null;
+    markCancelled: () => void;
+  } | null>(null);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -100,6 +111,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
+        lastPersistedSnapshotRef.current = stored;
         const parsed = JSON.parse(stored) as QueueItem[];
         setQueue((prev) => {
           const existingIds = new Set(prev.map((i) => i.id));
@@ -116,14 +128,13 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Sync finished items to localStorage (only after initial hydration to prevent wiping)
+  // Sync finished items to localStorage only when terminal items actually change
   useEffect(() => {
     if (!hasHydrated) return;
     try {
       const persistable = queue
         .filter((item) => ["done", "failed"].includes(item.status))
         .map((item) => {
-          // If source had a File object, store metadata only
           if (item.source.kind === "file") {
             return {
               ...item,
@@ -131,13 +142,16 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
                 kind: "file" as const,
                 name: item.source.name,
                 size: item.source.size,
-                // omit actual File object for JSON safety
               },
             };
           }
           return item;
         });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable.slice(-20)));
+      const serialized = JSON.stringify(persistable.slice(-20));
+      if (serialized !== lastPersistedSnapshotRef.current) {
+        lastPersistedSnapshotRef.current = serialized;
+        localStorage.setItem(STORAGE_KEY, serialized);
+      }
     } catch {
       // Ignore quota errors
     }
@@ -163,10 +177,19 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     async (item: QueueItem) => {
       const { id, source, settings, projectName } = item;
       let assignedProjectId: string | null = null;
+      let activeGenerationJobId: string | null = null;
       let isCancelled = false;
+      const abortController = new AbortController();
 
-      activeAbortRef.current = () => {
-        isCancelled = true;
+      activeRunStateRef.current = {
+        itemId: id,
+        abortController,
+        getProjectId: () => assignedProjectId,
+        getGenerationJobId: () => activeGenerationJobId,
+        markCancelled: () => {
+          isCancelled = true;
+          abortController.abort();
+        },
       };
 
       try {
@@ -178,21 +201,32 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
 
         // Step A: Source Acquisition
         if (source.kind === "youtube") {
-          const downloadRes = await downloadVideo(source.url, (job) => {
-            if (isCancelled) return;
-            updateItem(id, {
-              progress: Math.min(25, 5 + Math.round(job.progress * 0.2)),
-              step: job.step || "Downloading video...",
-            });
-          });
+          const downloadRes = await downloadVideo(
+            source.url,
+            (job) => {
+              if (isCancelled) return;
+              updateItem(id, {
+                progress: Math.min(25, 5 + Math.round(job.progress * 0.2)),
+                step: job.step || "Downloading video...",
+              });
+            },
+            {
+              signal: abortController.signal,
+              onProjectCreated: (pid) => {
+                assignedProjectId = pid;
+                updateItem(id, { projectId: pid });
+              },
+            }
+          );
 
-          if (isCancelled) throw new Error("Processing was cancelled by user");
+          if (isCancelled) throw new Error("Cancelled by user");
           assignedProjectId = downloadRes.project_id;
           updateItem(id, { projectId: assignedProjectId });
 
           // Save custom project title if customized
-          if (projectName && assignedProjectId) {
-            await updateProjectTitle(assignedProjectId, projectName).catch(() => {});
+          const latestName = queueRef.current.find((q) => q.id === id)?.projectName || projectName;
+          if (latestName && assignedProjectId) {
+            await updateProjectTitle(assignedProjectId, latestName).catch(() => {});
           }
 
           // Step B: Transcription
@@ -201,63 +235,84 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
             step: "Starting speech transcription...",
           });
 
-          const transcriptionJob = await transcribeVideo(assignedProjectId);
+          const transcriptionJob = await transcribeVideo(assignedProjectId, abortController.signal);
           let currentJob = transcriptionJob;
 
-          while (currentJob.status !== "completed" && currentJob.status !== "failed") {
-            if (isCancelled) throw new Error("Processing was cancelled by user");
+          while (
+            currentJob.status !== "completed" &&
+            currentJob.status !== "failed" &&
+            currentJob.status !== "cancelled"
+          ) {
+            if (isCancelled) throw new Error("Cancelled by user");
             await new Promise((res) => setTimeout(res, 600));
-            currentJob = await getLocalTranscriptionJob(assignedProjectId);
+            if (isCancelled) throw new Error("Cancelled by user");
+            currentJob = await getLocalTranscriptionJob(assignedProjectId, abortController.signal);
             updateItem(id, {
               progress: 28 + Math.round((currentJob.progress || 0) * 0.32),
               step: currentJob.step || "Transcribing audio...",
             });
           }
 
+          if (currentJob.status === "cancelled" || isCancelled) {
+            throw new Error("Cancelled by user");
+          }
           if (currentJob.status === "failed") {
             throw new Error(currentJob.error || "Speech transcription failed");
           }
         } else {
           // Local File Source
-          const uploadRes = await transcribeLocalVideo(source.file, (uploadProg) => {
-            if (isCancelled) return;
-            updateItem(id, {
-              progress: Math.min(25, Math.round(uploadProg * 0.25)),
-              step: "Uploading video...",
-            });
-          });
+          const uploadRes = await transcribeLocalVideo(
+            source.file,
+            (uploadProg) => {
+              if (isCancelled) return;
+              updateItem(id, {
+                progress: Math.min(25, Math.round(uploadProg * 0.25)),
+                step: "Uploading video...",
+              });
+            },
+            abortController.signal
+          );
 
-          if (isCancelled) throw new Error("Processing was cancelled by user");
+          if (isCancelled) throw new Error("Cancelled by user");
           assignedProjectId = uploadRes.project_id;
           updateItem(id, { projectId: assignedProjectId });
 
           // Save custom project title
-          if (projectName && assignedProjectId) {
-            await updateProjectTitle(assignedProjectId, projectName).catch(() => {});
+          const latestName = queueRef.current.find((q) => q.id === id)?.projectName || projectName;
+          if (latestName && assignedProjectId) {
+            await updateProjectTitle(assignedProjectId, latestName).catch(() => {});
           }
 
           let currentJob = uploadRes;
-          while (currentJob.status !== "completed" && currentJob.status !== "failed") {
-            if (isCancelled) throw new Error("Processing was cancelled by user");
+          while (
+            currentJob.status !== "completed" &&
+            currentJob.status !== "failed" &&
+            currentJob.status !== "cancelled"
+          ) {
+            if (isCancelled) throw new Error("Cancelled by user");
             await new Promise((res) => setTimeout(res, 600));
-            currentJob = await getLocalTranscriptionJob(assignedProjectId);
+            if (isCancelled) throw new Error("Cancelled by user");
+            currentJob = await getLocalTranscriptionJob(assignedProjectId, abortController.signal);
             updateItem(id, {
               progress: 25 + Math.round((currentJob.progress || 0) * 0.35),
               step: currentJob.step || "Transcribing audio...",
             });
           }
 
+          if (currentJob.status === "cancelled" || isCancelled) {
+            throw new Error("Cancelled by user");
+          }
           if (currentJob.status === "failed") {
             throw new Error(currentJob.error || "Speech transcription failed");
           }
         }
 
-        if (isCancelled) throw new Error("Processing was cancelled by user");
+        if (isCancelled) throw new Error("Cancelled by user");
 
         // Step C: Clip Generation
         updateItem(id, {
           progress: 60,
-          step: "Generating vertical clips with AI...",
+          step: "Generating vertical clips...",
         });
 
         const generation = await generateClips(
@@ -275,14 +330,21 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           settings.showWatermark,
           settings.framingMode,
           settings.captionStyle,
-          undefined,
+          settings.captionAnimation || undefined,
           settings.clipCount,
           settings.generationMode,
-          settings.faceTracking
+          settings.faceTracking,
+          {
+            signal: abortController.signal,
+            onJobCreated: (jid) => {
+              activeGenerationJobId = jid;
+            },
+          }
         );
 
         if (isCancelled || generation.cancelled) {
-          throw new Error("Clip generation was cancelled by user");
+          isCancelled = true;
+          throw new Error("Cancelled by user");
         }
 
         // Finished Successfully
@@ -292,15 +354,32 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           step: "Complete",
           readyClips: generation.clips,
         });
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent("cliprobin:queue-item-completed", {
+              detail: { projectId: assignedProjectId, itemId: id },
+            })
+          );
+        }
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : "Processing failed";
-        updateItem(id, {
-          status: "failed",
-          step: "Failed",
-          error: errorMsg,
-        });
+        if (isCancelled) {
+          updateItem(id, {
+            status: "failed",
+            step: "Cancelled",
+            error: "Cancelled by user",
+          });
+        } else {
+          const errorMsg = err instanceof Error ? err.message : "Processing failed";
+          updateItem(id, {
+            status: "failed",
+            step: "Failed",
+            error: errorMsg,
+          });
+        }
       } finally {
-        activeAbortRef.current = null;
+        if (activeRunStateRef.current?.itemId === id) {
+          activeRunStateRef.current = null;
+        }
       }
     },
     [updateItem]
@@ -415,17 +494,25 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       const item = queueRef.current.find((q) => q.id === id);
       if (item && item.status === "processing") {
-        if (activeAbortRef.current) {
-          activeAbortRef.current();
-        }
-        if (item.projectId) {
-          await deleteProject(item.projectId).catch(() => {});
-        }
+        const runState =
+          activeRunStateRef.current?.itemId === id ? activeRunStateRef.current : null;
+        const pid = runState?.getProjectId() || item.projectId || null;
+        const jobId = runState?.getGenerationJobId() || null;
+
+        runState?.markCancelled();
+
         updateItem(id, {
           status: "failed",
           step: "Cancelled",
           error: "Cancelled by user",
         });
+
+        if (pid && jobId) {
+          await cancelClipGeneration(pid, jobId).catch(() => {});
+        }
+        if (pid) {
+          await deleteProject(pid).catch(() => {});
+        }
       }
     },
     [updateItem]
@@ -458,30 +545,42 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const activeCount = queue.filter((item) =>
-    ["queued", "processing"].includes(item.status)
-  ).length;
-
-  const activeItem = queue.find((item) => item.status === "processing") || null;
-
-  return (
-    <QueueContext.Provider
-      value={{
-        queue,
-        activeItem,
-        queueCount: activeCount,
-        maxQueueSize: MAX_QUEUE_SIZE,
-        isAtLimit: activeCount >= MAX_QUEUE_SIZE,
-        addToQueue,
-        removeFromQueue,
-        cancelRunningItem,
-        renameQueueItem,
-        clearCompletedItems,
-      }}
-    >
-      {children}
-    </QueueContext.Provider>
+  const activeCount = useMemo(
+    () => queue.filter((item) => ["queued", "processing"].includes(item.status)).length,
+    [queue]
   );
+
+  const activeItem = useMemo(
+    () => queue.find((item) => item.status === "processing") || null,
+    [queue]
+  );
+
+  const contextValue = useMemo<QueueContextType>(
+    () => ({
+      queue,
+      activeItem,
+      queueCount: activeCount,
+      maxQueueSize: MAX_QUEUE_SIZE,
+      isAtLimit: activeCount >= MAX_QUEUE_SIZE,
+      addToQueue,
+      removeFromQueue,
+      cancelRunningItem,
+      renameQueueItem,
+      clearCompletedItems,
+    }),
+    [
+      queue,
+      activeItem,
+      activeCount,
+      addToQueue,
+      removeFromQueue,
+      cancelRunningItem,
+      renameQueueItem,
+      clearCompletedItems,
+    ]
+  );
+
+  return <QueueContext.Provider value={contextValue}>{children}</QueueContext.Provider>;
 }
 
 export function useVideoQueue() {

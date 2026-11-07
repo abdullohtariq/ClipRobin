@@ -198,3 +198,33 @@ def test_youtube_api_routes(monkeypatch, tmp_path: Path):
     resp = test_client.post("/api/youtube/disconnect")
     assert resp.status_code == 200
     assert resp.json()["status"]["authenticated"] is False
+
+
+def test_refresh_token_expired_clears_auth(temp_youtube_service: YouTubeService):
+    temp_youtube_service.save_config("test-client-id", "test-secret")
+    temp_youtube_service.save_auth_data({
+        "access_token": "expired-token",
+        "refresh_token": "stale-refresh-token",
+        "expires_at": 1000.0,
+    })
+    assert temp_youtube_service.get_status()["authenticated"] is True
+
+    # Mock Google returning invalid_grant error on refresh
+    def mock_invalid_grant(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={
+                "error": "invalid_grant",
+                "error_description": "Token has been expired or revoked.",
+            },
+        )
+
+    temp_youtube_service._client = httpx.Client(transport=httpx.MockTransport(mock_invalid_grant))
+
+    with pytest.raises(ValueError, match="expired or was revoked by Google"):
+        temp_youtube_service.get_valid_access_token()
+
+    # Verify stale auth was cleared
+    assert temp_youtube_service.get_status()["authenticated"] is False
+    assert not temp_youtube_service.auth_file.exists()
+

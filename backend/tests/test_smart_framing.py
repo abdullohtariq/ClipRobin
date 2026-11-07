@@ -601,3 +601,6 @@ def test_get_crop_filter_safe_decimation_on_many_shots():
     assert cw == 608
     # Count occurrences of 'if(lt(t,' to verify it does not exceed 50
     assert expr.count("if(lt(t,") <= 50
+    # Verify smoothstep parameter is clamped with clip(...,0,1) so decimated shots never overshoot
+    assert "clip(" in expr
+

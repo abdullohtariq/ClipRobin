@@ -1,3 +1,33 @@
+import os
+from pathlib import Path
+
+
+def _load_dotenv_files() -> None:
+	"""Load key=value pairs from backend/.env or repo .env without overriding existing env vars."""
+	backend_dir = Path(__file__).resolve().parents[1]
+	for env_path in (backend_dir / ".env", backend_dir.parent / ".env"):
+		if not env_path.is_file():
+			continue
+		try:
+			for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+				line = raw_line.strip()
+				if not line or line.startswith("#") or "=" not in line:
+					continue
+				if line.startswith("export "):
+					line = line[len("export "):].strip()
+				key, value = line.split("=", 1)
+				key = key.strip()
+				value = value.strip()
+				if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+					value = value[1:-1]
+				if key:
+					os.environ.setdefault(key, value)
+		except OSError:
+			pass
+
+
+_load_dotenv_files()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes.analysis import router as analysis_router

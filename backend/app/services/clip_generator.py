@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import shutil
 import tempfile
 import threading
@@ -12,11 +13,70 @@ from app.services.video_editor import ClipGenerationCancelled, VideoEditorError,
 
 logger = logging.getLogger(__name__)
 
+
+def _atomic_write_json(target_path: Path, data: dict[str, Any]) -> None:
+    tmp_path = target_path.with_name(
+        f"{target_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp_path, target_path)
+
+
+def _clip_version_token(path: Path) -> str:
+    try:
+        st = path.stat()
+        return f"{st.st_mtime_ns}_{st.st_size}"
+    except OSError:
+        return uuid.uuid4().hex[:12]
+
+
+def _find_project_transcript_path(project_directory: Path) -> Path | None:
+    for candidate in (
+        project_directory / "transcription" / "transcript.json",
+        project_directory / "transcript.json",
+    ):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _is_transcript_usable(transcript_path: Path, required_duration: float | None) -> bool:
+    if not transcript_path.is_file():
+        return False
+    try:
+        data = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(data, dict) or not isinstance(data.get("segments"), list):
+        return False
+    if data.get("is_complete", True):
+        return True
+    if required_duration is None:
+        return False
+    try:
+        covered = float(data.get("covered_duration", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return False
+    return covered >= max(0.0, required_duration - 0.5)
+
+
+def _load_transcript_language(project_directory: Path) -> str | None:
+    transcript_path = _find_project_transcript_path(project_directory)
+    if transcript_path is None:
+        return None
+    try:
+        transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(transcript, dict):
+        return None
+    lang = transcript.get("language")
+    return str(lang).strip() if isinstance(lang, str) and lang.strip() else None
+
+
 def _load_transcript_segments(project_directory: Path) -> list[dict[str, Any]]:
-    transcript_path = project_directory / "transcription" / "transcript.json"
-    if not transcript_path.is_file():
-        transcript_path = project_directory / "transcript.json"
-    if not transcript_path.is_file():
+    transcript_path = _find_project_transcript_path(project_directory)
+    if transcript_path is None:
         return []
 
     try:
@@ -79,7 +139,10 @@ def generate_clips(
     caption_animation: str | None = None,
     face_tracking: bool | None = None,
 ) -> list[dict[str, Any]]:
-    source_files = list(project_directory.glob("source.*"))
+    source_files = [
+        p for p in project_directory.glob("source.*")
+        if p.is_file() and not p.name.lower().endswith((".part", ".ytdl", ".json", ".txt", ".tmp"))
+    ]
     if not source_files:
         raise FileNotFoundError("Source video not found")
     source_path = source_files[0]
@@ -90,6 +153,7 @@ def generate_clips(
         progress_callback("Preparing clip analysis", 0, 0)
     analysis_path = project_directory / "analysis.json"
     analysis = None
+    existing_top_lines: dict[tuple[float, float], str] = {}
     if analysis_path.is_file():
         try:
             loaded = json.loads(analysis_path.read_text(encoding="utf-8"))
@@ -97,11 +161,29 @@ def generate_clips(
             loaded = None
         if isinstance(loaded, dict):
             clips = loaded.get("clips", [])
-            is_old_mock_analysis = any(
-                isinstance(clip, dict) and clip.get("reason", "").startswith("Mock analysis:")
-                for clip in clips
+            for existing_clip in clips:
+                if isinstance(existing_clip, dict) and existing_clip.get("top_line"):
+                    try:
+                        key = (
+                            round(float(existing_clip["start"]), 1),
+                            round(float(existing_clip["end"]), 1),
+                        )
+                        existing_top_lines[key] = str(existing_clip["top_line"])
+                    except (KeyError, TypeError, ValueError):
+                        pass
+            loaded_options = (
+                loaded.get("generation_options", {})
+                if isinstance(loaded.get("generation_options"), dict)
+                else {}
             )
-            loaded_options = loaded.get("generation_options", {}) if isinstance(loaded.get("generation_options"), dict) else {}
+            is_old_mock_analysis = (
+                any(
+                    isinstance(clip, dict) and str(clip.get("reason", "")).startswith("Mock analysis:")
+                    for clip in clips
+                )
+                and int(loaded.get("analyzer_version", 0) or 0) < 2
+                and "clip_duration_seconds" not in loaded_options
+            )
             saved_mode = loaded_options.get("generation_mode", "random")
             mode_mismatch = saved_mode != generation_mode
             saved_duration = loaded_options.get("clip_duration_seconds")
@@ -113,24 +195,57 @@ def generate_clips(
                 and loaded_options.get("clip_count") is not None
                 and len(clips) < requested_clip_count
             )
-            if clips and not is_old_mock_analysis and not duration_mismatch and not count_insufficient and not mode_mismatch:
+            if (
+                clips
+                and not is_old_mock_analysis
+                and not duration_mismatch
+                and not count_insufficient
+                and not mode_mismatch
+            ):
                 analysis = loaded
+                # Ensure any abnormally short teaser fragment (< 14s) in cached analysis is expanded
+                if any(
+                    isinstance(c, dict)
+                    and isinstance(c.get("start"), (int, float))
+                    and isinstance(c.get("end"), (int, float))
+                    and (float(c["end"]) - float(c["start"])) < 14.0
+                    for c in clips
+                ):
+                    segs = _load_transcript_segments(project_directory)
+                    if segs:
+                        from app.services.ai_analyzer import _relocate_and_expand_clip_bounds
+                        for c in clips:
+                            if isinstance(c, dict) and isinstance(c.get("start"), (int, float)) and isinstance(c.get("end"), (int, float)):
+                                s_val, e_val = _relocate_and_expand_clip_bounds(
+                                    float(c["start"]),
+                                    float(c["end"]),
+                                    segs,
+                                    max_clip_seconds=int(max_clip_seconds),
+                                )
+                                c["start"] = s_val
+                                c["end"] = e_val
             else:
                 analysis = None
     if not analysis:
-        # Check if transcript exists or needs to be generated / reused from identical source
+        target_count = requested_clip_count or 10
+        required_max_duration = (
+            None if generation_mode == "ai" else (target_count * max_clip_seconds * 1.15)
+        )
+        # Check if a usable transcript exists or can be reused from an identical source video
         transcript_candidates = [
             project_directory / "transcription" / "transcript.json",
             project_directory / "transcript.json",
         ]
-        has_transcript = any(t.is_file() for t in transcript_candidates)
+        has_transcript = any(
+            _is_transcript_usable(t, required_max_duration) for t in transcript_candidates
+        )
         if not has_transcript:
             source_candidates = [
                 project_directory / f"source{ext}"
                 for ext in [".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"]
             ]
-            source_video = next((p for p in source_candidates if p.is_file()), None)
-            if source_video:
+            source_video = next((p for p in source_candidates if p.is_file()), source_path)
+            if source_video and source_video.is_file():
                 reused_transcript = False
                 source_size = source_video.stat().st_size
                 projects_parent = project_directory.parent
@@ -141,7 +256,7 @@ def generate_clips(
                         other_t = other_proj / "transcription" / "transcript.json"
                         if not other_t.is_file():
                             other_t = other_proj / "transcript.json"
-                        if other_t.is_file():
+                        if _is_transcript_usable(other_t, required_max_duration):
                             other_src = next(
                                 (
                                     other_proj / f"source{ext}"
@@ -169,25 +284,24 @@ def generate_clips(
                     def report_transcription(step_name: str, pct: float) -> None:
                         if progress_callback:
                             progress_callback(f"Transcribing audio ({round(pct)}%)", 0, 0)
-                    target_count = requested_clip_count or 10
-                    max_d = None if generation_mode == "ai" else (target_count * max_clip_seconds * 1.15)
                     transcribe_video(
                         source_video,
                         project_directory / "transcription",
                         progress_callback=report_transcription,
                         cancel_event=cancel_event,
-                        max_duration=max_d,
+                        max_duration=required_max_duration,
                     )
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise ClipGenerationCancelled("Clip generation was cancelled")
 
         if progress_callback:
             progress_callback("Analyzing transcript", 0, 0)
         if generation_mode == "ai":
             from app.services.ai_analyzer import analyze_transcript
 
-            transcript_path = project_directory / "transcription" / "transcript.json"
-            if not transcript_path.is_file():
-                transcript_path = project_directory / "transcript.json"
-            if not transcript_path.is_file():
+            transcript_path = _find_project_transcript_path(project_directory)
+            if transcript_path is None:
                 raise FileNotFoundError("Transcript not found for AI analysis")
             transcript = json.loads(transcript_path.read_text(encoding="utf-8"))
             try:
@@ -210,6 +324,19 @@ def generate_clips(
                 max_clip_seconds=max_clip_seconds,
                 max_clips=requested_clip_count,
             )
+
+        if existing_top_lines and isinstance(analysis, dict):
+            for new_clip in analysis.get("clips", []):
+                if isinstance(new_clip, dict) and not new_clip.get("top_line"):
+                    try:
+                        key = (
+                            round(float(new_clip["start"]), 1),
+                            round(float(new_clip["end"]), 1),
+                        )
+                        if key in existing_top_lines:
+                            new_clip["top_line"] = existing_top_lines[key]
+                    except (KeyError, TypeError, ValueError):
+                        pass
 
     saved_options = analysis.get("generation_options", {}) if isinstance(analysis, dict) else {}
     if framing_mode is not None:
@@ -251,11 +378,12 @@ def generate_clips(
         "clip_duration_seconds": int(max_clip_seconds),
         "clip_count": requested_clip_count,
     }
-    analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
+    _atomic_write_json(analysis_path, analysis)
 
     if cancel_event is not None and cancel_event.is_set():
         raise ClipGenerationCancelled("Clip generation was cancelled")
     transcript_segments = _load_transcript_segments(project_directory)
+    transcript_language = _load_transcript_language(project_directory)
     generated = []
     analysis_clips = analysis.get("clips", [])
     if requested_clip_count is not None and len(analysis_clips) > requested_clip_count:
@@ -286,7 +414,7 @@ def generate_clips(
     if progress_callback:
         progress_callback("Rendering clips", 0, len(analysis_clips))
 
-    existing_clips = list(clips_directory.glob("*.mp4"))
+    existing_clips = [p for p in clips_directory.glob("*.mp4") if not p.name.startswith(".")]
     backup_directory: Path | None = None
     if existing_clips:
         backup_dir_path = project_directory / f".clips-backup-{uuid.uuid4().hex[:8]}"
@@ -307,20 +435,25 @@ def generate_clips(
                     segment for segment in transcript_segments
                     if segment["end"] > clip["start"] and segment["start"] < clip["end"]
                 ]
+                render_kwargs: dict[str, Any] = {
+                    "subtitle_segments": subtitle_segments if show_subtitles else None,
+                    "show_subtitles": show_subtitles,
+                    "show_watermark": show_watermark,
+                    "top_line": clip.get("top_line"),
+                    "cancel_event": cancel_event,
+                    "framing_mode": use_framing_mode,
+                    "caption_style": use_caption_style,
+                    "caption_animation": use_caption_animation,
+                    "face_tracking": use_face_tracking,
+                }
+                if transcript_language:
+                    render_kwargs["language"] = transcript_language
                 create_clip(
                     source_path,
                     temp_output,
                     clip["start"],
                     clip["end"],
-                    subtitle_segments=subtitle_segments if show_subtitles else None,
-                    show_subtitles=show_subtitles,
-                    show_watermark=show_watermark,
-                    top_line=clip.get("top_line"),
-                    cancel_event=cancel_event,
-                    framing_mode=use_framing_mode,
-                    caption_style=use_caption_style,
-                    caption_animation=use_caption_animation,
-                    face_tracking=use_face_tracking,
+                    **render_kwargs,
                 )
                 if cancel_event is not None and cancel_event.is_set():
                     if temp_output.is_file():
@@ -336,6 +469,7 @@ def generate_clips(
                     "id": clip_id,
                     "duration": round(clip["end"] - clip["start"], 3),
                     "file": final_output.name,
+                    "v": _clip_version_token(final_output),
                     "top_line": clip.get("top_line", ""),
                     "framing_mode": use_framing_mode,
                     "caption_style": use_caption_style,
@@ -395,7 +529,10 @@ def render_single_clip(
     caption_animation: str | None = None,
     face_tracking: bool | None = None,
 ) -> dict[str, Any]:
-    source_files = list(project_directory.glob("source.*"))
+    source_files = [
+        p for p in project_directory.glob("source.*")
+        if p.is_file() and not p.name.lower().endswith((".part", ".ytdl", ".json", ".txt", ".tmp"))
+    ]
     if not source_files:
         raise FileNotFoundError("Source video not found")
     source_path = source_files[0]
@@ -457,6 +594,8 @@ def render_single_clip(
 
     if caption_animation is not None:
         use_caption_animation = caption_animation
+    elif target_clip.get("caption_animation"):
+        use_caption_animation = str(target_clip["caption_animation"])
     elif "caption_animation" in saved_options and saved_options["caption_animation"] is not None:
         use_caption_animation = str(saved_options["caption_animation"])
     else:
@@ -481,6 +620,7 @@ def render_single_clip(
     analysis["generation_options"]["face_tracking"] = use_face_tracking
 
     transcript_segments = _load_transcript_segments(project_directory)
+    transcript_language = _load_transcript_language(project_directory)
     subtitle_segments = [
         segment for segment in transcript_segments
         if segment["end"] > target_clip["start"] and segment["start"] < target_clip["end"]
@@ -492,21 +632,25 @@ def render_single_clip(
     final_output = clips_directory / f"{actual_id}.mp4"
     temp_output = clips_directory / f".rendering_{actual_id}_{uuid.uuid4().hex[:6]}.mp4"
 
+    render_kwargs: dict[str, Any] = {
+        "source_path": source_path,
+        "output_path": temp_output,
+        "start_time": target_clip["start"],
+        "end_time": target_clip["end"],
+        "subtitle_segments": subtitle_segments if use_subtitles else None,
+        "show_subtitles": use_subtitles,
+        "show_watermark": use_watermark,
+        "top_line": cleaned_top_line,
+        "framing_mode": use_framing_mode,
+        "caption_style": use_caption_style,
+        "caption_animation": use_caption_animation,
+        "face_tracking": use_face_tracking,
+    }
+    if transcript_language:
+        render_kwargs["language"] = transcript_language
+
     try:
-        create_clip(
-            source_path=source_path,
-            output_path=temp_output,
-            start_time=target_clip["start"],
-            end_time=target_clip["end"],
-            subtitle_segments=subtitle_segments if use_subtitles else None,
-            show_subtitles=use_subtitles,
-            show_watermark=use_watermark,
-            top_line=cleaned_top_line,
-            framing_mode=use_framing_mode,
-            caption_style=use_caption_style,
-            caption_animation=use_caption_animation,
-            face_tracking=use_face_tracking,
-        )
+        create_clip(**render_kwargs)
         if temp_output.is_file():
             temp_output.replace(final_output)
     finally:
@@ -514,17 +658,22 @@ def render_single_clip(
             temp_output.unlink(missing_ok=True)
 
     target_clip["top_line"] = cleaned_top_line or ""
+    target_clip["framing_mode"] = use_framing_mode
+    target_clip["caption_style"] = use_caption_style
+    target_clip["caption_animation"] = use_caption_animation
     target_clip["face_tracking"] = use_face_tracking
-    analysis_path.write_text(json.dumps(analysis, indent=2), encoding="utf-8")
+    _atomic_write_json(analysis_path, analysis)
 
     return {
         **target_clip,
         "id": actual_id,
         "duration": round(target_clip["end"] - target_clip["start"], 3),
         "file": final_output.name,
+        "v": _clip_version_token(final_output),
         "top_line": cleaned_top_line or "",
         "framing_mode": use_framing_mode,
         "caption_style": use_caption_style,
         "caption_animation": use_caption_animation,
+        "face_tracking": use_face_tracking,
         "status": "ready",
     }

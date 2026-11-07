@@ -198,3 +198,15 @@ def test_karaoke_colors_and_animations():
     ass_punch = generate_ass_subtitles(segments, 0.0, 2.0, style="punch")
     assert r"\fscx116" in ass_punch
     assert r"\1c&H0004C2F7&" in ass_punch
+
+
+    # Custom animation overrides must apply distinct ASS transforms
+    ass_robin_fade = generate_ass_subtitles(segments, 0.0, 2.0, style="robin", animation="fade")
+    assert r"\alpha&H60&" in ass_robin_fade
+    assert r"\t(0,140,\alpha&H00&\fscx106\fscy106)" in ass_robin_fade
+
+    ass_robin_glide = generate_ass_subtitles(segments, 0.0, 2.0, style="robin", animation="glide")
+    assert r"\fscx96\fscy96\t(0,140,\fscx108\fscy108)" in ass_robin_glide
+
+    ass_karaoke_pop = generate_ass_subtitles(segments, 0.0, 2.0, style="karaoke", animation="pop")
+    assert r"\fscx116\fscy116\t(0,120,\fscx106\fscy106)" in ass_karaoke_pop

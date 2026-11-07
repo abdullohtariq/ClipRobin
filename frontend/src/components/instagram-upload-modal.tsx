@@ -38,15 +38,29 @@ export function InstagramUploadModal({
       if (active) setVideoUrl(url);
     });
 
-    const savedAccountId = localStorage.getItem("cliprobin_ig_account_id");
-    const savedToken = localStorage.getItem("cliprobin_ig_access_token");
-    if (savedAccountId) setInstagramAccountId(savedAccountId);
-    if (savedToken) setAccessToken(savedToken);
+    try {
+      const savedAccountId = localStorage.getItem("cliprobin_ig_account_id");
+      const savedToken = localStorage.getItem("cliprobin_ig_access_token");
+      if (savedAccountId) setInstagramAccountId(savedAccountId);
+      if (savedToken) setAccessToken(savedToken);
+    } catch {}
 
     return () => {
       active = false;
     };
   }, [clip, projectId]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isSaving) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isSaving, onClose]);
 
   const handleCopyCaption = async () => {
     try {
@@ -80,8 +94,10 @@ export function InstagramUploadModal({
   };
 
   const handleSaveApiKeys = () => {
-    localStorage.setItem("cliprobin_ig_account_id", instagramAccountId.trim());
-    localStorage.setItem("cliprobin_ig_access_token", accessToken.trim());
+    try {
+      localStorage.setItem("cliprobin_ig_account_id", instagramAccountId.trim());
+      localStorage.setItem("cliprobin_ig_access_token", accessToken.trim());
+    } catch {}
     setApiStatus("Meta Graph API credentials saved locally. Publishing via Graph API requires a public HTTPS container URL and an Instagram Professional Account linked to a Facebook Page.");
     setTimeout(() => setApiStatus(null), 5000);
   };
@@ -91,9 +107,16 @@ export function InstagramUploadModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="instagram-modal-title"
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!isSaving && e.target === e.currentTarget) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
     >
-      <div className="relative flex flex-col max-w-xl w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl overflow-hidden max-h-[92vh]">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative flex flex-col max-w-xl w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl overflow-hidden max-h-[92vh]"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 px-6 py-4 bg-zinc-900/50">
           <div className="flex items-center gap-2.5">
@@ -114,9 +137,10 @@ export function InstagramUploadModal({
           </div>
           <button
             type="button"
+            disabled={isSaving}
             onClick={onClose}
             aria-label="Close dialog"
-            className="size-8 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center transition-colors focus-ring"
+            className="size-8 rounded-full bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center transition-colors focus-ring disabled:opacity-50"
           >
             ✕
           </button>
@@ -179,7 +203,7 @@ export function InstagramUploadModal({
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label htmlFor="instagram-caption" className="text-xs font-medium text-zinc-300">
-                    Caption & Viral Reels Hashtags
+                    Caption &amp; Viral Reels Hashtags
                   </label>
                   <button
                     type="button"

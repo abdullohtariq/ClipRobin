@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { getPaddleConfig, savePaddleConfig, PaddleConfig, openPaddleCheckout } from "@/src/lib/paddle";
+import { getApiBaseUrl } from "@/src/lib/api";
 import { useSubscription } from "@/src/lib/subscription-context";
 
 export interface PaddleSandboxModalProps {
@@ -14,14 +15,30 @@ export function PaddleSandboxModal({ isOpen, onClose }: PaddleSandboxModalProps)
   const [config, setConfig] = useState<PaddleConfig>(getPaddleConfig());
   const [isSaved, setIsSaved] = useState(false);
   const [testStatus, setTestStatus] = useState<string | null>(null);
+  const [webhookBaseUrl, setWebhookBaseUrl] = useState("http://127.0.0.1:8000");
 
   useEffect(() => {
     if (isOpen) {
       setConfig(getPaddleConfig());
       setIsSaved(false);
       setTestStatus(null);
+      void getApiBaseUrl()
+        .then((url) => setWebhookBaseUrl(url))
+        .catch(() => {});
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -39,8 +56,11 @@ export function PaddleSandboxModal({ isOpen, onClose }: PaddleSandboxModalProps)
       planType: plan,
       userEmail: "creator@cliprobin.test",
       onSuccess: (txnId) => {
-        upgradeToPro(`ROBIN-PRO-${txnId.toUpperCase()}`);
+        void upgradeToPro(`ROBIN-PRO-${txnId.toUpperCase()}`);
         setTestStatus("🎉 Paddle Sandbox checkout completed successfully!");
+      },
+      onClose: () => {
+        setTestStatus("Paddle checkout closed.");
       },
     });
 
@@ -60,6 +80,10 @@ export function PaddleSandboxModal({ isOpen, onClose }: PaddleSandboxModalProps)
       role="dialog"
       aria-modal="true"
       aria-labelledby="paddle-sandbox-title"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in text-white"
     >
       <div
@@ -84,6 +108,7 @@ export function PaddleSandboxModal({ isOpen, onClose }: PaddleSandboxModalProps)
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close Paddle Sandbox Setup"
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
           >
             ✕
@@ -127,7 +152,7 @@ export function PaddleSandboxModal({ isOpen, onClose }: PaddleSandboxModalProps)
               >
                 Webhook URL
               </a>
-              : <code className="text-zinc-200 bg-zinc-900 px-1 rounded">http://127.0.0.1:8000/api/webhooks/paddle</code>
+              : <code className="text-zinc-200 bg-zinc-900 px-1 rounded">{webhookBaseUrl}/api/webhooks/paddle</code>
             </li>
           </ol>
         </div>
