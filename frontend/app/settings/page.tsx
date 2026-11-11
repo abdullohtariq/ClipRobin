@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import Link from "next/link";
 import {
   CaptionStyle,
   getYouTubeStatus,
@@ -14,7 +15,6 @@ import {
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 import { useSubscription } from "@/src/lib/subscription-context";
 import { CustomWatermarkSettings } from "@/src/components/custom-watermark-settings";
-import { PaddleSandboxModal } from "@/src/components/paddle-sandbox-modal";
 
 const SETTINGS_STORAGE_KEY = "cliprobin.settings";
 
@@ -40,19 +40,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export default function SettingsPage() {
   const { status: aiDevStatus, refresh: refreshAiStatus } = useAIDeveloperStatus();
-  const { isPro, openUpgradeModal, upgradeToPro, downgradeToFree, licenseKey, isCaptionStyleAllowed } = useSubscription();
-  const [settingsLicenseInput, setSettingsLicenseInput] = useState("");
-  const [settingsLicenseMsg, setSettingsLicenseMsg] = useState<string | null>(null);
-  const [isPaddleModalOpen, setIsPaddleModalOpen] = useState(false);
-
-  const handleSettingsLicenseSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!settingsLicenseInput.trim()) return;
-    await upgradeToPro(settingsLicenseInput.trim());
-    setSettingsLicenseMsg("Pro license successfully activated!");
-    setSettingsLicenseInput("");
-    setTimeout(() => setSettingsLicenseMsg(null), 3000);
-  };
+  const { isPro, openUpgradeModal, isCaptionStyleAllowed } = useSubscription();
 
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSaved, setIsSaved] = useState(false);
@@ -218,17 +206,12 @@ export default function SettingsPage() {
           defaultCaptionStyle: safeStyle,
         };
         setSettings(nextSettings);
-        if (parsed.defaultCaptionStyle && parsed.defaultCaptionStyle !== safeStyle) {
-          localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(nextSettings));
-        }
       } catch {
         // Ignore JSON parse errors
       }
     };
 
     syncFromStorage();
-    window.addEventListener("cliprobin:subscription-changed", syncFromStorage);
-    return () => window.removeEventListener("cliprobin:subscription-changed", syncFromStorage);
   }, [isCaptionStyleAllowed]);
 
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
@@ -276,7 +259,7 @@ export default function SettingsPage() {
                 <div className="size-6 rounded-md bg-amber-500/15 flex items-center justify-center text-amber-300 border border-amber-500/30 text-xs font-bold">
                   ★
                 </div>
-                <h2 className="text-base font-semibold text-white">Subscription &amp; License</h2>
+                <h2 className="text-base font-semibold text-white">Account &amp; Subscription</h2>
               </div>
               <span
                 className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-semibold ${
@@ -296,60 +279,9 @@ export default function SettingsPage() {
                 : "Free tier processes video locally for free. Upgrade to Pro to unlock Gemini AI hook detection, remove watermarks, and use custom brand logos."}
             </p>
 
-            {settingsLicenseMsg && (
-              <p className="text-xs text-emerald-400 font-semibold">{settingsLicenseMsg}</p>
-            )}
-
-            <div className="flex flex-wrap items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => setIsPaddleModalOpen(true)}
-                className="px-3.5 py-2 rounded-xl border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <span>💳 Paddle Sandbox Settings</span>
-              </button>
-              {!isPro ? (
-                <button
-                  type="button"
-                  onClick={() => openUpgradeModal("Clip Robin Pro")}
-                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-zinc-950 text-xs font-bold transition-all shadow-md cursor-pointer"
-                >
-                  ⚡ Upgrade to Pro ($19/mo or $79 lifetime)
-                </button>
-              ) : (
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-emerald-300 font-medium">
-                    License: {licenseKey || "Active Local License"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={downgradeToFree}
-                    className="text-xs text-zinc-500 hover:text-rose-400 underline transition-colors cursor-pointer"
-                  >
-                    Switch to Free (Testing)
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {!isPro && (
-              <form onSubmit={handleSettingsLicenseSubmit} className="pt-2 flex items-center gap-2 max-w-md">
-                <input
-                  type="text"
-                  placeholder="Enter license key (ROBIN-PRO-...)"
-                  value={settingsLicenseInput}
-                  onChange={(e) => setSettingsLicenseInput(e.target.value)}
-                  className="flex-1 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 uppercase font-mono"
-                />
-                <button
-                  type="submit"
-                  disabled={!settingsLicenseInput.trim()}
-                  className="px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-white text-xs font-semibold transition-colors shrink-0"
-                >
-                  Activate
-                </button>
-              </form>
-            )}
+            <Link href="/subscription" className="inline-block rounded-lg border border-zinc-700 px-4 py-2 text-xs font-semibold text-zinc-200 hover:bg-zinc-800">
+              Manage account and plan
+            </Link>
           </section>
 
           {/* Custom Watermark & Brand Logo Section */}
@@ -678,7 +610,6 @@ export default function SettingsPage() {
           </section>
         </div>
       </div>
-      <PaddleSandboxModal isOpen={isPaddleModalOpen} onClose={() => setIsPaddleModalOpen(false)} />
     </main>
   );
 }

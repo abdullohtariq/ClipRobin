@@ -2,7 +2,7 @@
 
 > Open-source, local-first video clipping for creators who want automation without surrendering their media workflow to the cloud.
 
-Clip Robin (**v0.1.29**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). It is built around a straightforward principle: **your computer does the heavy media lifting locally, while cloud AI is strictly an opt-in tool for semantic intelligence when you want it.**
+Clip Robin (**v0.1.30**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). It is built around a straightforward principle: **your computer does the heavy media lifting locally, while cloud AI is strictly an opt-in tool for semantic intelligence when you want it.**
 
 That means zero recurring minute quotas, complete local file privacy, and full control over the models, providers, and exports behind every clip.
 
@@ -65,7 +65,7 @@ flowchart TD
 | Semantic hook & virality scoring | Selected BYOK LLM API | Optional (transcript text only) |
 | Direct YouTube Shorts publishing | YouTube Data API v3 | Optional (explicit user action) |
 
-## Key Features (v0.1.29)
+## Key Features (v0.1.30)
 
 - **Dual Intake & Multi-Video Batch Queue:** Import local files (`.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`) or download YouTube links (`yt-dlp`), queue multiple videos sequentially, and cancel or retry items cleanly at any stage.
 - **Three 9:16 Vertical Framing Modes:**
@@ -100,7 +100,7 @@ ClipRobin/
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-`setup.ps1` creates `.venv`, installs `requirements\backend.txt`, and runs `npm ci` in `frontend/`. Requires **Python 3.10+** (3.12 recommended), **Node.js 20.9+**, and **FFmpeg** on `PATH` (or placed in `backend/bin/`):
+`setup.ps1` creates `.venv`, installs `requirements\backend.txt`, and runs `npm ci` in `frontend/`. Use **Python 3.12**, **Node.js 24**, and **FFmpeg** on `PATH` or in `backend/bin/`.
 
 ```powershell
 winget install --id Python.Python.3.12 --source winget
@@ -152,19 +152,19 @@ npm.cmd run build
 
 ## Versioning & Signed Desktop Releases
 
-`frontend/package.json`, `frontend/src-tauri/Cargo.toml`, and `frontend/src-tauri/tauri.conf.json` share a single synchronized version (currently **`0.1.29`**). Always bump all three together from `frontend/`:
+`frontend/package.json`, `frontend/src-tauri/Cargo.toml`, and `frontend/src-tauri/tauri.conf.json` share a single synchronized version (currently **`0.1.30`**). Always bump all three together from `frontend/`:
 
 ```powershell
-npm.cmd run version:set -- 0.1.29
+npm.cmd run version:set -- 0.1.30
 npm.cmd run version:check
 ```
 
 Pushing a matching `v*` tag triggers `.github/workflows/release-tauri.yml` to build the PyInstaller sidecar, bundle the signed NSIS Windows installer, and publish Tauri updater metadata to GitHub Releases:
 
 ```powershell
-git tag v0.1.29
+git tag v0.1.30
 git push origin main
-git push origin v0.1.29
+git push origin v0.1.30
 ```
 
 Production desktop builds (`com.cliprobin.desktop`) store projects, Whisper models, logs (`backend.log`), and local credentials inside `%APPDATA%\com.cliprobin.desktop` and check for signed updates automatically on startup and every 6 hours.
@@ -183,7 +183,7 @@ Full request/response contracts are documented in [`ai.md`](./ai.md). Core route
 GET    /api/health
 GET    /api/caption-styles
 GET    /api/jobs/active
-POST   /api/download                          | GET /api/download/jobs/{project_id}
+POST   /api/download                          | GET /api/download/{project_id}
 POST   /api/local-video/transcribe            | POST /api/local-video/from-path | GET /api/local-video/jobs/{project_id}
 GET    /api/projects                          | PATCH /api/projects/{id}        | DELETE /api/projects/{id}
 POST   /api/projects/{id}/transcribe
@@ -193,8 +193,9 @@ POST   /api/projects/{id}/clips/{clip_id}/save-dialog | GET /clips/download-all 
 GET    /api/ai/status                         | POST /api/ai/config             | POST /api/ai/developer-mode | POST /api/analyze
 GET    /api/watermark                         | POST /api/watermark/upload      | POST /api/watermark/settings | DELETE /api/watermark
 GET    /api/youtube/status                    | POST /api/youtube/config        | GET /api/youtube/auth-url   | POST /api/youtube/upload
-POST   /api/webhooks/paddle                   | GET /api/webhooks/paddle/status
 ```
+
+Free local editing works without an account. To enable account sign-in and verified Pro subscriptions, follow the [Supabase and Lemon Squeezy setup](supabase/README.md). It covers a Free database project, email and optional browser sign-in, and payment testing with no live charge.
 
 ## Contributing
 

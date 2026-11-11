@@ -40,7 +40,6 @@ from app.routes.local_video import router as local_video_router
 from app.routes.projects import router as projects_router
 from app.routes.transcription import router as transcription_router
 from app.routes.watermark import router as watermark_router
-from app.routes.webhooks import router as webhooks_router
 from app.routes.youtube import router as youtube_router
 
 app = FastAPI(title="Clip Robin API")
@@ -69,7 +68,6 @@ app.include_router(local_video_router)
 app.include_router(projects_router)
 app.include_router(transcription_router)
 app.include_router(watermark_router)
-app.include_router(webhooks_router)
 app.include_router(youtube_router)
 
 

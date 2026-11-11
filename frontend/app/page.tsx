@@ -202,8 +202,6 @@ export default function Home() {
     };
 
     syncPreferences();
-    window.addEventListener("cliprobin:subscription-changed", syncPreferences);
-    return () => window.removeEventListener("cliprobin:subscription-changed", syncPreferences);
   }, [isPro, isCaptionStyleAllowed]);
 
   useEffect(() => {

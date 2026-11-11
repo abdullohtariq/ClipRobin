@@ -30,7 +30,7 @@ Creators spend hours manually scrubbing through hours of footage, finding intere
 
 | Competitor | Platform Type | Pricing Model | Major Drawbacks | Clip Robin Advantage |
 | :--- | :--- | :--- | :--- | :--- |
-| **Opus Clip** (`opus.pro`) | Cloud Web SaaS | • **Free:** 60 mins/mo (watermarked, clips expire in 3 days)<br>• **Starter:** \$15/mo for 150 mins<br>• **Pro:** \$29/mo for 300 mins | • Consumes credits per minute of source video (a 60-min podcast burns 60 credits even for 1 clip)<br>• Forced cloud uploads<br>• Watermarks on free plan | **100% Free & Unlimited** source video processing on your local machine. No watermarks, no expiring clips. |
+| **Opus Clip** (`opus.pro`) | Cloud Web SaaS | • **Free:** 60 mins/mo (watermarked, clips expire in 3 days)<br>• **Starter:** \$15/mo for 150 mins<br>• **Pro:** \$29/mo for 300 mins | • Consumes credits per minute of source video (a 60-min podcast burns 60 credits even for 1 clip)<br>• Forced cloud uploads<br>• Watermarks on free plan | Local processing with no minute quotas or expiring files. Free exports include Clip Robin branding. |
 | **Submagic** (`submagic.co`) | Cloud Web SaaS | • **Starter:** \$19/mo (~15 videos, max 2 min/video)<br>• **Pro:** \$39/mo (~40 videos, max 5 min/video)<br>• **Business:** \$69/mo | • Strict duration caps per video<br>• High subscription pricing<br>• Expensive credit burn for basic features | **No duration caps**, process full 3-hour podcasts locally without spending credits or fees. |
 | **Klap** (`klap.app`) | Cloud Web SaaS | • **Basic:** \$29/mo (10 videos)<br>• **Pro:** \$79/mo (30 videos) | • Expensive for individual creators<br>• All media stored on third-party servers | **100% Local Privacy.** Source media never leaves the creator's storage drive. |
 | **Vizard.ai / Munch** | Cloud Web SaaS | • \$16 - \$49+/mo | • Targeted at enterprise marketing teams with locked workflows | **Open-source & transparent.** Inspectable code, modifiable subtitle styles, and offline capability. |
@@ -96,7 +96,7 @@ flowchart TD
 ### Section-by-Section Wireframe & Copywriting Plan
 
 #### Section 1: Sticky Navigation Bar
-- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.29 Beta` badge.
+- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.30 Beta` badge.
 - **Center:** Navigation Links (`Features`, `Compare`, `Captions`, `Architecture`, `Docs`).
 - **Right:**
   - **GitHub Star Button:** Link to repository with live star count.
@@ -106,13 +106,13 @@ flowchart TD
 - **Tagline Pill:** `⚡ 100% Local-First Desktop App for Windows` (with pulsing emerald dot).
 - **Headline (H1):**  
   **Turn Hours of Video into Viral Shorts.**  
-  <span style="color: #10b981;">100% Free. Completely Local. Zero Cloud Limits.</span>
+  <span style="color: #10b981;">Free local clipping and export.</span>
 - **Subheadline (P):**  
-  Extract, reframe, caption, and export high-performing 9:16 vertical clips on your own computer. No monthly subscriptions, no video uploads, no watermarks, and no expiring clips.
+  Extract, reframe, caption, and export 9:16 vertical clips on your own computer. The Free plan includes a Clip Robin watermark. Pro offers watermark removal, custom branding, more caption styles, and optional Gemini hook selection.
 - **CTA Cluster:**
   - **Primary CTA:** Huge Emerald Button:  
     `⬇ Download for Windows (x64)`  
-    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.29
+    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.30
   - **Secondary CTA:** Ghost Button with GitHub Octocat:  
     `★ Star on GitHub`
 - **Zero-Friction Bullets below CTA:**
@@ -167,7 +167,7 @@ Clip Robin already ships with **6 distinctive ASS subtitle styles** and **5 anim
 - *Do I need an expensive graphics card (GPU) to run Clip Robin?*  
   No. Clip Robin is optimized with multi-threaded CPU processing. If you have an NVIDIA GPU, it automatically takes advantage of CUDA acceleration for ultra-fast rendering and transcription.
 - *Is Clip Robin really completely free?*  
-  Yes. The application and all local processing (transcription, cutting, reframing, and subtitling) are 100% free and open source. If you choose to enable cloud AI for clip hook generation, you can provide your own API key (paying direct wholesale rates of pennies per hour).
+  Yes. Free includes local transcription, Fast Interval cuts, reframing, basic captions, and watermarked exports. Pro adds advanced caption styles, branding controls, and Gemini Hook Finder using your own API key.
 - *Can I use it offline?*  
   Yes. Media inspection, local transcription, smart framing, and video rendering require zero internet connectivity.
 - *What platforms are supported?*  

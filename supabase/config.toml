@@ -1,0 +1,4 @@
+project_id = "cliprobin"
+
+[functions.cliprobin-billing]
+verify_jwt = false # The function verifies user tokens and provider signatures separately.

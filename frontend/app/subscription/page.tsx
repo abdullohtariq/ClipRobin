@@ -1,276 +1,227 @@
 "use client";
 
-import React, { useState } from "react";
-import { useSubscription, PLAN_FEATURES } from "@/src/lib/subscription-context";
-import { PaddleSandboxModal } from "@/src/components/paddle-sandbox-modal";
-import { openPaddleCheckout } from "@/src/lib/paddle";
+import { isTauri } from "@tauri-apps/api/core";
+import { isAuthError } from "@supabase/supabase-js";
+import { useState, type FormEvent } from "react";
+import { accountClient, billingRequest } from "@/src/lib/account";
+import { PLAN_FEATURES, useSubscription } from "@/src/lib/subscription-context";
+
+const inputClass = "mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm";
+const primaryClass = "inline-block rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-50";
+const secondaryClass = "inline-block rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium disabled:opacity-50";
+const accountPageUrl = process.env.NEXT_PUBLIC_CLIPROBIN_ACCOUNT_URL;
+const oauthProviders = [
+  { id: "github", label: "GitHub", enabled: process.env.NEXT_PUBLIC_CLIPROBIN_GITHUB_AUTH === "1" },
+  { id: "google", label: "Google", enabled: process.env.NEXT_PUBLIC_CLIPROBIN_GOOGLE_AUTH === "1" },
+] as const;
+
+type AuthMode = "sign-in" | "sign-up" | "reset";
+
+function AccountPanel() {
+  const { authReady, session, recovering, setRecovering, plan, planError, refreshPlan } = useSubscription();
+  const [mode, setMode] = useState<AuthMode>("sign-in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
+  const [billingLink, setBillingLink] = useState<{ accountId: string; url: string; action: "checkout" | "portal" } | null>(null);
+  const [desktop] = useState(() => typeof window !== "undefined" && isTauri());
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await action();
+    } catch (err) {
+      if (isAuthError(err) && err.code === "over_email_send_rate_limit") {
+        setError("Supabase has reached its email limit. Use the confirmation link already sent, or try again later.");
+      } else if (isAuthError(err) && err.code === "email_address_not_authorized") {
+        setError("This email can’t receive account messages from this Supabase project. Ask the project owner to configure public email delivery.");
+      } else {
+        setError(err instanceof Error ? err.message : "Try again shortly.");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function confirmationRedirect() {
+    return accountPageUrl ?? (desktop ? undefined : `${window.location.origin}/subscription`);
+  }
+
+  function resendConfirmation() {
+    const auth = accountClient?.auth;
+    if (!auth || !unconfirmedEmail || unconfirmedEmail !== email.trim()) return;
+    void run(async () => {
+      const { error: resendError } = await auth.resend({
+        type: "signup",
+        email: unconfirmedEmail,
+        options: { emailRedirectTo: confirmationRedirect() },
+      });
+      if (resendError) throw resendError;
+      setMessage("Check your inbox and spam for the confirmation link, then return here to sign in.");
+    });
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!accountClient) return;
+    const auth = accountClient.auth;
+    void run(async () => {
+      if (recovering) {
+        const response = await auth.updateUser({ password });
+        if (response.error) throw response.error;
+        setRecovering(false);
+        setMessage("Password updated.");
+      } else if (mode === "reset") {
+        const response = await auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/subscription` });
+        if (response.error) throw response.error;
+        setMessage("If an account exists, check your email and open the reset link in this browser.");
+      } else if (mode === "sign-up") {
+        const response = await auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: confirmationRedirect() } });
+        if (response.error) throw response.error;
+        if (!response.data.session) {
+          setUnconfirmedEmail(email.trim());
+          setMode("sign-in");
+          setMessage("Check your inbox and spam for the confirmation link, then return here to sign in.");
+        }
+      } else {
+        const response = await auth.signInWithPassword({ email: email.trim(), password });
+        if (response.error?.code === "email_not_confirmed") {
+          setUnconfirmedEmail(email.trim());
+          setError("Confirm your email to sign in. Check your inbox and spam for the confirmation link.");
+          return;
+        }
+        if (response.error) throw response.error;
+        setUnconfirmedEmail(null);
+      }
+      setPassword("");
+    });
+  }
+
+  function socialSignIn(provider: "github" | "google") {
+    const auth = accountClient?.auth;
+    if (!auth) return;
+    void run(async () => {
+      const response = await auth.signInWithOAuth({ provider, options: { redirectTo: `${window.location.origin}/subscription` } });
+      if (response.error) throw response.error;
+    });
+  }
+
+  function getBillingLink(action: "checkout" | "portal") {
+    if (!session) return;
+    setBillingLink(null);
+    void run(async () => {
+      const result = await billingRequest<{ url: string }>(action, session.access_token);
+      const url = new URL(result.url);
+      if (url.protocol !== "https:" || !url.hostname.endsWith(".lemonsqueezy.com") || url.username || url.password || url.port) {
+        throw new Error("Checkout returned an invalid link.");
+      }
+      setBillingLink({ accountId: session.user.id, url: url.href, action });
+    });
+  }
+
+  const auth = accountClient?.auth;
+  if (!auth) return <p className="text-sm text-zinc-300">Account sign-in is unavailable in this build. You can still create and export clips on the Free plan.</p>;
+  if (!authReady) return <p role="status" className="text-sm text-zinc-300">Checking sign-in…</p>;
+
+  const accountForm = !session || recovering;
+  return (
+    <div className="space-y-4">
+      {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+      {message && <p role="status" className="text-sm text-emerald-300">{message}</p>}
+      {accountForm ? (
+        <>
+          <form className="max-w-md space-y-4" onSubmit={submit}>
+            <h2 className="font-semibold">{recovering ? "Choose a new password" : mode === "sign-up" ? "Create a free account" : mode === "reset" ? "Reset your password" : "Sign in with email"}</h2>
+            {!recovering && <label className="block text-sm">Email<input className={inputClass} required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
+            {(recovering || mode !== "reset") && (
+              <label className="block text-sm">Password<input className={inputClass} required minLength={recovering || mode === "sign-up" ? 8 : undefined} type="password" autoComplete={recovering || mode === "sign-up" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button type="submit" disabled={busy} className={primaryClass}>
+                {busy ? "Please wait…" : recovering ? "Save password" : mode === "sign-up" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}
+              </button>
+              {!recovering && (
+                <button type="button" disabled={busy} className={secondaryClass} onClick={() => { setMode(mode === "sign-in" ? "sign-up" : "sign-in"); setError(null); setMessage(null); setPassword(""); }}>
+                  {mode === "sign-in" ? "Create a free account" : "Back to sign-in"}
+                </button>
+              )}
+            </div>
+          </form>
+          {!recovering && mode === "sign-in" && (
+            <div className="flex flex-wrap gap-3">
+              {unconfirmedEmail && unconfirmedEmail === email.trim() && (
+                <button type="button" disabled={busy} className={secondaryClass} onClick={resendConfirmation}>Resend confirmation email</button>
+              )}
+              {desktop ? accountPageUrl && <a href={accountPageUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>Reset password in browser</a> : (
+                <>
+                  <button type="button" disabled={busy} className={secondaryClass} onClick={() => { setMode("reset"); setError(null); setMessage(null); setPassword(""); }}>Forgot password?</button>
+                  {oauthProviders.filter((provider) => provider.enabled).map((provider) => (
+                    <button key={provider.id} type="button" disabled={busy} className={secondaryClass} onClick={() => socialSignIn(provider.id)}>Continue with {provider.label}</button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-zinc-300">Signed in as {session.user.email}</p>
+          <p role="status" className="text-sm font-semibold">
+            {planError ? "Could not verify your plan. Free features are available." : !plan ? "Checking your plan…" : plan.tier === "pro" ? "Pro is active" : "Free plan"}
+            {plan?.status === "cancelled" && plan.activeUntil && ` until ${new Date(plan.activeUntil).toLocaleDateString()}`}
+          </p>
+          {planError && <p role="alert" className="text-sm text-rose-300">{planError}</p>}
+          {plan?.testMode && plan.checkoutAvailable && <p className="text-sm text-amber-300">Test checkout. Use test payment details only.</p>}
+          {plan && !plan.checkoutAvailable && !plan.portalAvailable && <p className="text-sm text-zinc-400">Paid checkout is currently unavailable.</p>}
+          <div className="flex flex-wrap gap-2">
+            {plan?.checkoutAvailable && <button type="button" disabled={busy} className={primaryClass} onClick={() => getBillingLink("checkout")}>Get Pro checkout link</button>}
+            {plan?.portalAvailable && <button type="button" disabled={busy} className={secondaryClass} onClick={() => getBillingLink("portal")}>Manage billing</button>}
+            <button type="button" disabled={busy} className={secondaryClass} onClick={() => void run(refreshPlan)}>Refresh plan</button>
+            <button type="button" disabled={busy} className={secondaryClass} onClick={() => void run(async () => {
+              const response = await auth.signOut({ scope: "local" });
+              if (response.error) throw response.error;
+              setBillingLink(null);
+              setMode("sign-in");
+            })}>Sign out</button>
+          </div>
+          {billingLink?.accountId === session.user.id && (
+            <div className="space-y-2">
+              <a className={primaryClass} href={billingLink.url} target="_blank" rel="noopener noreferrer">
+                {billingLink.action === "portal" ? "Open billing portal" : "Open secure checkout"}
+              </a>
+              {billingLink.action === "checkout" && <p className="text-sm text-zinc-400">Return here after checkout and refresh your plan. Pro appears once the payment provider confirms your subscription.</p>}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function SubscriptionPage() {
-  const {
-    isPro,
-    upgradeToPro,
-    downgradeToFree,
-    licenseKey,
-  } = useSubscription();
-
-  const [licenseInput, setLicenseInput] = useState("");
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [isPaddleModalOpen, setIsPaddleModalOpen] = useState(false);
-
-  const handleUpgrade = async () => {
-    setStatusMessage("Connecting to Paddle Sandbox...");
-    const opened = await openPaddleCheckout({
-      planType: "yearly",
-      userEmail: "creator@cliprobin.test",
-      onSuccess: (txnId) => {
-        void upgradeToPro(`ROBIN-PRO-${txnId.toUpperCase()}`);
-        setStatusMessage("🎉 Paddle Sandbox checkout successful! Pro unlocked.");
-      },
-      onClose: () => {
-        setStatusMessage(null);
-      },
-    });
-    if (!opened) {
-      await new Promise((r) => setTimeout(r, 400));
-      await upgradeToPro();
-      setStatusMessage("🎉 Clip Robin Pro is now activated! All features are unlocked.");
-    }
-  };
-
-  const handleLicenseSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!licenseInput.trim()) return;
-    setStatusMessage("Validating license key...");
-    await new Promise((r) => setTimeout(r, 400));
-    await upgradeToPro(licenseInput.trim());
-    setStatusMessage("🎉 License key verified! Clip Robin Pro is active.");
-  };
-
   return (
-    <main className="min-h-screen bg-[#09090b] text-white p-6 lg:p-10">
-      <div className="mx-auto max-w-4xl space-y-8">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-xs font-semibold text-emerald-400 mb-2">
-              Plans &amp; Subscription
-            </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-              Choose the Plan for Your Video Workflow
-            </h1>
-            <p className="mt-1.5 text-sm text-zinc-400">
-              Free local video processing on your hardware, with optional Pro power for AI hooks &amp; branding.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => setIsPaddleModalOpen(true)}
-              className="px-3 py-1.5 rounded-xl border border-zinc-700 bg-zinc-900/90 hover:bg-zinc-800 text-xs text-zinc-300 font-semibold flex items-center gap-1.5 transition-colors"
-            >
-              <span>💳 Paddle Sandbox</span>
-            </button>
-            <span
-              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold ${
-                isPro
-                  ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300"
-                  : "bg-amber-500/15 border-amber-500/40 text-amber-300"
-              }`}
-            >
-              <span className={`size-2 rounded-full ${isPro ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-              Active Plan: {isPro ? "Clip Robin Pro" : "Free Starter"}
-            </span>
-          </div>
-        </div>
-
-        {statusMessage && (
-          <div className="p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-semibold">
-            {statusMessage}
-          </div>
-        )}
-
-        {/* Pricing Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Card 1: Free Starter */}
-          <div className={`rounded-2xl border p-6 flex flex-col justify-between ${!isPro ? "border-amber-500/40 bg-[#121216]" : "border-zinc-800 bg-[#101014]"}`}>
-            <div>
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-white">Free Starter</h3>
-                <span className="text-xs px-2.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-medium">Forever</span>
-              </div>
-              <p className="mt-2 text-xs text-zinc-400">
-                Core local clipping on your own PC. No cloud costs, fully private.
-              </p>
-              <div className="mt-4 flex items-baseline gap-1">
-                <span className="text-3xl font-black text-white">$0</span>
-                <span className="text-xs text-zinc-500">/ forever</span>
-              </div>
-
-              <div className="mt-6 space-y-2.5 border-t border-zinc-800 pt-5 text-xs text-zinc-300">
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span>Unlimited local video cutting &amp; rendering</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span>Offline Whisper speech transcription</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span>AI face tracking &amp; 9:16 vertical reframe</span>
-                </div>
-                <div className="flex items-center gap-2 text-zinc-500">
-                  <span className="text-zinc-600">✕</span>
-                  <span className="line-through">Gemini AI Hook Finder &amp; Virality Scoring (Locked)</span>
-                </div>
-                <div className="flex items-center gap-2 text-zinc-500">
-                  <span className="text-zinc-600">✕</span>
-                  <span className="line-through">Custom Watermarks &amp; Removal (Locked)</span>
-                </div>
-                <div className="flex items-center gap-2 text-zinc-500">
-                  <span className="text-zinc-600">✕</span>
-                  <span className="line-through">All Viral Subtitle Styles (Limited to 2)</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-4">
-              {!isPro ? (
-                <div className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 text-zinc-400 text-xs font-semibold text-center select-none">
-                  Current Active Plan
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={downgradeToFree}
-                  className="w-full py-2.5 px-4 rounded-xl border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-colors"
-                >
-                  Switch back to Free (Testing)
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Card 2: Pro Creator */}
-          <div className="rounded-2xl border-2 border-emerald-500/60 bg-gradient-to-b from-[#141b18] via-[#121215] to-[#121215] p-6 flex flex-col justify-between shadow-xl shadow-emerald-950/20 relative">
-            <div className="absolute -top-3 right-6 px-3 py-0.5 rounded-full bg-emerald-500 text-zinc-950 text-[10px] font-black uppercase tracking-wider shadow-sm">
-              Most Popular
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <span>Clip Robin Pro</span>
-                  <span className="text-emerald-400 text-xs font-normal">✦</span>
-                </h3>
-              </div>
-              <p className="mt-2 text-xs text-zinc-400">
-                Unlock viral AI hook detection, custom watermarks, and all subtitle styles.
-              </p>
-
-              <div className="mt-4 flex items-baseline gap-2">
-                <span className="text-3xl font-black text-white">$19</span>
-                <span className="text-xs text-zinc-400">/ month or $79 lifetime</span>
-              </div>
-
-              <div className="mt-6 space-y-2.5 border-t border-zinc-800/80 pt-5 text-xs text-zinc-200">
-                <div className="flex items-center gap-2 font-medium">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span className="text-emerald-300 font-semibold">Gemini AI Hook Finder &amp; Virality Scoring</span>
-                </div>
-                <div className="flex items-center gap-2 font-medium">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span className="text-emerald-300 font-semibold">Custom Brand Watermarks &amp; 100% Watermark-Free</span>
-                </div>
-                <div className="flex items-center gap-2 font-medium">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span className="text-emerald-300 font-semibold">All 6+ Viral Subtitle Styles (Robin, Punch, Pill, etc.)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span>Pro Subtitle Customizer (Color picker, animation override)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span>Ultra 4K 60FPS local FFmpeg export quality</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">✓</span>
-                  <span>Batch clip queue &amp; priority processing</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-8 pt-4">
-              {isPro ? (
-                <div className="w-full py-2.5 px-4 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold text-center flex items-center justify-center gap-2">
-                  <span>✓ Pro Plan Active</span>
-                  {licenseKey && <span className="text-[10px] text-emerald-400/80">({licenseKey})</span>}
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleUpgrade}
-                  className="w-full py-2.5 px-4 rounded-xl bg-[#10b981] hover:bg-[#059669] text-zinc-950 text-xs font-bold transition-all duration-150 shadow-md shadow-emerald-500/20 hover:scale-[1.01] cursor-pointer"
-                >
-                  Upgrade to Clip Robin Pro
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Enter License Key Box */}
-        <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
-          <h3 className="text-sm font-semibold text-white">Activate With License Key</h3>
-          <p className="text-xs text-zinc-400">
-            Purchased a license on our website or received an activation key? Enter it here to activate Pro locally.
-          </p>
-          <form onSubmit={handleLicenseSubmit} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-            <input
-              type="text"
-              placeholder="e.g. ROBIN-PRO-XXXX-YYYY"
-              value={licenseInput}
-              onChange={(e) => setLicenseInput(e.target.value)}
-              className="flex-1 rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 uppercase font-mono"
-            />
-            <button
-              type="submit"
-              disabled={!licenseInput.trim()}
-              className="px-5 py-2.5 rounded-xl bg-white hover:bg-zinc-200 disabled:opacity-40 text-zinc-950 font-bold text-xs transition-colors shrink-0"
-            >
-              Activate Key
-            </button>
-          </form>
-        </section>
-
-        {/* Detailed Feature Comparison Matrix */}
-        <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
-          <h3 className="text-sm font-semibold text-white">Full Plan Comparison</h3>
-          <div className="border border-zinc-800 rounded-xl overflow-hidden bg-zinc-950/40">
-            <div className="grid grid-cols-12 bg-zinc-900/70 p-3 border-b border-zinc-800 text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-              <div className="col-span-6 sm:col-span-7">Feature</div>
-              <div className="col-span-3 sm:col-span-2 text-center">Free</div>
-              <div className="col-span-3 text-center text-emerald-400">Pro</div>
-            </div>
-            <div className="divide-y divide-zinc-800/60 text-xs">
-              {PLAN_FEATURES.map((item, i) => (
-                <div key={i} className={`grid grid-cols-12 p-3 items-center ${item.highlight ? "bg-emerald-500/[0.02]" : ""}`}>
-                  <div className="col-span-6 sm:col-span-7 font-medium text-zinc-200">{item.name}</div>
-                  <div className="col-span-3 sm:col-span-2 text-center text-zinc-400">
-                    {typeof item.free === "boolean" ? (item.free ? "✓" : "✕") : item.free}
-                  </div>
-                  <div className="col-span-3 text-center text-emerald-300 font-semibold">
-                    {typeof item.pro === "boolean" ? (item.pro ? "✓" : "✕") : item.pro}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      </div>
-      <PaddleSandboxModal isOpen={isPaddleModalOpen} onClose={() => setIsPaddleModalOpen(false)} />
+    <main className="mx-auto max-w-4xl space-y-6 p-4 sm:p-8">
+      <header className="space-y-2">
+        <h1 className="text-2xl font-bold">Account &amp; Plans</h1>
+        <p className="text-sm text-zinc-400">Create and export local clips for free. Sign in to manage your account and subscription.</p>
+      </header>
+      <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 sm:p-6" aria-label="Account">
+        <AccountPanel />
+      </section>
+      <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 sm:p-6">
+        <h2 className="mb-3 font-semibold">Compare plans</h2>
+        <table className="w-full text-left text-sm">
+          <thead className="text-zinc-400"><tr><th scope="col" className="py-2">Feature</th><th scope="col">Free</th><th scope="col">Pro</th></tr></thead>
+          <tbody>{PLAN_FEATURES.map(([feature, free, pro]) => (
+            <tr key={feature} className="border-t border-zinc-800"><th scope="row" className="py-3 pr-3 font-medium">{feature}</th><td className="pr-3 text-zinc-300">{free}</td><td className="text-emerald-300">{pro}</td></tr>
+          ))}</tbody>
+        </table>
+      </section>
     </main>
   );
 }

@@ -1056,17 +1056,3 @@ export async function deleteCustomWatermark(): Promise<{ status: string; deleted
   }
   return response.json();
 }
-
-export async function getPaddleWebhookStatus(): Promise<{
-  environment: string;
-  active_plan: "free" | "pro";
-  total_subscriptions_tracked: number;
-}> {
-  const apiUrl = await getApiUrl();
-  const response = await fetch(`${apiUrl}/api/webhooks/paddle/status`, { cache: "no-store" });
-  if (!response.ok) {
-    const payload: unknown = await response.json().catch(() => null);
-    throw new Error(getApiErrorMessage(payload, "Failed to check Paddle subscription status"));
-  }
-  return response.json();
-}

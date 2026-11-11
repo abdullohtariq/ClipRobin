@@ -36,6 +36,17 @@ jobs:
         working-directory: frontend
         run: npm run version:check -- $env:GITHUB_REF_NAME
 
+      - name: Require Clip Robin account configuration
+        if: github.repository == 'abdullohtariq/ClipRobin'
+        shell: pwsh
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if ($env:NEXT_PUBLIC_SUPABASE_URL -notmatch '^https://' -or $env:NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY -notmatch '^sb_publishable_') {
+            throw "Set the Supabase project URL and publishable key in GitHub Actions repository variables before publishing."
+          }
+
       - name: Read app version for release notes
         id: app-version
         shell: pwsh
@@ -81,6 +92,9 @@ jobs:
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          NEXT_PUBLIC_CLIPROBIN_ACCOUNT_URL: ${{ vars.NEXT_PUBLIC_CLIPROBIN_ACCOUNT_URL }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -89,6 +103,8 @@ jobs:
           releaseName: Clip Robin ${{ github.ref_name }}
           releaseBody: |
             [Download the Windows installer (.exe)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Clip.Robin_${{ steps.app-version.outputs.version }}_x64-setup.exe)
+
+            This release adds Supabase account sign-in and an option to resend the confirmation email. Free local editing and exports are available without an account. Hosted email signup is limited to project team addresses during testing. Paid checkout awaits payment provider setup.
 
             GitHub automatically includes source-code archives on releases; they are not needed to install Clip Robin. Existing installations will be notified when this update is available.
           releaseDraft: false
