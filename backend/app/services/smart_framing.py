@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -348,7 +349,7 @@ def _compute_iou(box1: tuple[float, float, float, float], box2: tuple[float, flo
 # ---------------------------------------------------------------------------
 # Bump whenever the analysis algorithm changes so stale tracking_analysis.json
 # caches produced by older code are recomputed instead of silently reused.
-ANALYSIS_VERSION = 5
+ANALYSIS_VERSION = 6
 
 SAMPLE_FPS = 4.0             # face sampling cadence (250 ms) - enough for lip-motion cues
 SAMPLE_WIDTH = 640           # detector input width; faces >= ~20px here are reliable for YuNet
@@ -632,19 +633,47 @@ class _FaceTracker:
         return visible
 
 
+def _frame_has_vertical_center_divider(gray: np.ndarray) -> bool:
+    """Detect an actual vertical split-screen divider bar or hard 50/50 seam near orig_w / 2."""
+    H, W = gray.shape[:2]
+    if W < 32 or H < 32:
+        return False
+    y0 = max(0, int(H * 0.10))
+    y1 = min(H, int(H * 0.90))
+    if y1 - y0 < 16:
+        return False
+    mid = W // 2
+    band = gray[y0:y1, max(0, mid - 3) : min(W, mid + 4)].astype(np.float32)
+    col_stds = np.std(band, axis=0)
+    if float(np.min(col_stds)) <= 10.0:
+        if float(np.std(gray[y0:y1, :])) >= 14.0:
+            return True
+    center_diffs = np.mean(np.abs(np.diff(band, axis=1)), axis=0)
+    center_edge = float(np.max(center_diffs)) if center_diffs.size > 0 else 0.0
+    l_band = gray[y0:y1, max(0, mid - 24) : max(1, mid - 8)].astype(np.float32)
+    r_band = gray[y0:y1, min(W - 1, mid + 8) : min(W, mid + 24)].astype(np.float32)
+    bg_diffs: list[float] = []
+    if l_band.shape[1] >= 2:
+        bg_diffs.append(float(np.median(np.abs(np.diff(l_band, axis=1)))))
+    if r_band.shape[1] >= 2:
+        bg_diffs.append(float(np.median(np.abs(np.diff(r_band, axis=1)))))
+    bg_med = max(bg_diffs) if bg_diffs else 0.0
+    return center_edge >= 22.0 and center_edge >= bg_med * 3.0
+
+
 def _clamp_split_screen_target(
     target_cx: float,
     visible: list[_Visible],
     orig_w: int,
     crop_w: int,
+    split_divider_present: bool = True,
 ) -> float:
     """
-    When two faces are simultaneously visible on opposite halves of a horizontal frame
-    (e.g., a 50/50 podcast split-screen with a center divider at orig_w / 2), keep the
-    9:16 crop window strictly on the active speaker's side of the center seam so the
+    When a real 50/50 split-screen vertical divider is present near orig_w / 2 and faces sit on
+    opposite halves, keep the 9:16 crop window strictly on the active speaker's side so the
     vertical divider bar is never visible in the output.
     """
-    if len(visible) < 2 or crop_w > (orig_w // 2) - 4:
+    if not split_divider_present or len(visible) < 2 or crop_w > (orig_w // 2) - 4:
         return target_cx
     cxs = [v[1] for v in visible]
     if min(cxs) < orig_w * 0.48 and max(cxs) > orig_w * 0.52:
@@ -667,7 +696,14 @@ class _Pass1Director:
         self.speaker_id: int | None = None
         self.last_switch_t = -1e9
 
-    def choose(self, t: float, visible: list[_Visible], tracks: dict[int, _FaceTrack], is_speech: bool) -> float:
+    def choose(
+        self,
+        t: float,
+        visible: list[_Visible],
+        tracks: dict[int, _FaceTrack],
+        is_speech: bool,
+        split_divider_present: bool = False,
+    ) -> float:
         if not visible:
             if self.last_cx is not None and t - self.last_face_t <= HOLD_SECONDS:
                 return self.last_cx
@@ -715,7 +751,13 @@ class _Pass1Director:
         if chosen[0] != self.speaker_id:
             self.last_switch_t = t
         self.speaker_id = chosen[0]
-        clamped_cx = _clamp_split_screen_target(chosen[1], visible, int(self.frame_center * 2), self.crop_w)
+        clamped_cx = _clamp_split_screen_target(
+            chosen[1],
+            visible,
+            int(self.frame_center * 2),
+            self.crop_w,
+            split_divider_present=split_divider_present,
+        )
         self.last_cx = clamped_cx
         return clamped_cx
 
@@ -808,7 +850,7 @@ def _assign_speakers(
 
 
 def _build_target_timeline(
-    frames: list[tuple[float, list[_Visible], float]],
+    frames: list[tuple[Any, ...]],
     tracks: dict[int, _FaceTrack],
     assignments: list[tuple[float, int]],
     crop_w: int,
@@ -823,7 +865,8 @@ def _build_target_timeline(
     if not assignments:
         timeline_p1: list[tuple[float, float, bool]] = []
         prev_p1: float | None = None
-        for t, _, p1 in frames:
+        for item in frames:
+            t, _, p1 = item[0], item[1], item[2]
             is_cut = prev_p1 is not None and abs(p1 - prev_p1) > switch_px
             timeline_p1.append((t, p1, is_cut))
             prev_p1 = p1
@@ -834,7 +877,9 @@ def _build_target_timeline(
     ai = 0
     prev_target: float | None = None
 
-    for t, visible, pass1_cx in frames:
+    for item in frames:
+        t, visible, pass1_cx = item[0], item[1], item[2]
+        has_divider = bool(item[3]) if len(item) >= 4 else False
         switched = False
         while ai + 1 < len(assignments) and assignments[ai + 1][0] <= t:
             ai += 1
@@ -844,12 +889,16 @@ def _build_target_timeline(
         vis = {tid: (cx, w) for tid, cx, w in visible if tid in eligible_ids or tid == speaker}
         if speaker in vis:
             scx, _ = vis[speaker]
-            target = _clamp_split_screen_target(scx, visible, orig_w, crop_w)
+            target = _clamp_split_screen_target(
+                scx, visible, orig_w, crop_w, split_divider_present=has_divider
+            )
         else:
             held = tracks[speaker].interpolated_center_x_at_time(t, max_gap=HOLD_SECONDS) if speaker in tracks else None
             # Speaker briefly off-screen: hold/interpolate on them. Long gone (B-roll): Pass 1 framing.
             raw_target = held if held is not None else pass1_cx
-            target = _clamp_split_screen_target(raw_target, visible, orig_w, crop_w)
+            target = _clamp_split_screen_target(
+                raw_target, visible, orig_w, crop_w, split_divider_present=has_divider
+            )
 
         # If target jumps across the frame (e.g. fallback switch or speaker change), mark as hard cut
         if prev_target is not None and abs(target - prev_target) > switch_px:
@@ -878,9 +927,9 @@ def _build_shots(
     crop_w: int,
     orig_w: int,
     frame_interval: float,
+    allow_ease: bool = False,
 ) -> list[dict[str, Any]]:
-    """Turn the target timeline into shots: hard cuts for speaker changes, eased pans for
-    same-subject re-framing, nothing for micro-jitter."""
+    """Turn the target timeline into stationary speaker-cut shots (optional ease if enabled)."""
     switch_px = SWITCH_FRACTION * crop_w
     dead_px = DEAD_ZONE_FRACTION * crop_w
 
@@ -919,11 +968,12 @@ def _build_shots(
         else:
             consolidated.append(dict(shot))
 
-    # Small moves ease (pan) instead of jumping; large moves stay hard cuts.
-    for prev, shot in zip(consolidated, consolidated[1:]):
-        if abs(shot["x"] - prev["x"]) <= switch_px:
-            shot["pan_from"] = prev["x"]
-            shot["pan_seconds"] = round(min(PAN_SECONDS, (shot["end"] - shot["start"]) / 2.0), 3)
+    # Stationary Speaker Cuts mode keeps crop stationary between cuts unless allow_ease=True.
+    if allow_ease:
+        for prev, shot in zip(consolidated, consolidated[1:]):
+            if abs(shot["x"] - prev["x"]) <= switch_px:
+                shot["pan_from"] = prev["x"]
+                shot["pan_seconds"] = round(min(PAN_SECONDS, (shot["end"] - shot["start"]) / 2.0), 3)
     return consolidated
 
 
@@ -1341,8 +1391,16 @@ def _scan_faces(
                         "nose_patch": _crop_patch(gray, nose[0], nose[1], nose_sz, nose_sz, (16, 16)),
                     })
 
+            has_divider = _frame_has_vertical_center_divider(gray)
             visible = tracker.process(t, detections, is_speech)
-            frames.append((t, visible, director.choose(t, visible, tracker.all_tracks, is_speech)))
+            p1_cx = director.choose(
+                t,
+                visible,
+                tracker.all_tracks,
+                is_speech,
+                split_divider_present=has_divider,
+            )
+            frames.append((t, visible, p1_cx, has_divider))
             frame_idx += 1
     finally:
         if process.poll() is None:
@@ -1388,6 +1446,80 @@ def _stitch_shot_lists(
     return stitched
 
 
+def _transcript_signature(project_directory: Path) -> dict[str, Any]:
+    for candidate in (
+        project_directory / "transcription" / "transcript.json",
+        project_directory / "transcript.json",
+    ):
+        if candidate.is_file():
+            try:
+                raw = candidate.read_bytes()
+                st = candidate.stat()
+                return {
+                    "exists": True,
+                    "size": st.st_size,
+                    "mtime_ns": st.st_mtime_ns,
+                    "sha256_prefix": hashlib.sha256(raw).hexdigest()[:16],
+                }
+            except OSError:
+                return {"exists": True}
+    return {"exists": False}
+
+
+def _locked_crop_left(crop_anchor_x: float, crop_w: int, orig_w: int) -> int:
+    anchor = max(0.0, min(1.0, float(crop_anchor_x)))
+    max_left = max(0, orig_w - crop_w)
+    x = int(round(max_left * anchor))
+    return max(0, x - (x % 2))
+
+
+def normalize_tracking_mode(face_tracking: bool = True, tracking_mode: str | None = None) -> str:
+    mode = (tracking_mode or "").strip().lower()
+    if mode in {"locked", "cuts", "follow"}:
+        return mode
+    return "follow" if face_tracking else "locked"
+
+
+def build_clip_crop_preview(
+    tracking_data: dict[str, Any],
+    clip_start: float,
+    clip_end: float,
+) -> dict[str, Any]:
+    orig_w = max(1, int(tracking_data.get("source_width", 1280)))
+    orig_h = max(1, int(tracking_data.get("source_height", 720)))
+    crop_w = max(1, int(tracking_data.get("crop_width", int(round(orig_h * 9.0 / 16.0)))))
+    crop_h = max(1, int(tracking_data.get("crop_height", orig_h)))
+    shots = tracking_data.get("shots", [])
+    segments: list[dict[str, Any]] = []
+    for s in shots:
+        s_start = float(s.get("start", 0.0))
+        s_end = float(s.get("end", 0.0))
+        if s_end > clip_start and s_start < clip_end:
+            x = int(s.get("x", 0))
+            segments.append({
+                "start": round(max(0.0, s_start - clip_start), 2),
+                "end": round(max(0.0, min(clip_end, s_end) - clip_start), 2),
+                "x": x,
+                "x_ratio": round(x / float(orig_w), 4),
+            })
+    first_x = segments[0]["x"] if segments else _even_left(orig_w / 2.0, crop_w, orig_w)
+    return {
+        "source_width": orig_w,
+        "source_height": orig_h,
+        "crop_width": crop_w,
+        "crop_height": crop_h,
+        "already_vertical": bool(tracking_data.get("already_vertical", False)),
+        "requested_tracking_mode": tracking_data.get("requested_tracking_mode", "locked"),
+        "applied_tracking_mode": tracking_data.get("applied_tracking_mode", "locked"),
+        "fallback_reason": tracking_data.get("fallback_reason"),
+        "crop_anchor_x": tracking_data.get("crop_anchor_x", 0.5),
+        "x": first_x,
+        "x_ratio": round(first_x / float(orig_w), 4),
+        "w_ratio": round(crop_w / float(orig_w), 4),
+        "segments": segments[:12],
+    }
+
+
 def analyze_speaker_tracking(
     project_directory: Path,
     ffmpeg_path: str,
@@ -1395,18 +1527,29 @@ def analyze_speaker_tracking(
     progress_callback: Any | None = None,
     max_duration: float | None = None,
     face_tracking: bool = True,
+    tracking_mode: str | None = None,
+    crop_anchor_x: float = 0.5,
 ) -> dict[str, Any]:
     """
-    Run YuNet face detection and mouth-movement speech correlation across the video.
-    Caches the resulting shot/crop tracking timeline in tracking_analysis.json.
+    Resolve 9:16 crop timeline for a project:
+    - 'locked': Fixed stationary crop at crop_anchor_x without invoking face detection.
+    - 'cuts': Stationary speaker-cut framing between active speakers (no pan motion).
+    - 'follow': Smooth YuNet + VAD active-speaker camera gliding.
     """
     key = str(Path(project_directory).resolve())
     with _ANALYSIS_LOCKS_GUARD:
         lock = _ANALYSIS_LOCKS.setdefault(key, threading.Lock())
-    # One analysis per project at a time: a concurrent caller waits and then hits the cache
-    # instead of decoding the whole video a second time.
     with lock:
-        return _analyze_speaker_tracking_locked(project_directory, ffmpeg_path, cancel_event, progress_callback, max_duration=max_duration, face_tracking=face_tracking)
+        return _analyze_speaker_tracking_locked(
+            project_directory,
+            ffmpeg_path,
+            cancel_event,
+            progress_callback,
+            max_duration=max_duration,
+            face_tracking=face_tracking,
+            tracking_mode=tracking_mode,
+            crop_anchor_x=crop_anchor_x,
+        )
 
 
 def _analyze_speaker_tracking_locked(
@@ -1416,27 +1559,79 @@ def _analyze_speaker_tracking_locked(
     progress_callback: Any | None,
     max_duration: float | None = None,
     face_tracking: bool = True,
+    tracking_mode: str | None = None,
+    crop_anchor_x: float = 0.5,
 ) -> dict[str, Any]:
     source_path = _find_source_video(project_directory)
     signature = _source_signature(source_path)
+    transcript_sig = _transcript_signature(project_directory)
+    effective_mode = normalize_tracking_mode(face_tracking=face_tracking, tracking_mode=tracking_mode)
+    anchor_ratio = max(0.0, min(1.0, float(crop_anchor_x)))
     analysis_cache = project_directory / "tracking_analysis.json"
+
+    cached_data: dict[str, Any] | None = None
     partial_cached: dict[str, Any] | None = None
     partial_scanned_dur: float = 0.0
     if analysis_cache.is_file():
         try:
-            cached = json.loads(analysis_cache.read_text(encoding="utf-8"))
-            if (
-                isinstance(cached, dict)
-                and cached.get("version") == ANALYSIS_VERSION
-                and cached.get("source") == signature
-                and not cached.get("fallback_reason")
-            ):
-                if cached.get("already_vertical") and "shots" in cached:
-                    return cached
+            loaded = json.loads(analysis_cache.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and loaded.get("source") == signature:
+                cached_data = loaded
+        except Exception:
+            cached_data = None
 
-                scanned_val = float(cached.get("scanned_duration", 0.0) or 0.0)
+    # Locked Crop: stationary horizontal framing with ZERO face scanning.
+    if effective_mode == "locked":
+        if cached_data and cached_data.get("source_width") and cached_data.get("source_height"):
+            orig_w = int(cached_data["source_width"])
+            orig_h = int(cached_data["source_height"])
+        else:
+            orig_w, orig_h = probe_video_dimensions(source_path, ffmpeg_path)
+        crop_h = orig_h if orig_h % 2 == 0 else orig_h - 1
+        crop_w = int(round(crop_h * 9.0 / 16.0))
+        if crop_w % 2 != 0:
+            crop_w -= 1
+        already_vertical = orig_w <= crop_w + 4 or (orig_w / max(1, orig_h)) <= (9.0 / 16.0 + 0.05)
+        locked_x = 0 if already_vertical else _locked_crop_left(anchor_ratio, crop_w, orig_w)
+        return {
+            "version": ANALYSIS_VERSION,
+            "source": signature,
+            "transcript": transcript_sig,
+            "source_width": orig_w,
+            "source_height": orig_h,
+            "crop_width": orig_w if already_vertical else crop_w,
+            "crop_height": orig_h if already_vertical else crop_h,
+            "already_vertical": already_vertical,
+            "face_tracking": False,
+            "tracking_mode": "locked",
+            "requested_tracking_mode": "locked",
+            "applied_tracking_mode": "locked",
+            "crop_anchor_x": round(anchor_ratio, 3),
+            "fallback_reason": None,
+            "shots": [{"start": 0.0, "end": 999999.0, "x": locked_x}],
+        }
+
+    if cached_data is not None:
+        try:
+            cached_transcript = cached_data.get("transcript") or {"exists": False}
+            if (
+                cached_data.get("version") == ANALYSIS_VERSION
+                and cached_transcript == transcript_sig
+                and not cached_data.get("fallback_reason")
+            ):
+                if cached_data.get("already_vertical") and "shots" in cached_data:
+                    return {
+                        **cached_data,
+                        "face_tracking": effective_mode == "follow",
+                        "tracking_mode": effective_mode,
+                        "requested_tracking_mode": effective_mode,
+                        "applied_tracking_mode": "already_vertical",
+                        "fallback_reason": None,
+                    }
+
+                scanned_val = float(cached_data.get("scanned_duration", 0.0) or 0.0)
                 if scanned_val <= 0.0:
-                    raw_shots = cached.get("shots") or cached.get("shots_tracked") or []
+                    raw_shots = cached_data.get("shots") or cached_data.get("shots_tracked") or []
                     scanned_val = max(
                         (
                             float(s.get("end", 0.0))
@@ -1445,10 +1640,10 @@ def _analyze_speaker_tracking_locked(
                         ),
                         default=0.0,
                     )
-                if cached.get("is_full_scan"):
+                if cached_data.get("is_full_scan"):
                     duration_ok = True
                 else:
-                    cached_vid_dur = float(cached.get("video_duration", 0.0) or 0.0)
+                    cached_vid_dur = float(cached_data.get("video_duration", 0.0) or 0.0)
                     if max_duration is None:
                         duration_ok = cached_vid_dur > 0 and scanned_val >= cached_vid_dur - 0.5
                     else:
@@ -1456,17 +1651,21 @@ def _analyze_speaker_tracking_locked(
                         duration_ok = scanned_val >= needed - 0.5
 
                 if duration_ok:
-                    if "shots_tracked" in cached and "shots_static" in cached:
-                        selected_shots = cached["shots_tracked" if face_tracking else "shots_static"]
+                    if "shots_tracked" in cached_data and "shots_static" in cached_data:
+                        selected_shots = cached_data["shots_tracked" if effective_mode == "follow" else "shots_static"]
                         return {
-                            **cached,
-                            "face_tracking": face_tracking,
+                            **cached_data,
+                            "face_tracking": effective_mode == "follow",
+                            "tracking_mode": effective_mode,
+                            "requested_tracking_mode": effective_mode,
+                            "applied_tracking_mode": cached_data.get("applied_tracking_mode") or effective_mode,
+                            "fallback_reason": cached_data.get("fallback_reason"),
                             "shots": selected_shots,
                         }
-                    if "shots" in cached and cached.get("face_tracking", True) == face_tracking:
-                        return cached
-                elif scanned_val >= 30.0 and ("shots" in cached or "shots_tracked" in cached):
-                    partial_cached = cached
+                    if "shots" in cached_data and cached_data.get("tracking_mode") == effective_mode:
+                        return cached_data
+                elif scanned_val >= 30.0 and ("shots" in cached_data or "shots_tracked" in cached_data):
+                    partial_cached = cached_data
                     partial_scanned_dur = scanned_val
         except Exception:
             pass
@@ -1480,6 +1679,7 @@ def _analyze_speaker_tracking_locked(
     base = {
         "version": ANALYSIS_VERSION,
         "source": signature,
+        "transcript": transcript_sig,
         "source_width": orig_w,
         "source_height": orig_h,
         "crop_width": crop_w,
@@ -1493,12 +1693,26 @@ def _analyze_speaker_tracking_locked(
             "already_vertical": True,
             "crop_width": orig_w,
             "crop_height": orig_h,
+            "face_tracking": effective_mode == "follow",
+            "tracking_mode": effective_mode,
+            "requested_tracking_mode": effective_mode,
+            "applied_tracking_mode": "already_vertical",
+            "fallback_reason": None,
             "shots": [{"start": 0.0, "end": 999999.0, "x": 0}],
         }
         _write_cache(analysis_cache, result)
         return result
 
-    center_fallback = {**base, "shots": [{"start": 0.0, "end": 999999.0, "x": _even_left(orig_w / 2.0, crop_w, orig_w)}]}
+    center_x = _locked_crop_left(anchor_ratio, crop_w, orig_w)
+    center_fallback = {
+        **base,
+        "face_tracking": effective_mode == "follow",
+        "tracking_mode": effective_mode,
+        "requested_tracking_mode": effective_mode,
+        "applied_tracking_mode": "fallback_center",
+        "crop_anchor_x": round(anchor_ratio, 3),
+        "shots": [{"start": 0.0, "end": 999999.0, "x": center_x}],
+    }
 
     # Prepare speech windows and utterances from VAD / faster-whisper transcript
     speech_windows = _load_speech_windows(project_directory)
@@ -1527,8 +1741,6 @@ def _analyze_speaker_tracking_locked(
     except ClipGenerationCancelled:
         raise
     except Exception as e:
-        # Missing OpenCV/model, unreadable video... Cache a centered result so each of the
-        # N clip renders does not re-run (and re-fail) a full-video scan.
         logger.exception("Smart framing analysis failed; using centered crop")
         result = {**center_fallback, "fallback_reason": f"{type(e).__name__}: {e}"}
         _write_cache(analysis_cache, result)
@@ -1543,7 +1755,7 @@ def _analyze_speaker_tracking_locked(
     if not frames:
         if partial_cached is not None:
             return partial_cached
-        result = {**center_fallback, "fallback_reason": "no frames decoded"}
+        result = {**center_fallback, "fallback_reason": "No video frames could be decoded for face detection."}
         _write_cache(analysis_cache, result)
         return result
 
@@ -1555,18 +1767,31 @@ def _analyze_speaker_tracking_locked(
     assignments = _assign_speakers(relevant_utterances, tracks, start_offset=scan_start_offset)
     timeline = _build_target_timeline(frames, tracks, assignments, crop_w, orig_w=orig_w)
     shots_tracked = _build_smooth_tracking_shots(timeline, crop_w, orig_w, frame_interval)
-    shots_static = _build_shots(timeline, crop_w, orig_w, frame_interval)
+    shots_static = _build_shots(timeline, crop_w, orig_w, frame_interval, allow_ease=False)
     if partial_cached is not None and resume_seam > 0.0:
         prev_tracked = partial_cached.get("shots_tracked") or partial_cached.get("shots") or []
         prev_static = partial_cached.get("shots_static") or partial_cached.get("shots") or []
         shots_tracked = _stitch_shot_lists(prev_tracked, shots_tracked, resume_seam)
         shots_static = _stitch_shot_lists(prev_static, shots_static, resume_seam)
-    shots = shots_tracked if face_tracking else shots_static
+
+    no_usable_faces = not any(tr.frame_count >= MIN_TRACK_FRAMES for tr in tracks.values()) and partial_cached is None
+    if no_usable_faces:
+        applied_mode = "fallback_center"
+        fallback_reason: str | None = "No usable faces detected; using centered crop."
+    else:
+        applied_mode = effective_mode
+        fallback_reason = None
+
+    shots = shots_tracked if effective_mode == "follow" else shots_static
     is_full_scan = bool(max_duration is None or max_duration >= video_duration - 0.5)
 
     result = {
         **base,
-        "face_tracking": face_tracking,
+        "face_tracking": effective_mode == "follow",
+        "tracking_mode": effective_mode,
+        "requested_tracking_mode": effective_mode,
+        "applied_tracking_mode": applied_mode,
+        "fallback_reason": fallback_reason,
         "scanned_duration": round(effective_duration, 3),
         "video_duration": round(video_duration, 3),
         "is_full_scan": is_full_scan,

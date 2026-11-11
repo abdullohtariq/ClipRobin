@@ -12,6 +12,7 @@ import {
   YouTubeStatusResponse,
   Clip,
 } from "@/src/lib/api";
+import { ModalDialog } from "@/src/components/ui/modal-dialog";
 
 interface YouTubeUploadModalProps {
   clip: Clip;
@@ -85,7 +86,7 @@ export function YouTubeUploadModal({
     void fetchStatus();
   }, [fetchStatus]);
 
-  // Listen for OAuth postMessage callback from the popup & Escape key
+  // Listen for OAuth postMessage callback from the popup
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === "CLIPROBIN_YOUTUBE_AUTH_SUCCESS") {
@@ -93,21 +94,12 @@ export function YouTubeUploadModal({
         setIsConnecting(false);
       }
     };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !isUploading) {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-      }
-    };
     window.addEventListener("message", handleMessage);
-    window.addEventListener("keydown", handleKeyDown);
     return () => {
       window.removeEventListener("message", handleMessage);
-      window.removeEventListener("keydown", handleKeyDown);
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
-  }, [fetchStatus, isUploading, onClose]);
+  }, [fetchStatus]);
 
   // Handle saving Google OAuth Credentials
   const handleSaveConfig = async (e: React.FormEvent) => {
@@ -254,19 +246,16 @@ export function YouTubeUploadModal({
   };
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Upload Clip to YouTube"
-      onClick={(e) => {
-        e.stopPropagation();
-        if (!isUploading && e.target === e.currentTarget) onClose();
+    <ModalDialog
+      open={true}
+      onClose={() => {
+        if (!isUploading) onClose();
       }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
+      ariaLabel="Upload Clip to YouTube"
+      className="max-w-xl"
     >
       <div
-        onClick={(e) => e.stopPropagation()}
-        className="relative flex flex-col max-w-xl w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl max-h-[90vh] overflow-hidden"
+        className="relative flex flex-col w-full rounded-2xl border border-zinc-800 bg-[#121215] shadow-2xl max-h-[90vh] overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-800/80 px-6 py-4 bg-[#141418]">
@@ -768,6 +757,6 @@ export function YouTubeUploadModal({
           )}
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }

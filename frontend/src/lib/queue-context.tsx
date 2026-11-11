@@ -13,21 +13,25 @@ import {
   cancelClipGeneration,
   downloadVideo,
   generateClips,
+  getActiveJobs,
+  getClips,
+  getLatestClipGenerationJob,
   getLocalTranscriptionJob,
   transcribeLocalVideo,
   transcribeVideo,
   updateProjectTitle,
-  deleteProject,
   Clip,
   FramingMode,
   CaptionStyle,
   CaptionAnimation,
+  RequestCancelledError,
+  TrackingMode,
 } from "@/src/lib/api";
 import { ClipDuration } from "@/src/components/clip-settings";
 import { sanitizeProjectName } from "@/src/lib/project-name-utils";
 
 export type QueueSource =
-  | { kind: "file"; file: File; name: string; size: number }
+  | { kind: "file"; file?: File; name: string; size: number }
   | { kind: "youtube"; url: string; videoLabel?: string };
 
 export interface QueueSettings {
@@ -40,6 +44,8 @@ export interface QueueSettings {
   showCaptions: boolean;
   showWatermark: boolean;
   faceTracking?: boolean;
+  trackingMode?: TrackingMode;
+  cropAnchorX?: number;
 }
 
 export interface QueueItem {
@@ -47,10 +53,11 @@ export interface QueueItem {
   projectName: string;
   source: QueueSource;
   settings: QueueSettings;
-  status: "queued" | "processing" | "done" | "failed";
+  status: "queued" | "processing" | "done" | "failed" | "cancelled";
   progress: number;
   step: string;
   projectId?: string;
+  generationJobId?: string;
   readyClips?: Clip[];
   error?: string;
   createdAt: number;
@@ -69,6 +76,7 @@ interface QueueContextType {
   }) => { success: boolean; id?: string; error?: string };
   removeFromQueue: (id: string) => void;
   cancelRunningItem: (id: string) => Promise<void>;
+  retryQueueItem: (id: string) => { success: boolean; error?: string };
   renameQueueItem: (id: string, newName: string) => Promise<void>;
   clearCompletedItems: () => void;
 }
@@ -106,19 +114,42 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Restore completed/failed items from localStorage only on client after initial hydration
+  const updateItem = useCallback(
+    (id: string, updater: Partial<QueueItem> | ((prev: QueueItem) => Partial<QueueItem>)) => {
+      setQueue((prevQueue) =>
+        prevQueue.map((item) => {
+          if (item.id !== id) return item;
+          const updates = typeof updater === "function" ? updater(item) : updater;
+          return { ...item, ...updates };
+        })
+      );
+    },
+    []
+  );
+
+  // Restore persisted queue state and reconcile active backend jobs on client hydration
   useEffect(() => {
+    let restoredItems: QueueItem[] = [];
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         lastPersistedSnapshotRef.current = stored;
         const parsed = JSON.parse(stored) as QueueItem[];
+        restoredItems = parsed.map((item) => {
+          if (item.status === "queued" && item.source.kind === "file" && !item.projectId) {
+            return {
+              ...item,
+              status: "failed" as const,
+              step: "Interrupted by reload",
+              error: "Page reloaded before local upload started. Re-select the video file to retry.",
+            };
+          }
+          return item;
+        });
         setQueue((prev) => {
           const existingIds = new Set(prev.map((i) => i.id));
-          const restored = parsed.filter(
-            (item) => ["done", "failed"].includes(item.status) && !existingIds.has(item.id)
-          );
-          return [...prev, ...restored];
+          const merged = restoredItems.filter((item) => !existingIds.has(item.id));
+          return [...prev, ...merged];
         });
       }
     } catch {
@@ -126,27 +157,110 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setHasHydrated(true);
     }
-  }, []);
 
-  // Sync finished items to localStorage only when terminal items actually change
+    // Reconcile items that were processing when the window reloaded
+    void (async () => {
+      const processingItems = restoredItems.filter((item) => item.status === "processing");
+      if (processingItems.length === 0) return;
+
+      const activeBackendJobs = await getActiveJobs().catch(() => []);
+      const activeByProject = new Map(activeBackendJobs.map((j) => [j.project_id, j]));
+
+      for (const item of processingItems) {
+        if (!isMountedRef.current) return;
+        const pid = item.projectId;
+        if (!pid) {
+          updateItem(item.id, {
+            status: "failed",
+            step: "Interrupted before project creation",
+            error: "Processing was interrupted before the project was created. Retry to restart.",
+          });
+          continue;
+        }
+
+        const liveJob = activeByProject.get(pid);
+        if (liveJob) {
+          // Track live backend job cleanly until completion
+          let polling = true;
+          while (polling && isMountedRef.current) {
+            await new Promise((r) => setTimeout(r, 900));
+            const latestActive = await getActiveJobs().catch(() => []);
+            const current = latestActive.find((j) => j.project_id === pid);
+            if (current) {
+              updateItem(item.id, {
+                progress: current.kind === "generation"
+                  ? 60 + Math.round((current.progress || 0) * 0.38)
+                  : Math.max(10, Math.round((current.progress || 0) * 0.58)),
+                step: current.step || item.step,
+                readyClips: current.ready_clips ?? item.readyClips,
+                generationJobId: current.kind === "generation" ? current.id : item.generationJobId,
+              });
+            } else {
+              polling = false;
+            }
+          }
+        }
+
+        if (!isMountedRef.current) return;
+        const genJob = await getLatestClipGenerationJob(pid).catch(() => null);
+        if (genJob?.status === "completed") {
+          const clipsData = await getClips(pid).catch(() => ({ clips: genJob.clips ?? [] }));
+          updateItem(item.id, {
+            status: "done",
+            progress: 100,
+            step: "Complete",
+            readyClips: clipsData.clips,
+          });
+        } else if (genJob?.status === "cancelled") {
+          updateItem(item.id, {
+            status: "cancelled",
+            step: "Cancelled",
+            error: undefined,
+          });
+        } else if (genJob?.status === "failed") {
+          updateItem(item.id, {
+            status: "failed",
+            step: "Failed",
+            error: genJob.error || "Clip generation failed.",
+          });
+        } else {
+          const clipsData = await getClips(pid).catch(() => null);
+          if (clipsData && clipsData.clips.length > 0) {
+            updateItem(item.id, {
+              status: "done",
+              progress: 100,
+              step: "Complete",
+              readyClips: clipsData.clips,
+            });
+          } else {
+            updateItem(item.id, {
+              status: "failed",
+              step: "Interrupted by reload",
+              error: "Background session ended before clips completed. Click Retry to resume.",
+            });
+          }
+        }
+      }
+    })();
+  }, [updateItem]);
+
+  // Sync queue items to localStorage (omitting non-serializable File handles)
   useEffect(() => {
     if (!hasHydrated) return;
     try {
-      const persistable = queue
-        .filter((item) => ["done", "failed"].includes(item.status))
-        .map((item) => {
-          if (item.source.kind === "file") {
-            return {
-              ...item,
-              source: {
-                kind: "file" as const,
-                name: item.source.name,
-                size: item.source.size,
-              },
-            };
-          }
-          return item;
-        });
+      const persistable = queue.map((item) => {
+        if (item.source.kind === "file") {
+          return {
+            ...item,
+            source: {
+              kind: "file" as const,
+              name: item.source.name,
+              size: item.source.size,
+            },
+          };
+        }
+        return item;
+      });
       const serialized = JSON.stringify(persistable.slice(-20));
       if (serialized !== lastPersistedSnapshotRef.current) {
         lastPersistedSnapshotRef.current = serialized;
@@ -156,21 +270,6 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
       // Ignore quota errors
     }
   }, [queue, hasHydrated]);
-
-  const updateItem = useCallback(
-    (id: string, updater: Partial<QueueItem> | ((prev: QueueItem) => Partial<QueueItem>)) => {
-      setQueue((prevQueue) => {
-        const nextQueue = prevQueue.map((item) => {
-          if (item.id !== id) return item;
-          const updates = typeof updater === "function" ? updater(item) : updater;
-          return { ...item, ...updates };
-        });
-        queueRef.current = nextQueue;
-        return nextQueue;
-      });
-    },
-    []
-  );
 
   // Process a single queue item from start to finish
   const processQueueItem = useCallback(
@@ -197,10 +296,21 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           status: "processing",
           progress: 5,
           step: source.kind === "youtube" ? "Downloading from YouTube..." : "Uploading video...",
+          error: undefined,
         });
 
+        // If retrying a project whose transcript is already ready, skip re-intake cleanly
+        let resumeToClips = false;
+        if (item.projectId) {
+          const prevTransJob = await getLocalTranscriptionJob(item.projectId, abortController.signal).catch(() => null);
+          if (prevTransJob?.status === "completed") {
+            assignedProjectId = item.projectId;
+            resumeToClips = true;
+          }
+        }
+
         // Step A: Source Acquisition
-        if (source.kind === "youtube") {
+        if (!resumeToClips && source.kind === "youtube") {
           const downloadRes = await downloadVideo(
             source.url,
             (job) => {
@@ -219,7 +329,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
             }
           );
 
-          if (isCancelled) throw new Error("Cancelled by user");
+          if (isCancelled) throw new RequestCancelledError("Cancelled by user");
           assignedProjectId = downloadRes.project_id;
           updateItem(id, { projectId: assignedProjectId });
 
@@ -243,9 +353,9 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
             currentJob.status !== "failed" &&
             currentJob.status !== "cancelled"
           ) {
-            if (isCancelled) throw new Error("Cancelled by user");
+            if (isCancelled) throw new RequestCancelledError("Cancelled by user");
             await new Promise((res) => setTimeout(res, 600));
-            if (isCancelled) throw new Error("Cancelled by user");
+            if (isCancelled) throw new RequestCancelledError("Cancelled by user");
             currentJob = await getLocalTranscriptionJob(assignedProjectId, abortController.signal);
             updateItem(id, {
               progress: 28 + Math.round((currentJob.progress || 0) * 0.32),
@@ -254,13 +364,15 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           }
 
           if (currentJob.status === "cancelled" || isCancelled) {
-            throw new Error("Cancelled by user");
+            throw new RequestCancelledError("Cancelled by user");
           }
           if (currentJob.status === "failed") {
             throw new Error(currentJob.error || "Speech transcription failed");
           }
-        } else {
-          // Local File Source
+        } else if (!resumeToClips && source.kind === "file") {
+          if (!source.file) {
+            throw new Error("Local file handle cleared after reload. Please re-select the video file.");
+          }
           const uploadRes = await transcribeLocalVideo(
             source.file,
             (uploadProg) => {
@@ -273,7 +385,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
             abortController.signal
           );
 
-          if (isCancelled) throw new Error("Cancelled by user");
+          if (isCancelled) throw new RequestCancelledError("Cancelled by user");
           assignedProjectId = uploadRes.project_id;
           updateItem(id, { projectId: assignedProjectId });
 
@@ -289,9 +401,9 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
             currentJob.status !== "failed" &&
             currentJob.status !== "cancelled"
           ) {
-            if (isCancelled) throw new Error("Cancelled by user");
+            if (isCancelled) throw new RequestCancelledError("Cancelled by user");
             await new Promise((res) => setTimeout(res, 600));
-            if (isCancelled) throw new Error("Cancelled by user");
+            if (isCancelled) throw new RequestCancelledError("Cancelled by user");
             currentJob = await getLocalTranscriptionJob(assignedProjectId, abortController.signal);
             updateItem(id, {
               progress: 25 + Math.round((currentJob.progress || 0) * 0.35),
@@ -300,14 +412,14 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           }
 
           if (currentJob.status === "cancelled" || isCancelled) {
-            throw new Error("Cancelled by user");
+            throw new RequestCancelledError("Cancelled by user");
           }
           if (currentJob.status === "failed") {
             throw new Error(currentJob.error || "Speech transcription failed");
           }
         }
 
-        if (isCancelled) throw new Error("Cancelled by user");
+        if (isCancelled || !assignedProjectId) throw new RequestCancelledError("Cancelled by user");
 
         // Step C: Clip Generation
         updateItem(id, {
@@ -336,15 +448,18 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           settings.faceTracking,
           {
             signal: abortController.signal,
+            trackingMode: settings.trackingMode,
+            cropAnchorX: settings.cropAnchorX,
             onJobCreated: (jid) => {
               activeGenerationJobId = jid;
+              updateItem(id, { generationJobId: jid });
             },
           }
         );
 
         if (isCancelled || generation.cancelled) {
           isCancelled = true;
-          throw new Error("Cancelled by user");
+          throw new RequestCancelledError("Cancelled by user");
         }
 
         // Finished Successfully
@@ -353,6 +468,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           progress: 100,
           step: "Complete",
           readyClips: generation.clips,
+          error: undefined,
         });
         if (typeof window !== "undefined") {
           window.dispatchEvent(
@@ -362,11 +478,15 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
           );
         }
       } catch (err) {
-        if (isCancelled) {
+        const cancelledErr =
+          isCancelled ||
+          err instanceof RequestCancelledError ||
+          (err instanceof DOMException && err.name === "AbortError");
+        if (cancelledErr) {
           updateItem(id, {
-            status: "failed",
+            status: "cancelled",
             step: "Cancelled",
-            error: "Cancelled by user",
+            error: undefined,
           });
         } else {
           const errorMsg = err instanceof Error ? err.message : "Processing failed";
@@ -484,7 +604,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
 
   const removeFromQueue = useCallback((id: string) => {
     setQueue((prev) => {
-      const next = prev.filter((item) => item.id !== id || item.status !== "queued");
+      const next = prev.filter((item) => item.id !== id || item.status === "processing");
       queueRef.current = next;
       return next;
     });
@@ -497,25 +617,48 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
         const runState =
           activeRunStateRef.current?.itemId === id ? activeRunStateRef.current : null;
         const pid = runState?.getProjectId() || item.projectId || null;
-        const jobId = runState?.getGenerationJobId() || null;
+        const jobId = runState?.getGenerationJobId() || item.generationJobId || null;
 
         runState?.markCancelled();
 
         updateItem(id, {
-          status: "failed",
+          status: "cancelled",
           step: "Cancelled",
-          error: "Cancelled by user",
+          error: undefined,
         });
 
+        // Cancel active backend generation without deleting saved projects or committed clips
         if (pid && jobId) {
           await cancelClipGeneration(pid, jobId).catch(() => {});
-        }
-        if (pid) {
-          await deleteProject(pid).catch(() => {});
         }
       }
     },
     [updateItem]
+  );
+
+  const retryQueueItem = useCallback(
+    (id: string): { success: boolean; error?: string } => {
+      const item = queueRef.current.find((q) => q.id === id);
+      if (!item || !["failed", "cancelled"].includes(item.status)) {
+        return { success: false, error: "Only failed or cancelled items can be retried." };
+      }
+      if (item.source.kind === "file" && !item.source.file && !item.projectId) {
+        const msg = "Local file handle was cleared when the page reloaded. Please re-select the video file.";
+        updateItem(id, { error: msg });
+        return { success: false, error: msg };
+      }
+      updateItem(id, {
+        status: "queued",
+        progress: 0,
+        step: "Waiting in queue...",
+        error: undefined,
+      });
+      setTimeout(() => {
+        void kickWorker();
+      }, 50);
+      return { success: true };
+    },
+    [kickWorker, updateItem]
   );
 
   const renameQueueItem = useCallback(
@@ -565,6 +708,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
       addToQueue,
       removeFromQueue,
       cancelRunningItem,
+      retryQueueItem,
       renameQueueItem,
       clearCompletedItems,
     }),
@@ -575,6 +719,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
       addToQueue,
       removeFromQueue,
       cancelRunningItem,
+      retryQueueItem,
       renameQueueItem,
       clearCompletedItems,
     ]

@@ -134,7 +134,7 @@ A clean side-by-side comparison table highlighting the customer pain points with
 | **Monthly Subscription** | **$0 / month** | \$15 – \$79 / month |
 | **Video Processing Quotas** | **Unlimited Minutes** | 60 – 300 minutes cap |
 | **Privacy & Security** | **100% Local on your PC** | Uploads raw video to cloud |
-| **Watermarks** | **Zero Watermarks Ever** | Watermarked on free tiers |
+| **Watermarks** | **Included on Free (removable with Pro)** | Watermarked on free tiers |
 | **Clip Expiration** | **Forever Saved on Local Disk** | Clips expire/delete after 3 days |
 | **AI Hook Analysis Cost** | **Pennies (Direct API Key / BYOK)** | Heavily marked-up credits |
 | **Code Transparency** | **Open Source (MIT / Inspectable)** | Closed proprietary black box |
@@ -148,9 +148,9 @@ Clip Robin already ships with **6 distinctive ASS subtitle styles** and **5 anim
 #### Section 6: Core Features (The Engine Under the Hood)
 1. **Local Whisper Transcription:** Powered by `faster-whisper` and CTranslate2. Transcribe hours of audio in minutes with word-level accuracy without sending a byte over the internet.
 2. **AI Virality & Hook Detection:** Connect Google Gemini (`gemini-3.8-flash`), OpenAI, or DeepSeek with your own API key via AI Developer Mode to rank topics and extract viral hooks for pennies per video.
-3. **Smart 9:16 Vertical Reframing:** Active-speaker face tracking and mouth-motion correlation powered by OpenCV YuNet ONNX + Whisper VAD, with an instant Face Tracking toggle.
-4. **Multi-Video Queue & Fast FFmpeg Export:** Queue multiple YouTube links and local files, burn in custom brand watermarks or Top-Line hooks, and export clips individually or as a complete `.ZIP` archive.
-5. **Direct Social Upload Modals:** Direct Google OAuth2 YouTube Shorts upload plus guided workflows for TikTok and Instagram Reels.
+3. **Smart 9:16 Vertical Reframing:** Choose **Locked Crop** (stationary with horizontal anchor), stationary **Speaker Cuts**, or **Follow Speaker** tracking powered by OpenCV YuNet ONNX + Whisper VAD mouth-motion correlation.
+4. **Multi-Video Queue & Fast FFmpeg Export:** Queue multiple YouTube links and local files, burn in custom brand watermarks or Top-Line hooks, and export `720×1280` 30 fps MP4 clips individually or as a complete `.ZIP` archive.
+5. **Direct Social Upload Modals:** Direct Google OAuth2 YouTube Shorts upload plus **Prepare for TikTok** and **Prepare for Instagram** export/caption helpers.
 
 #### Section 7: "How It Works" (3 Simple Steps)
 1. **Drop or Paste:** Paste YouTube URLs or drag-and-drop local video files (MP4, MKV, MOV, WebM, AVI) into the studio or batch queue.

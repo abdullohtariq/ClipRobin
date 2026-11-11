@@ -7,12 +7,14 @@ import {
   CaptionAnimation,
   CaptionStyle,
   FramingMode,
+  TrackingMode,
   ActiveJob,
   ClipGenerationJob,
   cancelClipGeneration,
   deleteProject,
   generateClips,
   getActiveJobs,
+  getClips,
   getProjects,
   Project,
 } from "@/src/lib/api";
@@ -52,14 +54,14 @@ export default function Projects() {
   const [subtitleOptions, setSubtitleOptions] = useState<Record<string, boolean>>({});
   const [watermarkOptions, setWatermarkOptions] = useState<Record<string, boolean>>({});
   const [framingOptions, setFramingOptions] = useState<Record<string, FramingMode>>({});
-  const [faceTrackingOptions, setFaceTrackingOptions] = useState<Record<string, boolean>>({});
+  const [trackingModeOptions, setTrackingModeOptions] = useState<Record<string, TrackingMode>>({});
   const [captionStyleOptions, setCaptionStyleOptions] = useState<Record<string, CaptionStyle>>({});
   const [captionAnimationOptions, setCaptionAnimationOptions] = useState<Record<string, CaptionAnimation | null>>({});
   const [durationOptions, setDurationOptions] = useState<Record<string, ClipDuration>>({});
   const [generationModeOptions, setGenerationModeOptions] = useState<Record<string, "random" | "ai">>({});
   const [activeModalProjectId, setActiveModalProjectId] = useState<string | null>(null);
   const [defaultFraming, setDefaultFraming] = useState<FramingMode>("standard");
-  const [defaultFaceTracking, setDefaultFaceTracking] = useState<boolean>(true);
+  const [defaultTrackingMode, setDefaultTrackingMode] = useState<TrackingMode>("locked");
   const [defaultCaptionStyle, setDefaultCaptionStyle] = useState<CaptionStyle>("classic");
   const [defaultCaptionAnimation, setDefaultCaptionAnimation] = useState<CaptionAnimation | null>(null);
   const [defaultDuration, setDefaultDuration] = useState<ClipDuration>(30);
@@ -74,9 +76,9 @@ export default function Projects() {
         if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
           setDefaultFraming(savedFraming as FramingMode);
         }
-        const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
-        if (savedFaceTracking !== null) {
-          setDefaultFaceTracking(savedFaceTracking === "true");
+        const savedTrackingMode = localStorage.getItem("cliprobin_tracking_mode");
+        if (savedTrackingMode && ["locked", "cuts", "follow"].includes(savedTrackingMode)) {
+          setDefaultTrackingMode(savedTrackingMode as TrackingMode);
         }
         const savedDuration = localStorage.getItem("cliprobin_clip_duration");
         if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
@@ -277,15 +279,13 @@ export default function Projects() {
     const rawGenMode = generationModeOptions[projectId] ?? defaultGenerationMode;
     const effectiveGenMode: "random" | "ai" =
       isPro && aiModeEnabled && rawGenMode === "ai" ? "ai" : "random";
-    const effectiveFaceTracking =
+    const effectiveTrackingMode: TrackingMode =
       chosenFraming === "true_9_16"
-        ? (faceTrackingOptions[projectId] ?? defaultFaceTracking)
-        : false;
+        ? (trackingModeOptions[projectId] ?? defaultTrackingMode)
+        : "locked";
+    const effectiveFaceTracking = effectiveTrackingMode === "follow";
 
     setGeneratingProject(projectId);
-    setProjects((current) => current.map((project) => project.project_id === projectId
-      ? { ...project, clips: 0 }
-      : project));
     setGenerationProgress({
       job_id: "",
       project_id: projectId,
@@ -303,11 +303,6 @@ export default function Projects() {
         subtitleOptions[projectId] ?? defaultSubtitles,
         (job) => {
           setGenerationProgress(job);
-          if (job.ready_clips && job.ready_clips.length > 0) {
-            setProjects((current) => current.map((p) => p.project_id === projectId
-              ? { ...p, clips: job.ready_clips!.length }
-              : p));
-          }
         },
         durationOptions[projectId] ?? defaultDuration,
         isPro ? (watermarkOptions[projectId] ?? defaultWatermark) : true,
@@ -319,13 +314,20 @@ export default function Projects() {
         undefined,
         effectiveGenMode,
         effectiveFaceTracking,
+        { trackingMode: effectiveTrackingMode },
       );
-      setProjects((current) => current.map((project) => project.project_id === projectId
-        ? { ...project, clips: result.clips.length }
-        : project));
       if (result.cancelled) {
-        setStatus(`Generation cancelled. Clips for ${projectLabel} were removed.`);
+        const saved = await getClips(projectId).catch(() => null);
+        if (saved) {
+          setProjects((current) => current.map((project) => project.project_id === projectId
+            ? { ...project, clips: saved.clips.length }
+            : project));
+        }
+        setStatus(`Generation cancelled. Saved clips for ${projectLabel} were kept intact.`);
       } else {
+        setProjects((current) => current.map((project) => project.project_id === projectId
+          ? { ...project, clips: result.clips.length }
+          : project));
         setStatus(`${result.clips.length} clips generated for ${projectLabel}.`);
         router.push(`/clips?project=${encodeURIComponent(projectId)}`);
       }
@@ -356,7 +358,7 @@ export default function Projects() {
           }
         : null;
     if (job?.project_id !== projectId || !job.job_id || job.status === "cancelling") return;
-    if (!window.confirm(`Cancel generation and remove all generated clips for ${projectId}? The source video and transcript will be kept.`)) {
+    if (!window.confirm(`Cancel generation for ${projectId}? Previously saved clips and the source video will be kept.`)) {
       return;
     }
     try {
@@ -462,7 +464,7 @@ export default function Projects() {
 
                   {(() => {
                     const currentFraming = framingOptions[project.project_id] ?? defaultFraming;
-                    const currentFaceTracking = faceTrackingOptions[project.project_id] ?? defaultFaceTracking;
+                    const currentTrackingMode = trackingModeOptions[project.project_id] ?? defaultTrackingMode;
                     const rawCaptionStyle = normalizeCaptionStyle(
                       captionStyleOptions[project.project_id] ?? defaultCaptionStyle
                     );
@@ -545,36 +547,44 @@ export default function Projects() {
                               </button>
                             </div>
                             {currentFraming === "true_9_16" && (
-                              <div className="mt-2 flex items-center justify-between rounded-[10px] border border-purple-500/30 bg-purple-950/20 px-3 py-2">
-                                <span className="text-xs font-medium text-purple-200">
-                                  Smooth Face Tracking
+                              <div className="mt-2 rounded-[10px] border border-purple-500/30 bg-purple-950/20 p-2 space-y-1.5">
+                                <span className="text-[11px] font-medium text-purple-200 block">
+                                  9:16 Framing Follow
                                 </span>
-                                <button
-                                  type="button"
-                                  role="switch"
-                                  aria-label="Toggle smooth face tracking in 9:16"
-                                  aria-checked={currentFaceTracking}
-                                  disabled={isGenerating || isTranscribing}
-                                  onClick={() => {
-                                    const nextFt = !currentFaceTracking;
-                                    setFaceTrackingOptions((prev) => ({
-                                      ...prev,
-                                      [project.project_id]: nextFt,
-                                    }));
-                                    try {
-                                      localStorage.setItem("cliprobin_face_tracking", String(nextFt));
-                                    } catch {}
-                                  }}
-                                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 ${
-                                    currentFaceTracking ? "bg-purple-600" : "bg-zinc-700"
-                                  }`}
-                                >
-                                  <span
-                                    className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                                      currentFaceTracking ? "translate-x-4" : "translate-x-0"
-                                    }`}
-                                  />
-                                </button>
+                                <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="9:16 crop tracking mode">
+                                  {(
+                                    [
+                                      { id: "locked", label: "Locked" },
+                                      { id: "cuts", label: "Cuts" },
+                                      { id: "follow", label: "Follow" },
+                                    ] as const
+                                  ).map((tm) => (
+                                    <button
+                                      key={tm.id}
+                                      type="button"
+                                      role="radio"
+                                      aria-checked={currentTrackingMode === tm.id}
+                                      disabled={isGenerating || isTranscribing}
+                                      onClick={() => {
+                                        setTrackingModeOptions((prev) => ({
+                                          ...prev,
+                                          [project.project_id]: tm.id,
+                                        }));
+                                        try {
+                                          localStorage.setItem("cliprobin_tracking_mode", tm.id);
+                                          localStorage.setItem("cliprobin_face_tracking", String(tm.id === "follow"));
+                                        } catch {}
+                                      }}
+                                      className={`py-1 rounded border text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50 ${
+                                        currentTrackingMode === tm.id
+                                          ? "border-purple-400 bg-purple-500/20 text-white"
+                                          : "border-zinc-800 bg-[#0a0a0a] text-zinc-400 hover:text-white"
+                                      }`}
+                                    >
+                                      {tm.label}
+                                    </button>
+                                  ))}
+                                </div>
                               </div>
                             )}
                           </div>
@@ -588,6 +598,7 @@ export default function Projects() {
                               <button
                                 type="button"
                                 role="switch"
+                                aria-label="Toggle captions"
                                 aria-checked={showSubs}
                                 disabled={isGenerating || isTranscribing}
                                 onClick={() => {
@@ -743,6 +754,7 @@ export default function Projects() {
                           <button
                             type="button"
                             role="switch"
+                            aria-label="Toggle brand watermark"
                             aria-checked={showWm}
                             disabled={isGenerating || isTranscribing}
                             onClick={() => {

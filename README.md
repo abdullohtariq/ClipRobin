@@ -71,12 +71,12 @@ flowchart TD
 - **Three 9:16 Vertical Framing Modes:**
   - **16:9 Letterbox Rounded** (`672x378` anti-aliased card on `720x1280` canvas)
   - **1:1 Rounded Square** (`660x660` anti-aliased card)
-  - **True 9:16 Smart Framing** powered by OpenCV YuNet ONNX + Whisper VAD mouth-motion correlation, with an instant **Face Tracking** toggle (cached tracked & static timelines).
-- **Flexible Clip Durations & Counter:** Generate **12s, 15s, 30s, 60s, or 90s** clips with a dynamic clip-count stepper bounded by source duration and early-exit Whisper transcription.
-- **6 High-Impact Caption Styles & Previews:** Choose **Classic**, **Robin**, **Clean**, **Punch**, **Pill**, or **Karaoke** (2 words per line, gap bridging, bundled OFL + RTL Arabic & Devanagari fonts) inside a 2-pane live preview picker with platform safe-zone guides.
-- **Custom Top-Line Hooks & Brand Watermarks:** Burn custom `<=15`-word headline hooks onto individual clips without re-rendering the whole project, and overlay default or custom PNG/JPG/WebP brand logos with adjustable position and opacity (`20%–100%`).
-- **AI Developer Mode (BYOK):** Configure your own Gemini API key directly in **Settings** (`gemini-3.8-flash` with automatic fallback to `gemini-3.1-flash-lite`), or configure OpenAI / DeepSeek via `.env`.
-- **Native Export & Social Publishing:** Export single clips or full project `.zip` archives through native Windows File Explorer Save As dialogs, publish directly to **YouTube Shorts** via Google OAuth2 resumable upload, or use guided **TikTok** and **Instagram Reels** export modals.
+  - **True 9:16 Smart Framing:** Defaults to stationary **Locked Crop** (configurable horizontal anchor, zero face scan) with optional **Speaker Cuts** and **Follow Speaker** active-speaker tracking powered by OpenCV YuNet ONNX + Whisper VAD, plus real vertical divider detection and per-clip **Reframe** controls (`720×1280`, 30 fps MP4).
+- **Flexible Clip Durations & Counter:** Generate **12s, 15s, 30s, 60s, or 90s** clips with a dynamic clip-count stepper bounded by source duration, early-exit Whisper transcription, and time-only slicing for silent media.
+- **6 High-Impact Caption Styles & Previews:** Choose **Classic**, **Robin**, **Clean**, **Punch**, **Pill**, or **Karaoke** (2 words per line, gap bridging, bundled OFL + RTL Arabic & Devanagari fonts) inside an accessible native `<dialog>` 2-pane live preview picker with platform safe-zone guides.
+- **Custom Top-Line Hooks & Brand Watermarks:** Burn custom `<=15`-word headline hooks onto individual clips without re-rendering the whole project, and overlay default or validated PNG/JPG/WebP brand logos with adjustable position and opacity (`20%–100%`).
+- **AI Developer Mode (BYOK):** Configure your own Gemini API key directly in **Settings** (`gemini-3.8-flash` with automatic fallback to `gemini-3.1-flash-lite`), or configure OpenAI / DeepSeek via `.env`; requested vs. applied selection mode and any fallback reasons are tracked transparently without hiding failed AI runs in cache.
+- **Native Export & Social Publishing:** Export single clips or full project `.zip` archives through native Windows File Explorer Save As dialogs (`POST` staging preserves committed clips if cancelled or interrupted), publish directly to **YouTube Shorts** via Google OAuth2 resumable upload, or prepare clips with **Prepare for TikTok** and **Prepare for Instagram** helpers.
 
 ## Repository Layout
 

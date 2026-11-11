@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.services.ai_analyzer import (
     AIAnalyzerError,
     analyze_transcript,
+    resolve_provider,
     save_analysis,
     validate_transcript,
 )
@@ -59,7 +60,8 @@ def update_developer_mode(request: DeveloperModeRequest) -> dict[str, Any]:
 
 @router.post("/analyze")
 def analyze(request: AnalyzeRequest) -> dict[str, Any]:
-    if (request.provider or "").lower() == "gemini":
+    resolved_provider = resolve_provider(request.provider)
+    if resolved_provider == "gemini":
         status = get_ai_developer_status()
         if not status["ai_enabled"]:
             raise HTTPException(status_code=403, detail=status["reason"] or "AI Developer Mode is disabled.")
@@ -72,7 +74,11 @@ def analyze(request: AnalyzeRequest) -> dict[str, Any]:
         analysis = analyze_transcript(request.transcript, request.provider)
     except AIAnalyzerError as error:
         message = str(error)
-        status_code = 503 if message.startswith("Missing ") else 502
+        err_status = getattr(error, "status_code", None)
+        if isinstance(err_status, int) and err_status in {400, 401, 403, 404, 429, 502, 503}:
+            status_code = err_status
+        else:
+            status_code = 503 if message.startswith("Missing ") else 502
         raise HTTPException(status_code=status_code, detail=message) from error
 
     if request.project_id:

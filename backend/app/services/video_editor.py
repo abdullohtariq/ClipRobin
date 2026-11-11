@@ -360,14 +360,21 @@ def find_ffprobe(ffmpeg_path: str | None = None) -> str | None:
     return None
 
 
-def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
+def has_audio_stream(source_path: Path, ffmpeg_path: str | None = None) -> bool:
     stat_key = _file_stat_key(source_path)
     if stat_key is not None:
         with _PROBE_CACHE_LOCK:
             if stat_key in _AUDIO_STREAM_CACHE:
                 return _AUDIO_STREAM_CACHE[stat_key]
 
-    ffprobe_path = find_ffprobe(ffmpeg_path)
+    resolved_ffmpeg = ffmpeg_path
+    if resolved_ffmpeg is None:
+        try:
+            resolved_ffmpeg = find_ffmpeg()
+        except VideoEditorError:
+            resolved_ffmpeg = None
+
+    ffprobe_path = find_ffprobe(resolved_ffmpeg)
     detected: bool | None = None
     if ffprobe_path:
         try:
@@ -391,10 +398,10 @@ def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
         except Exception:
             detected = None
 
-    if detected is None:
+    if detected is None and resolved_ffmpeg:
         try:
             result = subprocess.run(
-                [ffmpeg_path, "-i", str(source_path)],
+                [resolved_ffmpeg, "-i", str(source_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -404,6 +411,8 @@ def has_audio_stream(source_path: Path, ffmpeg_path: str) -> bool:
             detected = "Audio:" in result.stderr
         except Exception:
             detected = True
+    elif detected is None:
+        detected = True
 
     if stat_key is not None:
         with _PROBE_CACHE_LOCK:
@@ -995,6 +1004,8 @@ def create_clip(
     caption_animation: str | None = None,
     face_tracking: bool = True,
     language: str | None = None,
+    tracking_mode: str | None = None,
+    crop_anchor_x: float = 0.5,
 ) -> Path:
     if start_time < 0 or end_time <= start_time:
         raise VideoEditorError("Clip start must be before clip end")
@@ -1093,6 +1104,8 @@ def create_clip(
                         cancel_event=cancel_event,
                         max_duration=end_time + 1.0,
                         face_tracking=face_tracking,
+                        tracking_mode=tracking_mode,
+                        crop_anchor_x=crop_anchor_x,
                     )
                     crop_w, crop_h, x_expr = get_crop_filter_for_clip(tracking_data, start_time, end_time)
                 except Exception:

@@ -25,7 +25,12 @@ def test_watermark_endpoints(tmp_path, monkeypatch):
     assert bad_upload.status_code == 400
 
     # 3. Upload valid PNG image
-    fake_png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15c4"
+    from io import BytesIO
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGBA", (16, 16), (255, 0, 0, 255)).save(buf, format="PNG")
+    fake_png = buf.getvalue()
     upload_res = client.post(
         "/api/watermark/upload",
         files={"file": ("my_brand.png", fake_png, "image/png")},

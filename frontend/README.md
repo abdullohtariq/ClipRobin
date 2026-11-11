@@ -9,12 +9,12 @@ For full system architecture, backend contracts, and on-disk schemas, see the ro
 ## Architecture Highlights
 
 - **Static Desktop Export (`next.config.ts`)**: Builds with `output: "export"` into `frontend/out/`, which Tauri bundles directly into the native Windows WebView2 binary.
-- **Dynamic Backend Port Discovery (`src/lib/api.ts`)**:
-  - In web development (`npm run dev`), talks to `http://127.0.0.1:8000`.
-  - Inside Tauri desktop builds, invokes the Rust `backend_port` IPC command (`src-tauri/src/lib.rs`) to resolve the ephemeral loopback port bound by the spawned `cliprobin-api` sidecar.
+- **Dynamic Backend Port & Token Security (`src/lib/api.ts`)**:
+  - In web development (`npm run dev`), talks to `http://127.0.0.1:8000` with explicit local origin and `Sec-Fetch-Site` validation on the backend.
+  - Inside Tauri desktop builds, invokes the Rust `backend_port` and `backend_token` IPC commands (`src-tauri/src/lib.rs`) to resolve the ephemeral loopback port and per-launch API token (`X-ClipRobin-Token` / media query token) under a strict CSP (`tauri.conf.json`).
 - **Global State Providers (`app/layout.tsx`)**:
   - `SubscriptionProvider` (`src/lib/subscription-context.tsx`) reads the signed-in user's plan from the hosted Supabase billing function. Free local editing works without an account.
-  - `QueueProvider` (`src/lib/queue-context.tsx`): Orchestrates multi-video intake (YouTube URLs & local files), sequential transcription + clip generation, `AbortController` cancellation, and live progress updates.
+  - `QueueProvider` (`src/lib/queue-context.tsx`): Orchestrates multi-video intake (YouTube URLs & local files), persists recoverable queue state and reconciles active backend jobs across reloads, cleanly separates `cancelled` from `failed` items with retry support without deleting existing projects, and runs sequential transcription + staged clip generation.
 - **Adaptive & Visibility-Aware Polling**: Background status hooks (`app/job-progress.tsx`, `app/projects/page.tsx`, `src/hooks/use-ai-developer-status.ts`) pause automatically when `document.hidden` is true, back off when idle (`4000ms`), accelerate while active (`1000ms`), and wake immediately on custom DOM events (`cliprobin:job-started`, `cliprobin:ai-status-changed`).
 
 ---
@@ -24,9 +24,9 @@ For full system architecture, backend contracts, and on-disk schemas, see the ro
 | Route | File | Description |
 | :--- | :--- | :--- |
 | `/` | `app/page.tsx` | **Dashboard**: Local file drag-and-drop & YouTube URL tabs, unified `ClipSettings`, multi-video queue view, and sticky live 9:16 phone preview. |
-| `/clips` | `app/clips/page.tsx` | **Clips Studio**: Responsive 9:16 player grid, exclusive audio coordination, `ClipModalViewer`, Top-Line hook editor, Regenerate toolbar, Save As MP4/ZIP export, and YouTube / TikTok / Instagram modals. |
-| `/projects` | `app/projects/page.tsx` | **Projects Library**: Inline project rename (`PATCH /api/projects/{id}`), status badges, per-project regeneration panel (framing, duration, face tracking, captions, watermark), and safe deletion. |
-| `/settings` | `app/settings/page.tsx` | **Settings**: Default clip preferences, Gemini **AI Developer Mode** (BYOK), Google OAuth2 YouTube channel connection, and custom brand watermark upload/position/opacity controls. |
+| `/clips` | `app/clips/page.tsx` | **Clips Studio**: Responsive `720×1280` 9:16 player grid, exclusive audio coordination, accessible native `<dialog>` `ClipModalViewer`, single-clip **Reframe** & crop preview, Top-Line hook editor, staged regeneration toolbar, Save As MP4/ZIP export, and YouTube / Prepare for TikTok & Instagram modals. |
+| `/projects` | `app/projects/page.tsx` | **Projects Library**: Inline project rename (`PATCH /api/projects/{id}`), status badges, per-project regeneration panel (framing, 9:16 tracking mode, duration, captions, watermark), cancellation preserving prior clips, and safe deletion. |
+| `/settings` | `app/settings/page.tsx` | **Settings**: Verified local preferences (confirm delete, default caption style), output specification summary, Gemini **AI Developer Mode** (BYOK with transcript disclosure), Google OAuth2 YouTube channel connection, and validated PNG/JPG/WebP brand watermark upload/position/opacity controls. |
 | `/subscription` | `app/subscription/page.tsx` | Email sign-in, optional browser OAuth, Free and Pro plan comparison, and hosted Lemon Squeezy checkout and billing management. |
 
 ---

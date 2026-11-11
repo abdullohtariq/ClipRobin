@@ -13,13 +13,55 @@ use tauri::Manager;
 
 struct BackendProcess {
     port: u16,
+    token: Option<String>,
     #[cfg(all(not(debug_assertions), target_os = "windows"))]
     child: Mutex<Child>,
+}
+
+#[cfg(all(not(debug_assertions), target_os = "windows"))]
+#[link(name = "bcrypt")]
+extern "system" {
+    fn BCryptGenRandom(
+        h_algorithm: *mut core::ffi::c_void,
+        pb_buffer: *mut u8,
+        cb_buffer: u32,
+        dw_flags: u32,
+    ) -> i32;
+}
+
+#[cfg(all(not(debug_assertions), target_os = "windows"))]
+fn generate_api_token() -> Result<String, std::io::Error> {
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x00000002;
+    let mut bytes = [0u8; 32];
+    let status = unsafe {
+        BCryptGenRandom(
+            core::ptr::null_mut(),
+            bytes.as_mut_ptr(),
+            bytes.len() as u32,
+            BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        )
+    };
+    if status != 0 {
+        return Err(std::io::Error::other(format!(
+            "Failed to generate local API token (NTSTATUS {status})"
+        )));
+    }
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write as _;
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    Ok(hex)
 }
 
 #[tauri::command]
 fn backend_port(backend: tauri::State<'_, BackendProcess>) -> u16 {
     backend.port
+}
+
+#[tauri::command]
+fn backend_token(backend: tauri::State<'_, BackendProcess>) -> Option<String> {
+    backend.token.clone()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,6 +99,7 @@ pub fn run() {
                     new_path.push(existing_path);
                 }
 
+                let api_token = generate_api_token()?;
                 let listener = TcpListener::bind(("127.0.0.1", 0))?;
                 let port = listener.local_addr()?.port();
                 drop(listener);
@@ -66,6 +109,7 @@ pub fn run() {
                     .env("CLIPROBIN_FFMPEG_DIR", &bin_dir)
                     .env("CLIPROBIN_PROJECTS_DIR", projects_dir)
                     .env("CLIPROBIN_API_PORT", port.to_string())
+                    .env("CLIPROBIN_API_TOKEN", &api_token)
                     .env("HF_HOME", model_cache_dir)
                     .stdout(Stdio::from(backend_log.try_clone()?))
                     .stderr(Stdio::from(backend_log))
@@ -105,12 +149,19 @@ pub fn run() {
                 }
                 app.manage(BackendProcess {
                     port,
+                    token: Some(api_token),
                     child: Mutex::new(child),
                 });
             }
 
             #[cfg(not(all(not(debug_assertions), target_os = "windows")))]
-            app.manage(BackendProcess { port: 8000 });
+            app.manage(BackendProcess {
+                port: 8000,
+                token: std::env::var("CLIPROBIN_API_TOKEN")
+                    .ok()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
+            });
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -121,7 +172,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![backend_port])
+        .invoke_handler(tauri::generate_handler![backend_port, backend_token])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app_handle, event| {

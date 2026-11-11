@@ -134,15 +134,42 @@ def transcribe_video(
 
     output_directory.mkdir(parents=True, exist_ok=True)
     if progress_callback:
-        progress_callback("Loading speech model", 0)
+        progress_callback("Extracting audio", 0)
 
     full_media_duration = 0.0
-    if max_duration is not None:
-        try:
-            from app.services.video_editor import probe_video_duration
-            full_media_duration = probe_video_duration(video_path)
-        except Exception:
-            full_media_duration = 0.0
+    has_audio = True
+    try:
+        from app.services.video_editor import has_audio_stream, probe_video_duration
+        full_media_duration = probe_video_duration(video_path)
+        if full_media_duration > 0:
+            has_audio = has_audio_stream(video_path)
+    except Exception:
+        has_audio = True
+
+    if not has_audio and full_media_duration > 0:
+        silent_json = {
+            "language": None,
+            "language_probability": 0.0,
+            "has_audio": False,
+            "has_speech": False,
+            "segments": [],
+            "duration": round(full_media_duration, 3),
+            "is_complete": True,
+            "covered_duration": round(full_media_duration, 3),
+        }
+        _atomic_write_text(output_directory / "transcript.txt", "")
+        _atomic_write_text(output_directory / "transcript.json", json.dumps(silent_json, indent=2))
+        if progress_callback:
+            progress_callback("No audio track detected; prepared time slicing", 100)
+        return {
+            "text_file": "transcript.txt",
+            "json_file": "transcript.json",
+            "segments": 0,
+            "has_audio": False,
+            "has_speech": False,
+            "duration": full_media_duration,
+            "is_complete": True,
+        }
 
     # Only cap WAV extraction when max_duration is meaningfully shorter than the full video
     extract_cap: float | None = None
@@ -162,8 +189,16 @@ def transcribe_video(
     except Exception:
         audio_source = str(video_path)
 
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("Transcription cancelled")
+
+    if progress_callback:
+        progress_callback("Loading speech model", 0)
+
     try:
         model = get_whisper_model()
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Transcription cancelled")
         # 2. High-speed greedy decoding (beam_size=1, best_of=1) with VAD filter & word timestamps
         segments, info = model.transcribe(
             audio_source,
@@ -194,6 +229,8 @@ def transcribe_video(
             transcript_json = {
                 "language": info.language,
                 "language_probability": info.language_probability,
+                "has_audio": True,
+                "has_speech": len(transcript_segments) > 0,
                 "segments": transcript_segments,
                 "duration": duration,
                 "is_complete": is_complete,
@@ -256,6 +293,8 @@ def transcribe_video(
             "text_file": "transcript.txt",
             "json_file": "transcript.json",
             "segments": len(transcript_segments),
+            "has_audio": True,
+            "has_speech": len(transcript_segments) > 0,
             "duration": duration,
             "is_complete": not stopped_early,
         }

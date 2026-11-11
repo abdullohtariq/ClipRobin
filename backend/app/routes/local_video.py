@@ -11,6 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from app.routes.download import create_project_directory
+from app.services.project_manager import get_project_uid, verify_project_ownership
 from app.services.transcriber import transcribe_video
 
 router = APIRouter(prefix="/api")
@@ -77,18 +78,27 @@ def run_local_transcription(
     source_path: Path,
     project_directory: Path,
     cancel_event: threading.Event | None = None,
+    expected_uid: str | None = None,
 ) -> None:
     if cancel_event is None:
         with JOBS_LOCK:
             cancel_event = TRANSCRIPTION_CANCEL_EVENTS.get(project_id)
+    if expected_uid is None:
+        expected_uid = get_project_uid(project_directory)
 
     def report_progress(step: str, step_progress: float) -> None:
         if cancel_event is not None and cancel_event.is_set():
             return
-        if step == "Loading speech model":
+        if not verify_project_ownership(project_directory, expected_uid):
+            return
+        if step == "Extracting audio":
             progress = 5
+        elif step == "Loading speech model":
+            progress = 12
         elif step == "Transcribing audio":
-            progress = min(90, 10 + round(step_progress * 0.8))
+            progress = min(92, 15 + round(step_progress * 0.77))
+        elif step.startswith("No audio"):
+            progress = 95
         else:
             progress = 95
         update_job(
@@ -99,6 +109,8 @@ def run_local_transcription(
         )
 
     try:
+        if not verify_project_ownership(project_directory, expected_uid):
+            raise RuntimeError("Transcription cancelled")
         result = transcribe_video(
             source_path,
             project_directory / "transcription",

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -9,6 +10,11 @@ from typing import Any
 import httpx
 
 logger = logging.getLogger(__name__)
+SAFE_CLIP_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def is_safe_clip_id(clip_id: Any) -> bool:
+    return isinstance(clip_id, str) and bool(SAFE_CLIP_ID_RE.fullmatch(clip_id)) and clip_id not in {".", ".."}
 
 
 PROVIDER_DEFAULT = "openai"
@@ -65,6 +71,15 @@ Use the transcript timestamps to determine clip boundaries.
 class AIAnalyzerError(Exception):
     """Raised when a provider cannot produce valid clip analysis."""
 
+    def __init__(self, message: str, *, status_code: int | None = None, retryable: bool = True) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
+
+
+def resolve_provider(provider: str | None = None) -> str:
+    return (provider or os.getenv("AI_PROVIDER") or PROVIDER_DEFAULT).strip().lower()
+
 
 def analyze_transcript(
     transcript: dict[str, Any],
@@ -73,14 +88,18 @@ def analyze_transcript(
     max_clips: int | None = None,
 ) -> dict[str, Any]:
     segments = validate_transcript(transcript)
-    selected_provider = (provider or os.getenv("AI_PROVIDER") or PROVIDER_DEFAULT).lower()
+    selected_provider = resolve_provider(provider)
     if selected_provider not in PROVIDER_CONFIG:
-        raise AIAnalyzerError(f"Unsupported AI provider: {selected_provider}")
+        raise AIAnalyzerError(f"Unsupported AI provider: {selected_provider}", retryable=False)
 
     prompt = build_user_prompt(segments, max_clip_seconds=max_clip_seconds, max_clips=max_clips)
-    raw_response = request_provider(selected_provider, prompt)
+    raw_response, used_model = request_provider_with_model(selected_provider, prompt)
     analysis = parse_analysis(raw_response)
-    return validate_analysis(analysis, segments, max_clip_seconds=max_clip_seconds)
+    validated = validate_analysis(analysis, segments, max_clip_seconds=max_clip_seconds)
+    validated["provider"] = selected_provider
+    if used_model:
+        validated["model"] = used_model
+    return validated
 
 
 def validate_transcript(transcript: dict[str, Any]) -> list[dict[str, Any]]:
@@ -140,7 +159,33 @@ def build_user_prompt(
     return f"Transcript:\n{transcript_text}\n\n{constraint_text}" if constraint_text else f"Transcript:\n{transcript_text}"
 
 
-def request_provider(provider: str, user_prompt: str) -> str:
+def _raise_for_http_status(provider: str, model: str, status: int) -> None:
+    if status in {401, 403}:
+        raise AIAnalyzerError(
+            f"{provider.capitalize()} API key was rejected or lacks permission (HTTP {status}). Check your key in Settings.",
+            status_code=status,
+            retryable=False,
+        )
+    if status in {400, 404}:
+        raise AIAnalyzerError(
+            f"{provider.capitalize()} rejected the request or configured model '{model}' (HTTP {status}).",
+            status_code=status,
+            retryable=False,
+        )
+    if status == 429:
+        raise AIAnalyzerError(
+            f"{provider.capitalize()} rate limit exceeded (HTTP 429). Please retry shortly.",
+            status_code=status,
+            retryable=True,
+        )
+    raise AIAnalyzerError(
+        f"{provider.capitalize()} API returned HTTP {status} on model '{model}'.",
+        status_code=status,
+        retryable=status >= 500,
+    )
+
+
+def request_provider_with_model(provider: str, user_prompt: str) -> tuple[str, str]:
     config = PROVIDER_CONFIG[provider]
     if provider == "gemini":
         from app.services.ai_developer_mode import get_gemini_api_key
@@ -149,22 +194,44 @@ def request_provider(provider: str, user_prompt: str) -> str:
     else:
         api_key = os.getenv(config["api_key_env"])
     if not api_key:
-        raise AIAnalyzerError(f"Missing {config['api_key_env']} environment variable")
+        raise AIAnalyzerError(
+            f"Missing {config['api_key_env']} configuration",
+            status_code=503,
+            retryable=False,
+        )
 
     try:
         if provider == "gemini":
-            return request_gemini(config, api_key, user_prompt)
-        return request_openai_compatible(config, api_key, user_prompt)
+            return _request_gemini_with_model(config, api_key, user_prompt)
+        return _request_openai_compatible_with_model(provider, config, api_key, user_prompt)
+    except AIAnalyzerError:
+        raise
+    except httpx.TimeoutException as error:
+        raise AIAnalyzerError(
+            f"{provider.capitalize()} API request timed out.",
+            retryable=True,
+        ) from error
     except httpx.HTTPError as error:
-        raise AIAnalyzerError(f"{provider} API request failed") from error
+        raise AIAnalyzerError(f"{provider.capitalize()} API network request failed.") from error
 
 
-def request_openai_compatible(config: dict[str, str], api_key: str, user_prompt: str) -> str:
+def request_provider(provider: str, user_prompt: str) -> str:
+    text, _ = request_provider_with_model(provider, user_prompt)
+    return text
+
+
+def _request_openai_compatible_with_model(
+    provider: str,
+    config: dict[str, str],
+    api_key: str,
+    user_prompt: str,
+) -> tuple[str, str]:
+    model = os.getenv(config["model_env"], config["default_model"])
     response = httpx.post(
         os.getenv(config["base_url_env"], config["default_base_url"]),
         headers={"Authorization": f"Bearer {api_key}"},
         json={
-            "model": os.getenv(config["model_env"], config["default_model"]),
+            "model": model,
             "temperature": 0.2,
             "response_format": {"type": "json_object"},
             "messages": [
@@ -174,11 +241,17 @@ def request_openai_compatible(config: dict[str, str], api_key: str, user_prompt:
         },
         timeout=120.0,
     )
-    response.raise_for_status()
+    if response.status_code >= 400:
+        _raise_for_http_status(provider, model, response.status_code)
     try:
-        return response.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as error:
+        return response.json()["choices"][0]["message"]["content"], model
+    except (KeyError, IndexError, TypeError, ValueError) as error:
         raise AIAnalyzerError("AI provider returned an unexpected response") from error
+
+
+def request_openai_compatible(config: dict[str, str], api_key: str, user_prompt: str) -> str:
+    text, _ = _request_openai_compatible_with_model("openai", config, api_key, user_prompt)
+    return text
 
 
 def _extract_gemini_text(payload: dict[str, Any]) -> str:
@@ -197,7 +270,7 @@ def _extract_gemini_text(payload: dict[str, Any]) -> str:
     raise KeyError("text")
 
 
-def request_gemini(config: dict[str, str], api_key: str, user_prompt: str) -> str:
+def _request_gemini_with_model(config: dict[str, str], api_key: str, user_prompt: str) -> tuple[str, str]:
     primary_model = os.getenv(config["model_env"], config["default_model"])
     base_url = os.getenv(config["base_url_env"], config["default_base_url"])
 
@@ -207,7 +280,9 @@ def request_gemini(config: dict[str, str], api_key: str, user_prompt: str) -> st
             candidate_models.append(alt)
 
     max_retries = 3
-    last_error: Exception | None = None
+    last_status: int | None = None
+    last_model: str = primary_model
+    last_timeout = False
 
     with httpx.Client(timeout=120.0) as client:
         for model_idx, model in enumerate(candidate_models):
@@ -225,44 +300,77 @@ def request_gemini(config: dict[str, str], api_key: str, user_prompt: str) -> st
                             },
                         },
                     )
-                    response.raise_for_status()
+                    if response.status_code >= 400:
+                        status = response.status_code
+                        last_status = status
+                        last_model = model
+                        # Non-transient client/credential/model errors fail immediately without retry or model hiding
+                        if status not in {429, 500, 502, 503, 504}:
+                            _raise_for_http_status("gemini", model, status)
+                        if attempt < max_retries:
+                            backoff = 1.5 * (2 ** (attempt - 1))
+                            logger.warning(
+                                "Gemini API returned status %d on model %s. Retrying in %.1fs (attempt %d/%d)...",
+                                status, model, backoff, attempt, max_retries
+                            )
+                            time.sleep(backoff)
+                            continue
+                        if model_idx + 1 < len(candidate_models):
+                            logger.warning(
+                                "Model %s returned status %d. Falling back to next candidate %s...",
+                                model, status, candidate_models[model_idx + 1]
+                            )
+                            break
+                        _raise_for_http_status("gemini", model, status)
+
                     try:
-                        return _extract_gemini_text(response.json())
+                        return _extract_gemini_text(response.json()), model
                     except (KeyError, IndexError, TypeError, ValueError) as error:
                         raise AIAnalyzerError("AI provider returned an unexpected response") from error
-                except httpx.HTTPStatusError as error:
-                    last_error = error
-                    status = error.response.status_code
-                    if status in {429, 500, 502, 503, 504} and attempt < max_retries:
-                        backoff = 1.5 * (2 ** (attempt - 1))
-                        logger.warning(
-                            "Gemini API returned status %d on model %s. Retrying in %.1fs (attempt %d/%d)...",
-                            status, model, backoff, attempt, max_retries
-                        )
-                        time.sleep(backoff)
-                        continue
-                    if status in {429, 500, 502, 503, 504} and model_idx + 1 < len(candidate_models):
-                        logger.warning(
-                            "Model %s returned status %d. Falling back to next candidate %s...",
-                            model, status, candidate_models[model_idx + 1]
-                        )
-                        break
+                except AIAnalyzerError:
                     raise
-                except (httpx.TimeoutException, httpx.NetworkError) as error:
-                    last_error = error
+                except httpx.TimeoutException:
+                    last_timeout = True
+                    last_model = model
                     if attempt < max_retries:
                         backoff = 1.5 * (2 ** (attempt - 1))
                         logger.warning(
-                            "Gemini API network error on %s: %s. Retrying in %.1fs (attempt %d/%d)...",
-                            model, error, backoff, attempt, max_retries
+                            "Gemini API timed out on %s. Retrying in %.1fs (attempt %d/%d)...",
+                            model, backoff, attempt, max_retries
                         )
                         time.sleep(backoff)
                         continue
-                    raise
+                    if model_idx + 1 < len(candidate_models):
+                        break
+                    raise AIAnalyzerError(
+                        f"Gemini API request timed out on model '{model}'.",
+                        retryable=True,
+                    )
+                except httpx.NetworkError as error:
+                    last_model = model
+                    if attempt < max_retries:
+                        backoff = 1.5 * (2 ** (attempt - 1))
+                        logger.warning(
+                            "Gemini API network error on %s (%s). Retrying in %.1fs (attempt %d/%d)...",
+                            model, error.__class__.__name__, backoff, attempt, max_retries
+                        )
+                        time.sleep(backoff)
+                        continue
+                    raise AIAnalyzerError(
+                        f"Network error contacting Gemini API ({error.__class__.__name__}).",
+                        retryable=True,
+                    ) from error
 
-    if last_error:
-        raise last_error
+    if last_status is not None:
+        _raise_for_http_status("gemini", last_model, last_status)
+    if last_timeout:
+        raise AIAnalyzerError(f"Gemini API request timed out on model '{last_model}'.", retryable=True)
     raise AIAnalyzerError("Gemini API request failed after all retries and fallback models")
+
+
+def request_gemini(config: dict[str, str], api_key: str, user_prompt: str) -> str:
+    text, _ = _request_gemini_with_model(config, api_key, user_prompt)
+    return text
 
 
 def parse_analysis(raw_response: str) -> dict[str, Any]:
@@ -496,15 +604,20 @@ def validate_analysis(
         else:
             clip_score = 8.5
 
-        clip_id = clip.get("id") or f"clip_{index:03d}"
-        validated_clips.append({
-            "id": str(clip_id),
+        # Allocate filesystem-safe local clip IDs; retain any provider identifier separately.
+        clip_id = f"clip_{index:03d}"
+        raw_provider_id = clip.get("id")
+        entry: dict[str, Any] = {
+            "id": clip_id,
             "title": title.strip(),
             "start": snapped_start,
             "end": snapped_end,
             "score": clip_score,
             "reason": reason.strip(),
-        })
+        }
+        if isinstance(raw_provider_id, str) and raw_provider_id.strip():
+            entry["provider_id"] = raw_provider_id.strip()
+        validated_clips.append(entry)
 
     if not validated_clips:
         raise AIAnalyzerError("AI response contained no valid clips")

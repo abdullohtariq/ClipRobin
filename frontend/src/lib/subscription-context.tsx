@@ -5,11 +5,12 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { accountClient, billingRequest, type AccountPlan } from "@/src/lib/account";
 
 export const PLAN_FEATURES = [
-  ["Local transcription and Fast Interval clips", "Included", "Included"],
+  ["Local transcription & Fast Interval clips", "Included", "Included"],
+  ["Output resolution & format", "720×1280, 30 fps MP4", "720×1280, 30 fps MP4"],
   ["MP4 and ZIP export", "Included", "Included"],
+  ["Watermark", "Default Clip Robin mark", "Removable or custom logo"],
   ["Caption styles", "Classic and Clean", "All styles"],
   ["Gemini AI Hook Finder with your API key", "—", "Included"],
-  ["Custom logo and watermark removal", "—", "Included"],
 ] as const;
 
 const FREE_ALLOWED_CAPTION_STYLES = ["classic", "clean"];

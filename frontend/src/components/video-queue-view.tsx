@@ -19,6 +19,7 @@ export function VideoQueueView({ onAddAnotherVideo, className = "" }: VideoQueue
     isAtLimit,
     removeFromQueue,
     cancelRunningItem,
+    retryQueueItem,
     renameQueueItem,
     clearCompletedItems,
   } = useVideoQueue();
@@ -40,7 +41,7 @@ export function VideoQueueView({ onAddAnotherVideo, className = "" }: VideoQueue
     setEditingId(null);
   };
 
-  const hasFinishedItems = queue.some((item) => ["done", "failed"].includes(item.status));
+  const hasFinishedItems = queue.some((item) => ["done", "failed", "cancelled"].includes(item.status));
 
   return (
     <section
@@ -113,6 +114,7 @@ export function VideoQueueView({ onAddAnotherVideo, className = "" }: VideoQueue
           const isQueued = item.status === "queued";
           const isDone = item.status === "done";
           const isFailed = item.status === "failed";
+          const isCancelled = item.status === "cancelled";
           const isEditing = editingId === item.id;
 
           return (
@@ -123,6 +125,8 @@ export function VideoQueueView({ onAddAnotherVideo, className = "" }: VideoQueue
                   ? "border-emerald-500/30 bg-emerald-950/10 shadow-sm"
                   : isFailed
                   ? "border-red-500/30 bg-red-950/10"
+                  : isCancelled
+                  ? "border-amber-500/30 bg-amber-950/10"
                   : isDone
                   ? "border-zinc-800 bg-[#0e0e11]"
                   : "border-zinc-800/80 bg-[#0c0c0e]"
@@ -229,8 +233,24 @@ export function VideoQueueView({ onAddAnotherVideo, className = "" }: VideoQueue
                     </Badge>
                   )}
 
+                  {isCancelled && (
+                    <Badge variant="amber" size="sm">
+                      Cancelled
+                    </Badge>
+                  )}
+
                   {/* Action buttons */}
-                  {isQueued && (
+                  {(isFailed || isCancelled) && (
+                    <button
+                      type="button"
+                      onClick={() => retryQueueItem(item.id)}
+                      className="px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 transition-colors cursor-pointer"
+                    >
+                      Retry
+                    </button>
+                  )}
+
+                  {!isProcessing && (
                     <IconButton
                       label="Remove from queue"
                       tooltip="Remove from queue"

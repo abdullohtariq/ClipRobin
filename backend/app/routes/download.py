@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 
 from app.services.downloader import DownloadCancelled, download_video
-from app.services.project_manager import create_project
+from app.services.project_manager import create_project, get_project_uid, verify_project_ownership
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -73,14 +73,23 @@ def run_background_download(
     output_path: Path,
     project_directory: Path,
     cancel_event: threading.Event | None = None,
+    expected_uid: str | None = None,
 ) -> None:
     if cancel_event is None:
         with DOWNLOAD_JOBS_LOCK:
             cancel_event = DOWNLOAD_CANCEL_EVENTS.get(project_id)
+    if expected_uid is None:
+        expected_uid = get_project_uid(project_directory)
+
+    def _safe_remove_if_owned() -> None:
+        if verify_project_ownership(project_directory, expected_uid):
+            shutil.rmtree(project_directory, ignore_errors=True)
 
     def on_progress(data: dict[str, Any]) -> None:
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadCancelled("Download cancelled")
+        if not verify_project_ownership(project_directory, expected_uid):
+            raise DownloadCancelled("Project was deleted or replaced")
         with DOWNLOAD_JOBS_LOCK:
             existing_title = DOWNLOAD_JOBS.get(project_id, {}).get("title")
         update_download_job(
@@ -106,6 +115,8 @@ def run_background_download(
         )
         if cancel_event is not None and cancel_event.is_set():
             raise DownloadCancelled("Download cancelled")
+        if not verify_project_ownership(project_directory, expected_uid):
+            raise DownloadCancelled("Project was deleted or replaced")
 
         _write_project_metadata(
             project_directory,
@@ -126,7 +137,7 @@ def run_background_download(
             duration=info.get("duration"),
         )
     except DownloadCancelled:
-        shutil.rmtree(project_directory, ignore_errors=True)
+        _safe_remove_if_owned()
         update_download_job(
             project_id,
             status="cancelled",
@@ -135,7 +146,7 @@ def run_background_download(
         )
     except Exception as error:
         if cancel_event is not None and cancel_event.is_set():
-            shutil.rmtree(project_directory, ignore_errors=True)
+            _safe_remove_if_owned()
             update_download_job(
                 project_id,
                 status="cancelled",
@@ -144,7 +155,7 @@ def run_background_download(
             )
             return
         logger.exception("Video download failed for project %s: %s", project_id, error)
-        shutil.rmtree(project_directory, ignore_errors=True)
+        _safe_remove_if_owned()
         user_message = (
             "This YouTube video was unavailable to download. "
             "You can choose or drop a local video file (MP4, MOV, MKV, WebM) to generate clips instead."

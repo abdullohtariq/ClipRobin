@@ -7,6 +7,7 @@ import {
   CaptionStyle,
   Clip,
   ClipGenerationJob,
+  CropPreviewResponse,
   cancelClipGeneration,
   clipDownloadUrl,
   clipUrl,
@@ -14,13 +15,17 @@ import {
   generateClips,
   getClips,
   getLatestClipGenerationJob,
+  getProjectCropPreview,
   getProjects,
   Project,
+  reframeClip,
   removeClipTopLine,
   saveAllClipsWithExplorer,
   saveClipWithExplorer,
   setClipTopLine,
+  TrackingMode,
 } from "@/src/lib/api";
+import { ModalDialog } from "@/src/components/ui/modal-dialog";
 import { ClipSkeletonCard } from "@/src/components/skeletons";
 import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
 import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
@@ -45,7 +50,14 @@ const normalizeCaptionStyle = (raw: string | null | undefined): CaptionStyle => 
 interface AppliedProjectSettings {
   framingMode: FramingMode;
   faceTracking?: boolean;
+  trackingMode?: TrackingMode;
+  cropAnchorX?: number;
   generationMode?: "random" | "ai";
+  requestedGenerationMode?: "random" | "ai";
+  appliedGenerationMode?: "random" | "ai";
+  aiFallbackReason?: string | null;
+  appliedTrackingMode?: string | null;
+  trackingFallbackReason?: string | null;
   clipDurationSeconds: ClipDuration;
   clipCount?: number;
   captionStyle: CaptionStyle;
@@ -67,6 +79,7 @@ const ProClipCard = memo(function ProClipCard({
   showWatermark,
   showSubtitles,
   defaultFaceTracking,
+  actionsDisabled = false,
   onClipUpdated,
 }: {
   clip: Clip;
@@ -80,6 +93,7 @@ const ProClipCard = memo(function ProClipCard({
   showWatermark?: boolean;
   showSubtitles?: boolean;
   defaultFaceTracking?: boolean;
+  actionsDisabled?: boolean;
   onClipUpdated?: (updatedClip: Clip) => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -96,6 +110,15 @@ const ProClipCard = memo(function ProClipCard({
   const [topLineInput, setTopLineInput] = useState(clip.top_line || "");
   const [isSavingTopLine, setIsSavingTopLine] = useState(false);
   const [topLineError, setTopLineError] = useState("");
+  const [isEditingReframe, setIsEditingReframe] = useState(false);
+  const [reframeMode, setReframeMode] = useState<FramingMode>(clip.framing_mode || "standard");
+  const [reframeTracking, setReframeTracking] = useState<TrackingMode>(
+    clip.tracking_mode || (clip.face_tracking ? "follow" : "locked"),
+  );
+  const [reframeAnchor, setReframeAnchor] = useState<number>(clip.crop_anchor_x ?? 0.5);
+  const [reframePreview, setReframePreview] = useState<CropPreviewResponse | null>(null);
+  const [isReframing, setIsReframing] = useState(false);
+  const [reframeError, setReframeError] = useState("");
   const [hasVideoError, setHasVideoError] = useState(false);
   const hasStartedRef = useRef(false);
   const retryCountRef = useRef(0);
@@ -103,7 +126,34 @@ const ProClipCard = memo(function ProClipCard({
 
   const clipVersion =
     clip.v ||
-    `${clip.start}_${clip.end}_${clip.framing_mode || ""}_${clip.caption_style || ""}_${clip.caption_animation || ""}_${clip.face_tracking ?? ""}_${clip.top_line || ""}`;
+    `${clip.start}_${clip.end}_${clip.framing_mode || ""}_${clip.caption_style || ""}_${clip.caption_animation || ""}_${clip.tracking_mode || ""}_${clip.crop_anchor_x ?? ""}_${clip.top_line || ""}`;
+
+  useEffect(() => {
+    setReframeMode(clip.framing_mode || "standard");
+    setReframeTracking(clip.tracking_mode || (clip.face_tracking ? "follow" : "locked"));
+    setReframeAnchor(clip.crop_anchor_x ?? 0.5);
+  }, [clip.framing_mode, clip.tracking_mode, clip.face_tracking, clip.crop_anchor_x]);
+
+  useEffect(() => {
+    if (!isEditingReframe || reframeMode !== "true_9_16") {
+      setReframePreview(null);
+      return;
+    }
+    const controller = new AbortController();
+    getProjectCropPreview(
+      projectId,
+      {
+        start: clip.start,
+        end: clip.end,
+        trackingMode: reframeTracking,
+        cropAnchorX: reframeAnchor,
+      },
+      controller.signal,
+    )
+      .then((res) => setReframePreview(res))
+      .catch(() => {});
+    return () => controller.abort();
+  }, [isEditingReframe, reframeMode, reframeTracking, reframeAnchor, projectId, clip.start, clip.end]);
 
   useEffect(() => {
     isActivePlayingRef.current = isActivePlaying;
@@ -241,15 +291,12 @@ const ProClipCard = memo(function ProClipCard({
       });
       setIsEditingTopLine(false);
       onClipUpdated?.(response.clip);
-      const timestamp = Date.now();
+      const nextVersion = response.clip.v || String(Date.now());
       const [cUrl, dUrl] = await Promise.all([
-        clipUrl(projectId, clip.file),
-        clipDownloadUrl(projectId, clip.file),
+        clipUrl(projectId, response.clip.file || clip.file, nextVersion),
+        clipDownloadUrl(projectId, response.clip.file || clip.file, nextVersion),
       ]);
-      setMediaUrls({
-        clip: `${cUrl}?t=${timestamp}`,
-        download: `${dUrl}&t=${timestamp}`,
-      });
+      setMediaUrls({ clip: cUrl, download: dUrl });
       if (videoRef.current) videoRef.current.load();
     } catch (err) {
       setTopLineError(err instanceof Error ? err.message : String(err));
@@ -273,15 +320,12 @@ const ProClipCard = memo(function ProClipCard({
       setIsEditingTopLine(false);
       setTopLineInput("");
       onClipUpdated?.(response.clip);
-      const timestamp = Date.now();
+      const nextVersion = response.clip.v || String(Date.now());
       const [cUrl, dUrl] = await Promise.all([
-        clipUrl(projectId, clip.file),
-        clipDownloadUrl(projectId, clip.file),
+        clipUrl(projectId, response.clip.file || clip.file, nextVersion),
+        clipDownloadUrl(projectId, response.clip.file || clip.file, nextVersion),
       ]);
-      setMediaUrls({
-        clip: `${cUrl}?t=${timestamp}`,
-        download: `${dUrl}&t=${timestamp}`,
-      });
+      setMediaUrls({ clip: cUrl, download: dUrl });
       if (videoRef.current) videoRef.current.load();
     } catch (err) {
       setTopLineError(err instanceof Error ? err.message : String(err));
@@ -289,6 +333,45 @@ const ProClipCard = memo(function ProClipCard({
       setIsSavingTopLine(false);
     }
   };
+
+  const handleSaveReframe = async () => {
+    if (isReframing) return;
+    setIsReframing(true);
+    setReframeError("");
+    try {
+      const response = await reframeClip(projectId, clip.id, {
+        framing_mode: reframeMode,
+        tracking_mode: reframeMode === "true_9_16" ? reframeTracking : "locked",
+        crop_anchor_x: reframeAnchor,
+        face_tracking: reframeMode === "true_9_16" && reframeTracking === "follow",
+      });
+      setIsEditingReframe(false);
+      onClipUpdated?.(response.clip);
+      const nextVersion = response.clip.v || String(Date.now());
+      const [cUrl, dUrl] = await Promise.all([
+        clipUrl(projectId, response.clip.file || clip.file, nextVersion),
+        clipDownloadUrl(projectId, response.clip.file || clip.file, nextVersion),
+      ]);
+      setMediaUrls({ clip: cUrl, download: dUrl });
+      if (videoRef.current) videoRef.current.load();
+    } catch (err) {
+      setReframeError(err instanceof Error ? err.message : "Could not reframe clip");
+    } finally {
+      setIsReframing(false);
+    }
+  };
+
+  const isAiClip =
+    clip.selection_method === "ai" ||
+    (clip.applied_generation_mode === "ai" &&
+      typeof clip.score === "number" &&
+      !clip.reason?.startsWith("Evenly spaced"));
+  const selectionLabel =
+    clip.selection_method === "time_slice"
+      ? "Time Slice"
+      : isAiClip
+      ? "AI Hook"
+      : "Fast Interval";
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -302,6 +385,126 @@ const ProClipCard = memo(function ProClipCard({
       className="group relative flex flex-col justify-between rounded-2xl border border-zinc-800 bg-[#121215] p-3.5 shadow-sm transition-all duration-150 hover:border-zinc-700 hover:bg-[#141418] hover:shadow-md"
       style={{ contentVisibility: "auto" }}
     >
+      {/* Card top metadata bar outside watermark safe corners */}
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-1.5">
+          <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 font-mono font-bold text-zinc-200">
+            #{String(index + 1).padStart(2, "0")}
+          </span>
+          <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 font-mono font-medium text-emerald-400">
+            {clip.duration.toFixed(1)}s
+          </span>
+        </div>
+        <StatusPill status={clip.status} />
+      </div>
+
+      {/* Inline Single-Clip Reframe Drawer */}
+      {isEditingReframe && (
+        <div className="mb-3 rounded-xl border border-purple-500/30 bg-zinc-950 p-3 shadow-xl space-y-2.5 z-20">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-zinc-100">Reframe this clip</span>
+            <button
+              type="button"
+              onClick={() => setIsEditingReframe(false)}
+              className="text-xs text-zinc-400 hover:text-white cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-1">
+            {(
+              [
+                { id: "standard", label: "16:9" },
+                { id: "square_rounded", label: "1:1" },
+                { id: "true_9_16", label: "9:16" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setReframeMode(opt.id)}
+                className={`py-1 rounded-lg border text-[11px] font-semibold cursor-pointer ${
+                  reframeMode === opt.id
+                    ? "border-emerald-500 bg-emerald-500/15 text-emerald-300"
+                    : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {reframeMode === "true_9_16" && (
+            <div className="space-y-2 pt-1 border-t border-zinc-800">
+              <div className="grid grid-cols-3 gap-1">
+                {(
+                  [
+                    { id: "locked", label: "Locked" },
+                    { id: "cuts", label: "Cuts" },
+                    { id: "follow", label: "Follow" },
+                  ] as const
+                ).map((tm) => (
+                  <button
+                    key={tm.id}
+                    type="button"
+                    onClick={() => setReframeTracking(tm.id)}
+                    className={`py-1 rounded-md border text-[10px] font-semibold cursor-pointer ${
+                      reframeTracking === tm.id
+                        ? "border-purple-400 bg-purple-500/20 text-white"
+                        : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    {tm.label}
+                  </button>
+                ))}
+              </div>
+              {reframeTracking === "locked" && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-zinc-300">
+                    <label htmlFor={`reframe-anchor-${clip.id}`}>Crop anchor</label>
+                    <span className="font-mono text-purple-300">
+                      {Math.round(reframeAnchor * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    id={`reframe-anchor-${clip.id}`}
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={Math.round(reframeAnchor * 100)}
+                    onChange={(e) => setReframeAnchor(Number(e.target.value) / 100)}
+                    className="w-full accent-purple-400 cursor-pointer"
+                  />
+                  {reframePreview && (
+                    <div className="relative h-2.5 w-full rounded bg-zinc-800 overflow-hidden border border-zinc-700" title="Server crop window preview">
+                      <div
+                        className="absolute inset-y-0 bg-purple-500/70 border-x border-purple-300"
+                        style={{
+                          left: `${Math.round(reframePreview.x_ratio * 100)}%`,
+                          width: `${Math.max(8, Math.round(reframePreview.w_ratio * 100))}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {reframeError && <p className="text-[11px] text-red-400">{reframeError}</p>}
+
+          <button
+            type="button"
+            disabled={isReframing || actionsDisabled}
+            onClick={() => void handleSaveReframe()}
+            className="w-full py-1.5 rounded-lg bg-[#10b981] text-zinc-950 text-xs font-bold hover:bg-[#059669] disabled:opacity-50 cursor-pointer"
+          >
+            {isReframing ? "Applying crop..." : "Apply Reframe"}
+          </button>
+        </div>
+      )}
+
       {/* Top Line Editor Dropdown */}
       {isEditingTopLine && (
         <div className="mb-3 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-xl space-y-2 z-20 animate-in fade-in-0 duration-150">
@@ -458,24 +661,14 @@ const ProClipCard = memo(function ProClipCard({
           </div>
         )}
 
-        {/* Minimal Player Controls Overlay */}
-        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/player:opacity-100 focus-within:opacity-100 transition-opacity duration-150 flex flex-col justify-between p-2.5">
-          {/* Top Badges */}
-          <div className="flex items-center justify-between">
-            <span className="px-2 py-0.5 rounded-md bg-black/75 text-xs font-mono font-bold text-white border border-white/10">
-              #{String(index + 1).padStart(2, "0")}
-            </span>
-            <span className="px-2 py-0.5 rounded-md bg-black/75 text-xs font-mono font-medium text-emerald-400 border border-white/10">
-              {clip.duration.toFixed(1)}s
-            </span>
-          </div>
-
+        {/* Minimal Player Controls Overlay (kept away from watermark corners) */}
+        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/player:opacity-100 focus-within:opacity-100 transition-opacity duration-150 flex flex-col justify-end p-2.5 gap-3">
           {/* Center Play / Pause Icon Button */}
           <button
             type="button"
             aria-label={isPlaying ? "Pause clip" : "Play clip"}
             onClick={togglePlayPause}
-            className="mx-auto flex size-12 items-center justify-center rounded-full bg-black/80 border border-white/20 text-white shadow-xl hover:scale-105 active:scale-95 transition-transform"
+            className="m-auto flex size-12 items-center justify-center rounded-full bg-black/80 border border-white/20 text-white shadow-xl hover:scale-105 active:scale-95 transition-transform"
           >
             {isPlaying ? (
               <svg className="size-5 fill-current" viewBox="0 0 24 24">
@@ -507,12 +700,18 @@ const ProClipCard = memo(function ProClipCard({
 
       {/* Card Content & Metadata */}
       <div className="mt-3 space-y-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="text-[13px] font-semibold text-white leading-snug line-clamp-1 flex-1" title={clip.title}>
-            {clip.title}
-          </h3>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {typeof clip.score === "number" && (
+        {/* Title on its own dedicated full-width row */}
+        <h3 className="text-[13px] font-semibold text-white leading-snug line-clamp-2" title={clip.title}>
+          {clip.title}
+        </h3>
+
+        {/* Timecode, selection method, & optional AI score */}
+        <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
+          <span className="font-mono text-zinc-400">
+            {formatTime(clip.start)} — {formatTime(clip.end)}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {isAiClip && typeof clip.score === "number" ? (
               <span
                 className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-bold border ${
                   clip.score >= 8.5
@@ -521,42 +720,33 @@ const ProClipCard = memo(function ProClipCard({
                     ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
                     : "bg-zinc-800 text-zinc-400 border-zinc-700"
                 }`}
-                title={`Viral Hook Potential: ${clip.score}/10`}
+                title={`AI Hook Score: ${clip.score}/10`}
               >
                 <span>⭐</span>
                 <span>{clip.score.toFixed(1)}/10</span>
               </span>
+            ) : (
+              <span className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[10px] font-medium text-zinc-300">
+                {selectionLabel}
+              </span>
             )}
-            <StatusPill status={clip.status} />
+            {clip.top_line && (
+              <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded truncate max-w-[90px]" title={clip.top_line}>
+                Hook active
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Timecode badge & Hook indicator */}
-        <div className="flex items-center justify-between gap-2 text-xs font-mono text-zinc-500">
-          <span>{formatTime(clip.start)} — {formatTime(clip.end)}</span>
-          {clip.top_line && (
-            <span className="text-xs font-sans font-semibold text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-1.5 py-0.5 rounded truncate max-w-[120px]" title={clip.top_line}>
-              Hook active
-            </span>
-          )}
-        </div>
-
-        {/* Why this clip is good / Hook breakdown */}
-        {clip.reason ? (
+        {/* AI rationale or non-AI interval summary */}
+        {isAiClip && clip.reason ? (
           <div className="rounded-xl border border-zinc-800/80 bg-[#0c0c0e] p-2.5 space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                <svg className="size-3 fill-current text-emerald-400" viewBox="0 0 24 24">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
-                Why this clip is good:
-              </span>
-              {typeof clip.score === "number" && (
-                <span className="text-[10px] text-zinc-400 font-mono">
-                  Rating: <span className="text-white font-bold">{clip.score.toFixed(1)}</span>/10
-                </span>
-              )}
-            </div>
+            <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
+              <svg className="size-3 fill-current text-emerald-400" viewBox="0 0 24 24">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+              Why this clip stands out:
+            </span>
             <p
               className="text-[11px] text-zinc-300 line-clamp-3 leading-relaxed"
               title={clip.reason}
@@ -565,20 +755,24 @@ const ProClipCard = memo(function ProClipCard({
             </p>
           </div>
         ) : (
-          <p className="text-xs text-zinc-500 italic line-clamp-1">
-            Segment from source video
+          <p className="text-xs text-zinc-400 line-clamp-2">
+            {clip.reason && !clip.reason.startsWith("Mock analysis")
+              ? clip.reason
+              : clip.selection_method === "time_slice"
+              ? "Evenly sliced time window (no speech track detected)."
+              : "Evenly spaced interval across detected transcript segments."}
           </p>
         )}
 
-        {/* Three actions: Download, Upload, Add/Edit Top Line */}
-        <div className="pt-2 border-t border-zinc-800/80 flex flex-wrap items-center justify-between gap-2">
+        {/* Actions: Download, Upload, Reframe, Top Line */}
+        <div className="pt-2 border-t border-zinc-800/80 flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             disabled={isDownloading}
             onClick={handleDownload}
-            className="flex-1 py-1.5 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800/90 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors focus-ring flex items-center justify-center gap-1.5"
+            className="flex-1 min-w-[78px] py-1.5 px-2 rounded-lg border border-zinc-700 bg-zinc-800/90 hover:bg-zinc-700 text-xs font-medium text-zinc-200 transition-colors focus-ring flex items-center justify-center gap-1 cursor-pointer"
           >
-            <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg className="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
             </svg>
             <span>{downloadMsg || (isDownloading ? "Saving..." : "Download")}</span>
@@ -587,21 +781,37 @@ const ProClipCard = memo(function ProClipCard({
           <button
             type="button"
             onClick={() => onOpenModal(clip)}
-            className="py-1.5 px-2.5 rounded-lg border border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring flex items-center gap-1.5"
-            title="Upload to YouTube, TikTok, or Instagram"
+            className="py-1.5 px-2 rounded-lg border border-zinc-700 bg-zinc-800/40 hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring flex items-center gap-1 cursor-pointer"
+            title="Upload to YouTube or prepare for TikTok / Instagram"
           >
             <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
             </svg>
-            <span>Upload</span>
+            <span>Share</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setIsEditingTopLine((prev) => !prev)}
-            className="py-1.5 px-2.5 rounded-lg border border-zinc-700 bg-transparent hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring"
+            disabled={actionsDisabled}
+            onClick={() => {
+              setIsEditingTopLine(false);
+              setIsEditingReframe((prev) => !prev);
+            }}
+            className="py-1.5 px-2 rounded-lg border border-zinc-700 bg-transparent hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring cursor-pointer disabled:opacity-40"
           >
-            {clip.top_line ? "Edit top line" : "Add top line"}
+            Reframe
+          </button>
+
+          <button
+            type="button"
+            disabled={actionsDisabled}
+            onClick={() => {
+              setIsEditingReframe(false);
+              setIsEditingTopLine((prev) => !prev);
+            }}
+            className="py-1.5 px-2 rounded-lg border border-zinc-700 bg-transparent hover:bg-zinc-800 text-xs font-medium text-zinc-300 hover:text-white transition-colors focus-ring cursor-pointer disabled:opacity-40"
+          >
+            {clip.top_line ? "Edit line" : "Top line"}
           </button>
         </div>
       </div>
@@ -624,6 +834,7 @@ function ClipModalViewer({
   onClose: () => void;
 }) {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<string | null>(null);
   const [isYouTubeModalOpen, setIsYouTubeModalOpen] = useState(false);
   const [isTikTokModalOpen, setIsTikTokModalOpen] = useState(false);
   const [isInstagramModalOpen, setIsInstagramModalOpen] = useState(false);
@@ -633,10 +844,11 @@ function ClipModalViewer({
 
   useEffect(() => {
     if (!clip) return;
+    setModalError(null);
     let active = true;
     const clipVersion =
       clip.v ||
-      `${clip.start}_${clip.end}_${clip.framing_mode || ""}_${clip.caption_style || ""}_${clip.caption_animation || ""}_${clip.face_tracking ?? ""}_${clip.top_line || ""}`;
+      `${clip.start}_${clip.end}_${clip.framing_mode || ""}_${clip.caption_style || ""}_${clip.caption_animation || ""}_${clip.tracking_mode || ""}_${clip.crop_anchor_x ?? ""}_${clip.top_line || ""}`;
     clipUrl(projectId, clip.file, clipVersion).then((url) => {
       if (active) setVideoUrl(url);
     });
@@ -644,18 +856,6 @@ function ClipModalViewer({
       active = false;
     };
   }, [clip, projectId]);
-
-  useEffect(() => {
-    if (!clip || hasChildUploadModal) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clip, hasChildUploadModal, onClose]);
 
   useEffect(() => {
     if (hasChildUploadModal && modalVideoRef.current && !modalVideoRef.current.paused) {
@@ -670,25 +870,31 @@ function ClipModalViewer({
     v.muted = globalMuted;
   }, [globalVolume, globalMuted, videoUrl]);
 
-  if (!clip) return null;
+  const isModalAiClip = Boolean(
+    clip &&
+      (clip.selection_method === "ai" ||
+        (clip.applied_generation_mode === "ai" &&
+          typeof clip.score === "number" &&
+          !clip.reason?.startsWith("Evenly spaced"))),
+  );
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={clip.title}
-      onClick={(e) => {
-        if (!hasChildUploadModal && e.target === e.currentTarget) onClose();
+    <ModalDialog
+      open={Boolean(clip)}
+      onClose={() => {
+        if (!hasChildUploadModal) onClose();
       }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0 duration-150"
+      ariaLabel={clip?.title || "Clip preview"}
+      className="max-w-4xl"
     >
-      <div className="relative flex flex-col md:flex-row items-center max-w-4xl w-full rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-2xl gap-6 overflow-y-auto md:overflow-hidden max-h-[90vh]">
+      {clip && (
+      <div className="relative flex flex-col md:flex-row items-center w-full rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-2xl gap-6 overflow-y-auto md:overflow-hidden max-h-[90vh]">
         {/* Close Button */}
         <button
           type="button"
           onClick={onClose}
           aria-label="Close clip preview"
-          className="absolute top-4 right-4 z-20 size-8 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center focus-ring"
+          className="absolute top-4 right-4 z-20 size-8 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-center focus-ring cursor-pointer"
         >
           ✕
         </button>
@@ -714,7 +920,7 @@ function ClipModalViewer({
               <span className="text-xs font-mono font-semibold text-emerald-400">
                 {clip.id}
               </span>
-              {typeof clip.score === "number" && (
+              {isModalAiClip && typeof clip.score === "number" ? (
                 <span
                   className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-bold border ${
                     clip.score >= 8.5
@@ -722,28 +928,43 @@ function ClipModalViewer({
                       : "bg-amber-500/15 text-amber-400 border-amber-500/30"
                   }`}
                 >
-                  <span>⭐ Viral Rating: {clip.score.toFixed(1)}/10</span>
+                  <span>⭐ AI Hook Score: {clip.score.toFixed(1)}/10</span>
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] font-medium text-zinc-300">
+                  {clip.selection_method === "time_slice" ? "Time Slice" : "Fast Interval"}
                 </span>
               )}
             </div>
             <h2 className="text-lg font-bold text-white mt-1 leading-snug">
               {clip.title}
             </h2>
-            <div className="flex items-center gap-3 mt-2 text-xs text-zinc-400">
+            <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-zinc-400">
               <span>Duration: {clip.duration.toFixed(1)}s</span>
               <span>•</span>
-              <span>Framing: {clip.framing_mode === "true_9_16" ? (clip.face_tracking !== false ? "9:16 Smooth Face Track" : "9:16 Static Crop") : clip.framing_mode || "Standard"}</span>
+              <span>
+                Framing:{" "}
+                {clip.framing_mode === "true_9_16"
+                  ? clip.tracking_mode === "follow"
+                    ? "9:16 Follow Speaker"
+                    : clip.tracking_mode === "cuts"
+                    ? "9:16 Speaker Cuts"
+                    : `9:16 Locked (${Math.round((clip.crop_anchor_x ?? 0.5) * 100)}%)`
+                  : clip.framing_mode === "square_rounded"
+                  ? "1:1 Rounded"
+                  : "16:9 Letterbox"}
+              </span>
             </div>
           </div>
 
-          {clip.reason && (
+          {isModalAiClip && clip.reason ? (
             <div className="rounded-xl border border-emerald-500/20 bg-[#0c0c0e] p-4 space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
                   <svg className="size-3.5 fill-current" viewBox="0 0 24 24">
                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                   </svg>
-                  Why this clip is good
+                  Why this clip stands out
                 </span>
                 {typeof clip.score === "number" && (
                   <span className="text-xs text-zinc-400 font-mono">
@@ -752,6 +973,18 @@ function ClipModalViewer({
                 )}
               </div>
               <p className="text-xs text-zinc-300 leading-relaxed">{clip.reason}</p>
+            </div>
+          ) : (
+            clip.reason && !clip.reason.startsWith("Mock analysis") && (
+              <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5 text-xs text-zinc-300">
+                {clip.reason}
+              </div>
+            )
+          )}
+
+          {modalError && (
+            <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-200">
+              {modalError}
             </div>
           )}
 
@@ -765,8 +998,13 @@ function ClipModalViewer({
           <div className="pt-2 flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              onClick={() => void saveClipWithExplorer(projectId, clip.file, `${clip.id}.mp4`)}
-              className="px-3.5 py-2.5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-xs font-bold text-zinc-950 transition-colors focus-ring inline-flex items-center gap-2 shadow-md"
+              onClick={() => {
+                setModalError(null);
+                void saveClipWithExplorer(projectId, clip.file, `${clip.id}.mp4`).catch((err) => {
+                  setModalError(err instanceof Error ? err.message : "Could not export video");
+                });
+              }}
+              className="px-3.5 py-2.5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-xs font-bold text-zinc-950 transition-colors focus-ring inline-flex items-center gap-2 shadow-md cursor-pointer"
             >
               <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
@@ -777,7 +1015,7 @@ function ClipModalViewer({
             <button
               type="button"
               onClick={() => setIsYouTubeModalOpen(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-[#FF0000] hover:bg-[#E50914] text-xs font-bold text-white transition-colors focus-ring inline-flex items-center gap-2 shadow-lg shadow-red-950/40"
+              className="px-3.5 py-2.5 rounded-xl bg-[#FF0000] hover:bg-[#E50914] text-xs font-bold text-white transition-colors focus-ring inline-flex items-center gap-2 shadow-lg shadow-red-950/40 cursor-pointer"
             >
               <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
@@ -788,29 +1026,30 @@ function ClipModalViewer({
             <button
               type="button"
               onClick={() => setIsTikTokModalOpen(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-black hover:bg-zinc-900 border border-zinc-700/80 hover:border-[#25F4EE] text-xs font-bold text-white transition-all focus-ring inline-flex items-center gap-2 shadow-lg shadow-black/60"
+              className="px-3.5 py-2.5 rounded-xl bg-black hover:bg-zinc-900 border border-zinc-700/80 hover:border-[#25F4EE] text-xs font-bold text-white transition-all focus-ring inline-flex items-center gap-2 shadow-lg shadow-black/60 cursor-pointer"
             >
               <svg className="size-4 text-[#25F4EE]" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64c.298-.002.595.042.88.13V9.4a6.33 6.33 0 0 0-1-.08A6.34 6.34 0 0 0 3 15.66a6.34 6.34 0 0 0 10.82 4.46 6.27 6.27 0 0 0 1.96-4.46V8.71a8.28 8.28 0 0 0 5.1 1.77V7.03a4.88 4.88 0 0 1-1.29-.34z" />
               </svg>
-              <span>Upload to TikTok</span>
+              <span>Prepare for TikTok</span>
             </button>
 
             <button
               type="button"
               onClick={() => setIsInstagramModalOpen(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-[#f09433] via-[#dc2743] to-[#bc1888] hover:opacity-95 text-xs font-bold text-white transition-opacity focus-ring inline-flex items-center gap-2 shadow-lg shadow-pink-950/30"
+              className="px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-[#f09433] via-[#dc2743] to-[#bc1888] hover:opacity-95 text-xs font-bold text-white transition-opacity focus-ring inline-flex items-center gap-2 shadow-lg shadow-pink-950/30 cursor-pointer"
             >
               <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
               </svg>
-              <span>Upload to Instagram</span>
+              <span>Prepare for Instagram</span>
             </button>
           </div>
         </div>
       </div>
+      )}
 
-      {isYouTubeModalOpen && (
+      {clip && isYouTubeModalOpen && (
         <YouTubeUploadModal
           clip={clip}
           projectId={projectId}
@@ -818,7 +1057,7 @@ function ClipModalViewer({
         />
       )}
 
-      {isTikTokModalOpen && (
+      {clip && isTikTokModalOpen && (
         <TikTokUploadModal
           clip={clip}
           projectId={projectId}
@@ -826,14 +1065,14 @@ function ClipModalViewer({
         />
       )}
 
-      {isInstagramModalOpen && (
+      {clip && isInstagramModalOpen && (
         <InstagramUploadModal
           clip={clip}
           projectId={projectId}
           onClose={() => setIsInstagramModalOpen(false)}
         />
       )}
-    </div>
+    </ModalDialog>
   );
 }
 
@@ -846,15 +1085,19 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   const [clips, setClips] = useState<Clip[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(projectId));
+  const [loadedProjectId, setLoadedProjectId] = useState<string>("");
   const [status, setStatus] = useState(projectId ? "" : "Choose a project to view its clips.");
   const [statusTone, setStatusTone] = useState<"info" | "success" | "error">("info");
   const [generating, setGenerating] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [generationProgress, setGenerationProgress] = useState<ClipGenerationJob | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const [trackingFallbackNotice, setTrackingFallbackNotice] = useState<string | null>(null);
 
   // Settings state
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
-  const [faceTracking, setFaceTracking] = useState<boolean>(true);
+  const [trackingMode, setTrackingMode] = useState<TrackingMode>("locked");
+  const [cropAnchorX, setCropAnchorX] = useState<number>(0.5);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classic");
   const [captionAnimation, setCaptionAnimation] = useState<CaptionAnimation | null>(null);
   const [clipDurationSeconds, setClipDurationSeconds] = useState<ClipDuration>(30);
@@ -928,9 +1171,16 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
         setFramingMode(savedFraming as FramingMode);
       }
-      const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
-      if (savedFaceTracking !== null) {
-        setFaceTracking(savedFaceTracking === "true");
+      const savedTracking = localStorage.getItem("cliprobin_tracking_mode");
+      if (savedTracking && ["locked", "cuts", "follow"].includes(savedTracking)) {
+        setTrackingMode(savedTracking as TrackingMode);
+      }
+      const savedAnchor = localStorage.getItem("cliprobin_crop_anchor_x");
+      if (savedAnchor !== null) {
+        const parsedAnchor = Number(savedAnchor);
+        if (!Number.isNaN(parsedAnchor) && parsedAnchor >= 0 && parsedAnchor <= 1) {
+          setCropAnchorX(parsedAnchor);
+        }
       }
       const savedDuration = localStorage.getItem("cliprobin_clip_duration");
       if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
@@ -1006,10 +1256,12 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   // Check if current settings differ from applied generation settings (dirty state)
   const isDirty = useMemo(() => {
     if (!appliedSettings || !clips.length) return false;
-    const faceTrackChanged =
+    const prevTrackingMode: TrackingMode =
+      appliedSettings.trackingMode || (appliedSettings.faceTracking ? "follow" : "locked");
+    const trackingChanged =
       framingMode === "true_9_16" &&
-      appliedSettings.faceTracking !== undefined &&
-      appliedSettings.faceTracking !== faceTracking;
+      (prevTrackingMode !== trackingMode ||
+        Math.abs((appliedSettings.cropAnchorX ?? 0.5) - cropAnchorX) > 0.02);
     const genModeChanged =
       appliedSettings.generationMode !== undefined &&
       appliedSettings.generationMode !== generationMode;
@@ -1018,7 +1270,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       appliedSettings.clipCount !== clipCount;
     return (
       appliedSettings.framingMode !== framingMode ||
-      faceTrackChanged ||
+      trackingChanged ||
       genModeChanged ||
       clipCountChanged ||
       appliedSettings.clipDurationSeconds !== clipDurationSeconds ||
@@ -1031,7 +1283,8 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
     appliedSettings,
     clips.length,
     framingMode,
-    faceTracking,
+    trackingMode,
+    cropAnchorX,
     generationMode,
     clipCount,
     clipDurationSeconds,
@@ -1045,13 +1298,21 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   useEffect(() => {
     if (!projectId) {
       setIsLoading(false);
+      setLoadedProjectId("");
       setStatus("Choose a project to view its clips.");
       setStatusTone("info");
       return;
     }
     let isCurrentRequest = true;
+    const abortController = new AbortController();
     let pollIntervalId: number | undefined;
     let retryTimeoutId: number | undefined;
+
+    setClips([]);
+    setIsLoading(true);
+    setLoadedProjectId("");
+    setFallbackNotice(null);
+    setTrackingFallbackNotice(null);
 
     const loadClipsAndStatus = async () => {
       if (!isCurrentRequest) return;
@@ -1060,31 +1321,46 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
       }
       try {
         const [result, job] = await Promise.all([
-          getClips(projectId),
+          getClips(projectId, abortController.signal),
           getLatestClipGenerationJob(projectId),
         ]);
         if (!isCurrentRequest) return;
+        setLoadedProjectId(projectId);
         if (result.source_duration) {
           setSourceDuration(result.source_duration);
         }
         setIsLoading(false);
-        const currentClips =
-          job?.status !== "cancelled" &&
-          job?.status !== "failed" &&
-          job?.ready_clips &&
-          job.ready_clips.length > result.clips.length
-            ? job.ready_clips
-            : result.clips;
-        setClips(currentClips);
+        setClips(result.clips);
         setGenerationProgress(job);
 
+        const opts = result.generation_options || {};
+        if (
+          (job?.requested_generation_mode === "ai" &&
+            job?.applied_generation_mode &&
+            job.applied_generation_mode !== "ai") ||
+          (opts.requested_generation_mode === "ai" &&
+            opts.applied_generation_mode &&
+            opts.applied_generation_mode !== "ai")
+        ) {
+          const reason = job?.ai_fallback_reason || opts.ai_fallback_reason || "AI service was unavailable.";
+          setFallbackNotice(`AI Hook Finder fell back to Fast Interval: ${reason}`);
+        } else {
+          setFallbackNotice(null);
+        }
+
+        const tfReason = job?.tracking_fallback_reason || opts.tracking_fallback_reason;
+        if (tfReason) {
+          setTrackingFallbackNotice(tfReason);
+        } else {
+          setTrackingFallbackNotice(null);
+        }
+
         // Hydrate appliedSettings and toolbar state from backend generation_options once per project
-        if (hydratedProjectRef.current !== projectId && (result.generation_options || currentClips.length > 0)) {
-          const opts = result.generation_options || {};
+        if (hydratedProjectRef.current !== projectId && (result.generation_options || result.clips.length > 0)) {
           const hasServerOpts = Object.keys(opts).length > 0;
-          if (hasServerOpts || currentClips.length > 0) {
+          if (hasServerOpts || result.clips.length > 0) {
             hydratedProjectRef.current = projectId;
-            const firstClip = currentClips[0];
+            const firstClip = result.clips[0];
             const appliedFraming: FramingMode =
               (opts.framing_mode as FramingMode) || firstClip?.framing_mode || "standard";
             const rawStyle =
@@ -1099,19 +1375,38 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
             const appliedDur: ClipDuration = ([12, 15, 30, 60, 90].includes(rawDur) ? rawDur : 30) as ClipDuration;
             const appliedWm = typeof opts.show_watermark === "boolean" ? opts.show_watermark : false;
             const appliedSubs = typeof opts.show_subtitles === "boolean" ? opts.show_subtitles : true;
-            const appliedFt =
-              typeof opts.face_tracking === "boolean"
-                ? opts.face_tracking
+            const resolvedTracking: TrackingMode =
+              opts.tracking_mode && ["locked", "cuts", "follow"].includes(opts.tracking_mode)
+                ? opts.tracking_mode
+                : firstClip?.tracking_mode && ["locked", "cuts", "follow"].includes(firstClip.tracking_mode)
+                ? firstClip.tracking_mode
+                : typeof opts.face_tracking === "boolean"
+                ? (opts.face_tracking ? "follow" : "locked")
                 : firstClip?.face_tracking !== undefined
-                  ? firstClip.face_tracking
-                  : true;
+                ? (firstClip.face_tracking ? "follow" : "locked")
+                : "locked";
+            const resolvedAnchor =
+              typeof opts.crop_anchor_x === "number"
+                ? opts.crop_anchor_x
+                : typeof firstClip?.crop_anchor_x === "number"
+                ? firstClip.crop_anchor_x
+                : 0.5;
             const appliedMode: "random" | "ai" =
-              opts.generation_mode === "ai" && isPro && aiModeEnabled ? "ai" : "random";
+              (opts.applied_generation_mode || opts.generation_mode) === "ai" && isPro && aiModeEnabled
+                ? "ai"
+                : "random";
 
             const hydrated: AppliedProjectSettings = {
               framingMode: appliedFraming,
-              faceTracking: appliedFt,
+              faceTracking: resolvedTracking === "follow",
+              trackingMode: resolvedTracking,
+              cropAnchorX: resolvedAnchor,
               generationMode: appliedMode,
+              requestedGenerationMode: opts.requested_generation_mode,
+              appliedGenerationMode: opts.applied_generation_mode,
+              aiFallbackReason: opts.ai_fallback_reason,
+              appliedTrackingMode: opts.applied_tracking_mode,
+              trackingFallbackReason: opts.tracking_fallback_reason,
               clipDurationSeconds: appliedDur,
               clipCount: opts.clip_count ?? undefined,
               captionStyle: appliedStyle,
@@ -1121,7 +1416,8 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
             };
             setAppliedSettings(hydrated);
             setFramingMode(appliedFraming);
-            setFaceTracking(appliedFt);
+            setTrackingMode(resolvedTracking);
+            setCropAnchorX(resolvedAnchor);
             setGenerationMode(appliedMode);
             setCaptionStyle(appliedStyle);
             setCaptionAnimation(appliedAnim);
@@ -1164,7 +1460,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
           pollIntervalId = undefined;
         }
       } catch (err) {
-        if (!isCurrentRequest) return;
+        if (!isCurrentRequest || (err instanceof DOMException && err.name === "AbortError")) return;
         setIsLoading(false);
         const msg = err instanceof Error ? err.message : "Failed to load clips";
         setStatus(msg);
@@ -1189,27 +1485,30 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       isCurrentRequest = false;
+      abortController.abort();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (pollIntervalId !== undefined) window.clearInterval(pollIntervalId);
       if (retryTimeoutId !== undefined) window.clearTimeout(retryTimeoutId);
     };
   }, [projectId, isCaptionStyleAllowed, isPro, aiModeEnabled]);
 
-  // Regenerate clips pipeline
-  const handleGenerate = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!projectId || generating) return;
+  // Regenerate clips pipeline (stages in background without wiping existing committed clips)
+  const triggerGeneration = async (overrideGenerationMode?: "random" | "ai") => {
+    if (!projectId || generating || loadedProjectId !== projectId) return;
+    const requestedMode = overrideGenerationMode ?? generationMode;
     const normalizedStyle = normalizeCaptionStyle(captionStyle);
     const effectiveStyle: CaptionStyle = isCaptionStyleAllowed(normalizedStyle)
       ? normalizedStyle
       : "classic";
     const effectiveGenMode: "random" | "ai" =
-      isPro && aiModeEnabled && generationMode === "ai" ? "ai" : "random";
-    const effectiveFt = framingMode === "true_9_16" ? faceTracking : false;
+      isPro && aiModeEnabled && requestedMode === "ai" ? "ai" : "random";
+    const effectiveTrackingMode: TrackingMode = framingMode === "true_9_16" ? trackingMode : "locked";
+    const effectiveFt = effectiveTrackingMode === "follow";
 
     isManualGeneratingRef.current = true;
     setGenerating(true);
-    setClips([]);
+    setFallbackNotice(null);
+    setTrackingFallbackNotice(null);
     setStatus("");
     setGenerationProgress({
       job_id: "",
@@ -1222,19 +1521,13 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
     });
 
     try {
+      let latestJobState: ClipGenerationJob | null = null;
       const result = await generateClips(
         projectId,
         showCaptions,
         (job) => {
+          latestJobState = job;
           setGenerationProgress(job);
-          if (
-            job.status !== "cancelled" &&
-            job.status !== "failed" &&
-            job.ready_clips &&
-            job.ready_clips.length > 0
-          ) {
-            setClips(job.ready_clips);
-          }
         },
         clipDurationSeconds,
         effectiveShowWatermark,
@@ -1244,14 +1537,55 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         clipCount,
         effectiveGenMode,
         effectiveFt,
+        {
+          trackingMode: effectiveTrackingMode,
+          cropAnchorX,
+        },
       );
 
-      setClips(result.clips);
+      if (result.cancelled) {
+        const diskClips = await getClips(projectId).catch(() => null);
+        if (diskClips) setClips(diskClips.clips);
+        setStatusTone("info");
+        setStatus("Generation cancelled. Previously saved clips were kept intact.");
+        return;
+      }
+
+      const fresh = await getClips(projectId).catch(() => null);
+      const committedClips = fresh ? fresh.clips : result.clips;
+      setClips(committedClips);
+
+      const appliedModeFromServer =
+        fresh?.generation_options?.applied_generation_mode ||
+        (latestJobState as ClipGenerationJob | null)?.applied_generation_mode ||
+        effectiveGenMode;
+      const aiReason =
+        fresh?.generation_options?.ai_fallback_reason ||
+        (latestJobState as ClipGenerationJob | null)?.ai_fallback_reason ||
+        null;
+      const tfReason =
+        fresh?.generation_options?.tracking_fallback_reason ||
+        (latestJobState as ClipGenerationJob | null)?.tracking_fallback_reason ||
+        null;
+
+      if (effectiveGenMode === "ai" && appliedModeFromServer !== "ai") {
+        setFallbackNotice(`AI Hook Finder fell back to Fast Interval: ${aiReason || "AI service was unavailable."}`);
+      } else {
+        setFallbackNotice(null);
+      }
+      setTrackingFallbackNotice(tfReason);
+
       // Save applied settings
       const applied: AppliedProjectSettings = {
         framingMode,
         faceTracking: effectiveFt,
-        generationMode: effectiveGenMode,
+        trackingMode: effectiveTrackingMode,
+        cropAnchorX,
+        generationMode: appliedModeFromServer === "ai" ? "ai" : "random",
+        requestedGenerationMode: effectiveGenMode,
+        appliedGenerationMode: appliedModeFromServer === "ai" ? "ai" : "random",
+        aiFallbackReason: aiReason,
+        trackingFallbackReason: tfReason,
         clipDurationSeconds,
         clipCount,
         captionStyle: effectiveStyle,
@@ -1260,15 +1594,12 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         showCaptions,
       };
       setAppliedSettings(applied);
+      setGenerationMode(applied.generationMode ?? "random");
       try {
         localStorage.setItem(`cliprobin_applied_${projectId}`, JSON.stringify(applied));
       } catch {}
-      setStatusTone(result.cancelled ? "info" : "success");
-      setStatus(
-        result.cancelled
-          ? "Generation cancelled."
-          : `${result.clips.length} clips generated successfully.`,
-      );
+      setStatusTone("success");
+      setStatus(`${committedClips.length} clips generated successfully.`);
     } catch (err) {
       setStatusTone("error");
       setStatus(err instanceof Error ? err.message : "Clip generation failed");
@@ -1282,15 +1613,20 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
     }
   };
 
+  const handleGenerate = async (e: FormEvent) => {
+    e.preventDefault();
+    await triggerGeneration();
+  };
+
   const handleCancel = async () => {
     const job = generationProgress;
     if (!projectId || !job?.job_id || job.status === "cancelling") return;
-    if (!window.confirm("Cancel generation? Existing clips will be removed.")) return;
+    if (!window.confirm("Cancel regeneration? Previously saved clips will be kept.")) return;
     try {
       const updated = await cancelClipGeneration(projectId, job.job_id);
       setGenerationProgress(updated);
       setStatusTone("info");
-      setStatus("Cancelling generation...");
+      setStatus("Cancelling regeneration; keeping previous clips...");
     } catch (err) {
       setStatusTone("error");
       setStatus(err instanceof Error ? err.message : "Could not cancel");
@@ -1434,6 +1770,52 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
           </div>
         )}
 
+        {/* Fallback Warning Banners (AI or Smart Framing) */}
+        {fallbackNotice && (
+          <div
+            role="status"
+            className="rounded-xl border border-amber-500/35 bg-amber-950/25 px-4 py-3 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-3"
+          >
+            <span>{fallbackNotice}</span>
+            <div className="flex items-center gap-2">
+              {isPro && aiModeEnabled && !generating && (
+                <button
+                  type="button"
+                  onClick={() => void triggerGeneration("ai")}
+                  className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold cursor-pointer"
+                >
+                  Retry AI Analysis
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setFallbackNotice(null)}
+                className="text-amber-300/80 hover:text-white px-1 cursor-pointer"
+                aria-label="Dismiss AI fallback warning"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        {trackingFallbackNotice && (
+          <div
+            role="status"
+            className="rounded-xl border border-amber-500/30 bg-amber-950/20 px-4 py-2.5 text-xs text-amber-200 flex items-center justify-between gap-3"
+          >
+            <span>Framing notice: {trackingFallbackNotice}</span>
+            <button
+              type="button"
+              onClick={() => setTrackingFallbackNotice(null)}
+              className="text-amber-300/80 hover:text-white px-1 cursor-pointer"
+              aria-label="Dismiss framing notice"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Sticky Toolbar */}
         <section className="sticky top-4 z-30 rounded-2xl border border-zinc-800 bg-[#121215]/95 backdrop-blur-md p-3.5 shadow-xl space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1442,8 +1824,8 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
               <button
                 type="button"
                 onClick={(e) => void handleGenerate(e as unknown as FormEvent)}
-                disabled={generating || !projectId}
-                className="relative min-h-[38px] rounded-xl bg-[#10b981] px-5 py-2 text-xs font-bold text-zinc-950 transition-all duration-150 hover:bg-[#059669] hover:shadow-lg disabled:opacity-40 focus-ring flex items-center gap-2"
+                disabled={generating || !projectId || isLoading || loadedProjectId !== projectId}
+                className="relative min-h-[38px] rounded-xl bg-[#10b981] px-5 py-2 text-xs font-bold text-zinc-950 transition-all duration-150 hover:bg-[#059669] hover:shadow-lg disabled:opacity-40 focus-ring flex items-center gap-2 cursor-pointer"
               >
                 {isDirty && (
                   <span className="size-2 rounded-full bg-amber-400 animate-pulse" />
@@ -1455,7 +1837,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   onClick={handleCancel}
-                  className="min-h-[38px] rounded-xl border border-red-500/30 bg-red-950/20 px-3.5 py-2 text-xs font-semibold text-red-300 hover:bg-red-900/30 focus-ring"
+                  className="min-h-[38px] rounded-xl border border-red-500/30 bg-red-950/20 px-3.5 py-2 text-xs font-semibold text-red-300 hover:bg-red-900/30 focus-ring cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -1465,8 +1847,8 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 <button
                   type="button"
                   onClick={handleDownloadAll}
-                  disabled={downloadingAll}
-                  className="min-h-[38px] rounded-xl border border-zinc-700 bg-zinc-800/80 px-4 py-2 text-xs font-medium text-zinc-200 hover:text-white hover:bg-zinc-700 transition-colors focus-ring flex items-center gap-1.5"
+                  disabled={downloadingAll || isLoading || loadedProjectId !== projectId}
+                  className="min-h-[38px] rounded-xl border border-zinc-700 bg-zinc-800/80 px-4 py-2 text-xs font-medium text-zinc-200 hover:text-white hover:bg-zinc-700 transition-colors focus-ring flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
                 >
                   <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
@@ -1481,10 +1863,18 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
               <button
                 type="button"
                 onClick={() => setIsSettingsOpen((prev) => !prev)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] hover:border-zinc-700 transition-colors text-xs text-zinc-300 focus-ring"
+                className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] hover:border-zinc-700 transition-colors text-xs text-zinc-300 focus-ring cursor-pointer"
               >
                 <span>
-                  {framingMode === "true_9_16" ? (faceTracking ? "9:16 Face Track" : "9:16 Static") : framingMode === "square_rounded" ? "1:1 Rounded" : "16:9"} • {clipDurationSeconds}s • {showCaptions ? activeCaptionName : "No subs"} • {effectiveShowWatermark ? "Watermark" : "No logo"}
+                  {framingMode === "true_9_16"
+                    ? trackingMode === "locked"
+                      ? `9:16 Locked (${Math.round(cropAnchorX * 100)}%)`
+                      : trackingMode === "cuts"
+                      ? "9:16 Cuts"
+                      : "9:16 Follow"
+                    : framingMode === "square_rounded"
+                    ? "1:1 Rounded"
+                    : "16:9"} • {clipDurationSeconds}s • 720×1280 • {showCaptions ? activeCaptionName : "No subs"} • {effectiveShowWatermark ? "Watermark" : "No logo"}
                 </span>
                 <span className="text-zinc-500">{isSettingsOpen ? "▲" : "▼"}</span>
               </button>
@@ -1579,10 +1969,27 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                   setFramingMode(fm);
                   try { localStorage.setItem("cliprobin_framing_mode", fm); } catch {}
                 }}
-                faceTracking={faceTracking}
+                faceTracking={trackingMode === "follow"}
                 onFaceTrackingChange={(ft) => {
-                  setFaceTracking(ft);
-                  try { localStorage.setItem("cliprobin_face_tracking", String(ft)); } catch {}
+                  const next: TrackingMode = ft ? "follow" : "locked";
+                  setTrackingMode(next);
+                  try {
+                    localStorage.setItem("cliprobin_tracking_mode", next);
+                    localStorage.setItem("cliprobin_face_tracking", String(ft));
+                  } catch {}
+                }}
+                trackingMode={trackingMode}
+                onTrackingModeChange={(tm) => {
+                  setTrackingMode(tm);
+                  try {
+                    localStorage.setItem("cliprobin_tracking_mode", tm);
+                    localStorage.setItem("cliprobin_face_tracking", String(tm === "follow"));
+                  } catch {}
+                }}
+                cropAnchorX={cropAnchorX}
+                onCropAnchorXChange={(anchor) => {
+                  setCropAnchorX(anchor);
+                  try { localStorage.setItem("cliprobin_crop_anchor_x", String(anchor)); } catch {}
                 }}
                 showCaptions={showCaptions}
                 onShowCaptionsChange={(subs) => {
@@ -1757,32 +2164,11 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
                 onOpenModal={handleOpenClipModal}
                 showWatermark={appliedSettings?.showWatermark ?? effectiveShowWatermark}
                 showSubtitles={appliedSettings?.showCaptions ?? showCaptions}
-                defaultFaceTracking={appliedSettings?.faceTracking ?? faceTracking}
+                defaultFaceTracking={(appliedSettings?.trackingMode ?? trackingMode) === "follow"}
+                actionsDisabled={generating || isLoading || loadedProjectId !== projectId}
                 onClipUpdated={handleClipUpdated}
               />
             ))}
-            {generating &&
-              Array.from({
-                length: Math.max(
-                  1,
-                  (generationProgress?.total_clips || 6) - filteredClips.length
-                ),
-              }).map((_, i) => {
-                const itemIndex = filteredClips.length + i + 1;
-                const totalItems = Math.max(generationProgress?.total_clips || 6, filteredClips.length + 1);
-                return (
-                  <ClipSkeletonCard
-                    key={`gen-skel-${i}`}
-                    index={itemIndex}
-                    total={totalItems}
-                    message={
-                      generationProgress?.step
-                        ? `${generationProgress.step.slice(0, 24)}...`
-                        : `Generating clip ${itemIndex} of ${totalItems}`
-                    }
-                  />
-                );
-              })}
           </div>
         )}
 
@@ -1827,5 +2213,5 @@ export default function ClipsPage() {
 function ClipsPageInner() {
   const searchParams = useSearchParams();
   const projectId = searchParams.get("project") ?? "";
-  return <ProjectClipsContent projectId={projectId} />;
+  return <ProjectClipsContent key={projectId} projectId={projectId} />;
 }
