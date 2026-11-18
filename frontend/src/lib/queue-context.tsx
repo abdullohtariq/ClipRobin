@@ -39,6 +39,7 @@ export interface QueueSettings {
   clipDurationSeconds: ClipDuration;
   clipCount: number;
   generationMode: "random" | "ai";
+  hostedHookAccountId?: string;
   captionStyle: CaptionStyle;
   captionAnimation?: CaptionAnimation | null;
   showCaptions: boolean;
@@ -450,6 +451,7 @@ export function QueueProvider({ children }: { children: React.ReactNode }) {
             signal: abortController.signal,
             trackingMode: settings.trackingMode,
             cropAnchorX: settings.cropAnchorX,
+            hostedHookAccountId: settings.hostedHookAccountId,
             onJobCreated: (jid) => {
               activeGenerationJobId = jid;
               updateItem(id, { generationJobId: jid });

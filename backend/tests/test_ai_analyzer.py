@@ -1,12 +1,46 @@
+import base64
+import json
+
+import httpx
 import pytest
 
 from app.services.ai_analyzer import (
     AIAnalyzerError,
+    analyze_included_hooks,
     build_user_prompt,
     parse_analysis,
     validate_analysis,
     validate_transcript,
 )
+
+
+def test_included_hooks_uses_the_account_service_and_sends_only_transcript_fields(monkeypatch):
+    segment = {"start": 0, "end": 30, "text": "A complete thought"}
+    transcript = {"segments": [{**segment, "words": [{"word": "A"}]}], "path": "local.mp4"}
+
+    def token_for(issuer):
+        payload = base64.urlsafe_b64encode(json.dumps({"iss": issuer}).encode()).decode().rstrip("=")
+        return f"header.{payload}.fixture"
+
+    bearer = token_for("https://project.supabase.co/auth/v1")
+    calls = []
+
+    def post(url, *, headers, json, timeout):
+        calls.append(url)
+        assert url == "https://project.supabase.co/functions/v1/cliprobin-billing"
+        assert headers == {"Authorization": f"Bearer {bearer}"}
+        assert json == {"action": "hooks", "durationSeconds": 1801, "clipSeconds": 30, "clipCount": 3, "segments": [segment]}
+        return httpx.Response(200, json={"model": "gemini-3.5-flash-lite", "clips": [
+            {"title": "A complete thought", "start": 0, "end": 30, "score": 8, "reason": "Good opening"},
+        ]})
+
+    monkeypatch.setattr("app.services.ai_analyzer.httpx.post", post)
+    result = analyze_included_hooks(transcript, bearer, 1801, 30, 3)
+    assert result["clips"][0]["id"] == "clip_001"
+    assert result["model"] == "gemini-3.5-flash-lite"
+    with pytest.raises(AIAnalyzerError, match="hosted Supabase account"):
+        analyze_included_hooks(transcript, token_for("https://example.test/auth/v1"), 1801, 30, 3)
+    assert len(calls) == 1
 
 
 def test_validate_transcript_valid():

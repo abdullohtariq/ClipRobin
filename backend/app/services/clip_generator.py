@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from app.services.ai_analyzer import is_safe_clip_id
 from app.services.mock_analyzer import create_mock_analysis
-from app.services.video_editor import ClipGenerationCancelled, VideoEditorError, create_clip
+from app.services.video_editor import ClipGenerationCancelled, VideoEditorError, create_clip, probe_video_duration
 
 logger = logging.getLogger(__name__)
 _PROJECT_WRITE_LOCKS: dict[str, threading.Lock] = {}
@@ -284,6 +284,7 @@ def generate_clips(
     job_id: str | None = None,
     tracking_mode: str | None = None,
     crop_anchor_x: float | None = None,
+    hosted_hook_token: str | None = None,
 ) -> list[dict[str, Any]]:
     source_files = [
         p for p in project_directory.glob("source.*")
@@ -501,7 +502,7 @@ def generate_clips(
             if progress_callback:
                 progress_callback("Analyzing transcript", 0, 0)
             if generation_mode == "ai":
-                from app.services.ai_analyzer import analyze_transcript
+                from app.services.ai_analyzer import analyze_included_hooks, analyze_transcript
 
                 transcript_path = _find_project_transcript_path(project_directory)
                 if transcript_path is None:
@@ -519,12 +520,18 @@ def generate_clips(
                     _restore_prior_analysis()
                 else:
                     try:
-                        analysis = analyze_transcript(
-                            transcript,
-                            provider="gemini",
-                            max_clip_seconds=int(max_clip_seconds),
-                            max_clips=requested_clip_count,
-                        )
+                        if hosted_hook_token:
+                            analysis = analyze_included_hooks(
+                                transcript, hosted_hook_token, probe_video_duration(source_path),
+                                int(max_clip_seconds), requested_clip_count or 10,
+                            )
+                        else:
+                            analysis = analyze_transcript(
+                                transcript,
+                                provider="gemini",
+                                max_clip_seconds=int(max_clip_seconds),
+                                max_clips=requested_clip_count,
+                            )
                         applied_generation_mode = "ai"
                         ai_provider = str(analysis.get("provider") or "gemini")
                         ai_model = str(analysis.get("model") or os.getenv("GEMINI_MODEL") or "gemini-3.5-flash-lite")

@@ -41,8 +41,9 @@ const normalizeCaptionStyle = (raw: string | null | undefined): CaptionStyle => 
 
 export default function Projects() {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
-  const { isPro, openUpgradeModal, isCaptionStyleAllowed } = useSubscription();
-  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
+  const { isPro, openUpgradeModal, isCaptionStyleAllowed, plan, session } = useSubscription();
+  const hostedHookAccountId = !aiDeveloperStatus?.ai_enabled && plan?.hookCredits ? session?.user.id : undefined;
+  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled || hostedHookAccountId);
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -145,7 +146,7 @@ export default function Projects() {
   }, [isPro, isCaptionStyleAllowed]);
 
   useEffect(() => {
-    if (!aiDeveloperStatus || aiDeveloperStatus.ai_enabled) return;
+    if (!aiDeveloperStatus || !plan || aiModeEnabled) return;
     setDefaultGenerationMode("random");
     setGenerationModeOptions((current) => {
       const next = { ...current };
@@ -155,7 +156,7 @@ export default function Projects() {
       return next;
     });
     try { localStorage.setItem("cliprobin_generation_mode", "random"); } catch {}
-  }, [aiDeveloperStatus]);
+  }, [aiDeveloperStatus, aiModeEnabled, plan]);
 
   useEffect(() => {
     const loadInitial = () => {
@@ -314,7 +315,7 @@ export default function Projects() {
         undefined,
         effectiveGenMode,
         effectiveFaceTracking,
-        { trackingMode: effectiveTrackingMode },
+        { trackingMode: effectiveTrackingMode, hostedHookAccountId },
       );
       if (result.cancelled) {
         const saved = await getClips(projectId).catch(() => null);
@@ -682,9 +683,9 @@ export default function Projects() {
                               <div className={`relative group ${aiModeEnabled ? "" : "cursor-not-allowed"}`}>
                                 <button
                                   type="button"
-                                  disabled={!aiModeEnabled || isGenerating || isTranscribing}
-                                  title={aiModeEnabled ? "AI clip selection is enabled in Developer Mode" : aiDeveloperStatus?.reason || "Add a Gemini API key and enable AI Developer Mode in Settings to unlock AI clip selection"}
-                                  aria-label={aiModeEnabled ? "Select AI generation mode" : "AI mode requires a Gemini API key and Developer Mode in Settings"}
+                                  disabled={isGenerating || isTranscribing || (isPro && !aiModeEnabled)}
+                                  title={!isPro ? "View Clip Robin Pro" : aiModeEnabled ? "Gemini analyzes the timestamped transcript" : aiDeveloperStatus?.reason || "Set up Gemini in Settings"}
+                                  aria-label="Select AI Hook Finder"
                                   onClick={() => {
                                     if (!isPro) {
                                       openUpgradeModal("Gemini AI Hook Finder");
@@ -703,17 +704,20 @@ export default function Projects() {
                                 >
                                   <span className="font-semibold text-zinc-400">AI</span>
                                   <span className={`rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wider border ${aiModeEnabled ? "bg-violet-500/10 text-violet-300 border-violet-400/20" : "bg-zinc-800/80 text-amber-400/90 border-amber-400/20"}`}>
-                                    {aiModeEnabled ? "Developer" : "Soon"}
+                                    {hostedHookAccountId ? `${plan?.hookCredits?.availableNow ?? plan?.hookCredits?.remaining} available` : aiModeEnabled ? "Own key" : "Off"}
                                   </span>
                                 </button>
                                   {/* Hover tooltip */}
                                   <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-all duration-150 transform translate-y-1 group-hover:translate-y-0 flex items-center justify-center rounded-[6px] bg-zinc-950 border border-zinc-700 px-2.5 py-1 text-xs font-bold tracking-wider text-amber-300 shadow-xl whitespace-nowrap z-30">
-                                    {aiModeEnabled ? "AI DEVELOPER MODE" : aiDeveloperStatus?.reason || "COMING SOON"}
+                                    {aiModeEnabled ? "AI Hook Finder" : aiDeveloperStatus?.reason || "Set up Gemini in Settings"}
                                     <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-zinc-950" />
                                   </div>
                                 </div>
                               </div>
                             </div>
+                            {hostedHookAccountId && currentGenMode === "ai" && (
+                              <p className="mt-1 text-xs text-zinc-400">Gemini analyzes your timestamped transcript through Clip Robin. Fresh analyses use 1 credit per started 30 minutes.</p>
+                            )}
 
                             {/* Clip Duration Selector */}
                             <div className="space-y-1.5">

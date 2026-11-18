@@ -2,7 +2,7 @@
 
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { accountClient, billingRequest, type AccountPlan } from "@/src/lib/account";
+import { accountClient, billingRequest, recoveryIsOpen, saveRecovery, takeAuthCallback, type AccountPlan, type EmailCallback } from "@/src/lib/account";
 
 export const PLAN_FEATURES = [
   ["Local transcription & Fast Interval clips", "Included", "Included"],
@@ -10,7 +10,7 @@ export const PLAN_FEATURES = [
   ["MP4 and ZIP export", "Included", "Included"],
   ["Watermark", "Default Clip Robin mark", "Removable or custom logo"],
   ["Caption styles", "Classic and Clean", "All styles"],
-  ["Gemini AI Hook Finder with your API key", "—", "Included"],
+  ["Gemini AI Hook Finder", "—", "20 included credits per billing cycle, or use your own Gemini key"],
 ] as const;
 
 const FREE_ALLOWED_CAPTION_STYLES = ["classic", "clean"];
@@ -20,31 +20,64 @@ type PlanResult = { accountId: string; plan: AccountPlan | null; error: string |
 function useSubscriptionState() {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(!accountClient);
-  const [recovering, setRecovering] = useState(false);
+  const [recovering, setRecoveryOpen] = useState(false);
+  const [checkingCallback, setCheckingCallback] = useState(false);
+  const [emailCallback, setEmailCallback] = useState<EmailCallback | null>(null);
+  const [callbackError, setCallbackError] = useState<string | null>(null);
   const [result, setResult] = useState<PlanResult | null>(null);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [upgradeReason, setUpgradeReason] = useState<string | null>(null);
   const requestVersion = useRef(0);
+  const callbackRead = useRef(false);
   const accountId = session?.user.id;
   const accessToken = session?.access_token;
   const current = accountId && result?.accountId === accountId ? result : null;
   const plan = current?.plan ?? null;
   const isPro = plan?.tier === "pro";
   const invalidateRequests = useCallback(() => { requestVersion.current++; }, []);
+  const setRecovering = useCallback((userId?: string) => {
+    saveRecovery(userId);
+    setRecoveryOpen(Boolean(userId));
+  }, []);
 
   useEffect(() => {
-    const listener = accountClient?.auth.onAuthStateChange((event, nextSession) => {
+    if (!accountClient) return;
+    const auth = accountClient.auth;
+    const listener = auth.onAuthStateChange((event, nextSession) => {
       if (event === "SIGNED_OUT") {
         invalidateRequests();
         setResult(null);
-        setRecovering(false);
+        setRecovering();
       }
-      if (event === "PASSWORD_RECOVERY") setRecovering(true);
+      if (event === "PASSWORD_RECOVERY" && nextSession) setRecovering(nextSession.user.id);
+      if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+        setRecoveryOpen(Boolean(nextSession && recoveryIsOpen(nextSession.user.id)));
+      }
       setSession(nextSession);
       setAuthReady(true);
     });
-    return () => listener?.data.subscription.unsubscribe();
-  }, [invalidateRequests]);
+    if (!callbackRead.current) {
+      callbackRead.current = true;
+      const callback = takeAuthCallback();
+      if (callback && "error" in callback) setCallbackError(callback.error);
+      if (callback && "email" in callback) setEmailCallback(callback.email);
+      if (callback && "code" in callback) {
+        setCheckingCallback(true);
+        void (async () => {
+          try {
+            const { data, error } = await auth.exchangeCodeForSession(callback.code);
+            if (error || !data.session) throw error ?? new Error("No session returned");
+            setSession(data.session);
+          } catch {
+            setCallbackError("This account link has expired or was opened in a different browser. Open it in the browser that requested it or request a new email.");
+          } finally {
+            setCheckingCallback(false);
+          }
+        })();
+      }
+    }
+    return () => listener.data.subscription.unsubscribe();
+  }, [invalidateRequests, setRecovering]);
 
   const refreshPlan = useCallback(async () => {
     if (!accountId || !accessToken) return;
@@ -67,11 +100,13 @@ function useSubscriptionState() {
     };
     const interval = window.setInterval(refreshIfVisible, 60_000);
     window.addEventListener("focus", refreshIfVisible);
+    window.addEventListener("cliprobin:hook-usage-changed", refreshIfVisible);
     document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
       invalidateRequests();
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshIfVisible);
+      window.removeEventListener("cliprobin:hook-usage-changed", refreshIfVisible);
       document.removeEventListener("visibilitychange", refreshIfVisible);
     };
   }, [accountId, invalidateRequests, refreshPlan]);
@@ -84,7 +119,8 @@ function useSubscriptionState() {
   const isCaptionStyleAllowed = useCallback((style: string) => isPro || FREE_ALLOWED_CAPTION_STYLES.includes(style), [isPro]);
 
   return {
-    authReady, session, recovering, setRecovering, plan, isPro, planError: current?.error,
+    authReady: authReady && !checkingCallback, session, recovering, setRecovering, emailCallback, setEmailCallback,
+    callbackError, setCallbackError, plan, isPro, planError: current?.error,
     refreshPlan, upgradeModalOpen, upgradeReason, openUpgradeModal, closeUpgradeModal, isCaptionStyleAllowed,
   };
 }

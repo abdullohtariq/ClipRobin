@@ -58,7 +58,20 @@ jobs:
         run: |
           $repo = $PWD.Path
           python -m pip install --disable-pip-version-check pyinstaller -r requirements/backend.txt
-          python -m PyInstaller --clean --noconfirm --onefile --windowed --icon "$repo\backend\icon.ico" --name cliprobin-api --distpath backend/dist --workpath "$env:RUNNER_TEMP\pyinstaller-work" --specpath "$env:RUNNER_TEMP\pyinstaller-spec" --collect-all faster_whisper --collect-all ctranslate2 --collect-all av --collect-all tokenizers --collect-all huggingface_hub --collect-all uvicorn --collect-all yt_dlp --collect-all cv2 --add-data "$repo\backend\app\models;app/models" --add-data "$repo\backend\assets;assets" --add-data "$repo\clip_robin_watermark.png;assets" backend/run.py
+          $packArgs = @(
+            '--clean', '--noconfirm', '--onefile', '--windowed', '--icon', "$repo\backend\icon.ico"
+            '--name', 'cliprobin-api', '--distpath', 'backend/dist'
+            '--workpath', "$env:RUNNER_TEMP\pyinstaller-work", '--specpath', "$env:RUNNER_TEMP\pyinstaller-spec"
+            '--collect-all', 'faster_whisper', '--collect-all', 'ctranslate2', '--collect-all', 'av'
+            '--collect-all', 'tokenizers', '--collect-all', 'huggingface_hub', '--collect-all', 'uvicorn'
+            '--collect-all', 'yt_dlp', '--collect-all', 'cv2'
+            '--add-data', "$repo\backend\app\models\face_detection_yunet_2023mar.onnx;app/models"
+            '--add-data', "$repo\backend\app\models\YUNET-LICENSE.txt;app/models"
+            '--add-data', "$repo\backend\assets;assets"
+            '--add-data', "$repo\clip_robin_watermark.png;assets"
+            'backend/run.py'
+          )
+          python -m PyInstaller @packArgs
 
       - name: Stage FFmpeg static binaries for packaging
         shell: pwsh
@@ -74,6 +87,31 @@ jobs:
           Copy-Item -Force $foundFfprobe.FullName backend/bin/ffprobe.exe
           Write-Host "Staged FFmpeg: $((Get-Item backend/bin/ffmpeg.exe).Length) bytes"
           Write-Host "Staged FFprobe: $((Get-Item backend/bin/ffprobe.exe).Length) bytes"
+
+      - name: Start the packaged backend and check its health
+        shell: pwsh
+        run: |
+          $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $probe.Start()
+          $env:CLIPROBIN_API_PORT = [string]$probe.LocalEndpoint.Port
+          $probe.Stop()
+          $env:CLIPROBIN_API_TOKEN = [Guid]::NewGuid().ToString('N')
+          $env:CLIPROBIN_PROJECTS_DIR = "$env:RUNNER_TEMP\cliprobin-smoke-projects"
+          $env:CLIPROBIN_FFMPEG_DIR = (Resolve-Path backend/bin).Path
+          $headers = @{ 'X-ClipRobin-Token' = $env:CLIPROBIN_API_TOKEN }
+          $endpoint = "http://127.0.0.1:$env:CLIPROBIN_API_PORT/api/health"
+          $backend = Start-Process -FilePath (Resolve-Path backend/dist/cliprobin-api.exe).Path -WindowStyle Hidden -PassThru
+          try {
+            $deadline = [DateTime]::UtcNow.AddSeconds(30)
+            do {
+              if ($backend.HasExited) { throw "Packaged backend exited with code $($backend.ExitCode)." }
+              try { $health = Invoke-RestMethod -Uri $endpoint -Headers $headers -TimeoutSec 2 }
+              catch { Start-Sleep -Milliseconds 500 }
+            } while ($health.status -ne 'healthy' -and [DateTime]::UtcNow -lt $deadline)
+            if ($health.status -ne 'healthy') { throw 'Packaged backend did not become healthy.' }
+          } finally {
+            if (!$backend.HasExited) { taskkill.exe /PID $backend.Id /T /F | Out-Null }
+          }
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -104,9 +142,11 @@ jobs:
           releaseBody: |
             [Download the Windows installer (.exe)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Clip.Robin_${{ steps.app-version.outputs.version }}_x64-setup.exe)
 
-            This release adds Supabase account sign-in and an option to resend the confirmation email. Free local editing and exports are available without an account. Hosted email signup is limited to project team addresses during testing. Paid checkout awaits payment provider setup.
+            - Improved 9:16 speaker tracking handles camera cuts, filters false detections, and reduces brief jumps to listeners. Locked Crop keeps a fixed position without scanning faces.
+            - Clip generation restores interrupted queue entries and improves handling of silent videos.
+            - Account & Plans has clearer email recovery errors and support for Polar checkout, refunds, and Gemini credit balances. Public email delivery and paid upgrades require the hosted setup to be completed.
 
-            GitHub automatically includes source-code archives on releases; they are not needed to install Clip Robin. Existing installations will be notified when this update is available.
+            Use the Windows installer above to install or update Clip Robin. Local editing and exports are available without an account.
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           uploadUpdaterJson: true

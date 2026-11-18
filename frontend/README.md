@@ -1,6 +1,6 @@
 # Clip Robin — Frontend & Desktop Shell (`frontend/`)
 
-This directory contains the **Next.js 16 (`16.3.5`) / React 19 (`19.2.8`)** user interface and the **Tauri v2 (`2.12.3`)** Windows desktop shell for **Clip Robin (v0.1.30)**.
+This directory contains the **Next.js 16 (`16.4.6`) / React 19 (`19.2.8`)** user interface and the **Tauri v2 (`2.12.3`)** Windows desktop shell for **Clip Robin**.
 
 For full system architecture, backend contracts, and on-disk schemas, see the root [`README.md`](../README.md) and [`ai.md`](../ai.md).
 
@@ -55,7 +55,7 @@ npm.cmd run lint
 npm.cmd run version:check
 
 # Bump version across all 3 manifests simultaneously
-npm.cmd run version:set -- 0.1.30
+npm.cmd run version:set -- 0.1.31
 
 # Build static production export into frontend/out/
 npm.cmd run build
@@ -65,4 +65,4 @@ npm.cmd run build
 
 ## Environment Variables (Optional)
 
-Copy [`.env.example`](.env.example) to `frontend/.env.local` to enable account sign-in. See [Supabase and Lemon Squeezy setup](../supabase/README.md) for the database, redirect URLs, and server-only payment secrets.
+Copy [`.env.example`](.env.example) to `frontend/.env.local` to enable account sign-in. The [Supabase and Polar setup](../supabase/README.md) covers the public account page, email delivery, and server-only payment settings.

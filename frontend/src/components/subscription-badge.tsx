@@ -1,16 +1,15 @@
 "use client";
 
-import React from "react";
+import Link from "next/link";
 import { useSubscription } from "@/src/lib/subscription-context";
 
 export function SubscriptionBadge() {
-  const { isPro, openUpgradeModal } = useSubscription();
+  const { isPro } = useSubscription();
 
   if (isPro) {
     return (
-      <button
-        type="button"
-        onClick={() => openUpgradeModal()}
+      <Link
+        href="/subscription"
         className="w-full flex items-center justify-between p-2.5 rounded-xl border border-emerald-500/30 bg-gradient-to-r from-emerald-950/40 to-zinc-900/40 hover:border-emerald-500/50 transition-all text-left group cursor-pointer"
         title="Clip Robin Pro active"
       >
@@ -29,7 +28,7 @@ export function SubscriptionBadge() {
         <span className="hidden xl:inline text-[11px] font-medium text-zinc-400 group-hover:text-emerald-300">
           Manage
         </span>
-      </button>
+      </Link>
     );
   }
 
@@ -47,14 +46,13 @@ export function SubscriptionBadge() {
       <p className="hidden xl:block mt-1 text-[11px] text-zinc-400 line-clamp-2">
         Gemini AI hooks &amp; custom watermark are locked.
       </p>
-      <button
-        type="button"
-        onClick={() => openUpgradeModal("Gemini AI Hooks & Custom Watermarks")}
-        className="mt-2 w-full py-1.5 px-2 rounded-lg bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-zinc-950 font-bold text-xs shadow-md transition-all duration-150 text-center cursor-pointer"
+      <Link
+        href="/subscription"
+        className="mt-2 block w-full py-1.5 px-2 rounded-lg bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-zinc-950 font-bold text-xs shadow-md transition-all duration-150 text-center"
       >
         <span className="xl:inline hidden">⚡ Upgrade to Pro</span>
         <span className="xl:hidden inline">Upgrade</span>
-      </button>
+      </Link>
     </div>
   );
 }

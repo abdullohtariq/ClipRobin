@@ -2,9 +2,9 @@
 
 > Open-source, local-first video clipping for creators who want automation without surrendering their media workflow to the cloud.
 
-Clip Robin (**v0.1.30**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). It is built around a straightforward principle: **your computer does the heavy media lifting locally, while cloud AI is strictly an opt-in tool for semantic intelligence when you want it.**
+Clip Robin (**v0.1.31**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). Video processing runs locally. Cloud AI for hook suggestions is optional.
 
-That means zero recurring minute quotas, complete local file privacy, and full control over the models, providers, and exports behind every clip.
+Local clipping and exports have no monthly video quota. Pro includes a separate allowance for hosted Gemini Hook Finder.
 
 ## Why Clip Robin?
 
@@ -13,7 +13,7 @@ Many clipping platforms upload your entire workflow to a hosted SaaS—charging 
 Clip Robin takes a different route:
 
 - **Local by default:** Media inspection, audio extraction, `faster-whisper` transcription, YuNet ONNX active-speaker face tracking, FFmpeg rendering, and project storage run directly on your hardware.
-- **AI where it matters:** Opt-in **AI Hook Finder** connects to Google Gemini (`gemini-3.8-flash` / `gemini-3.1-flash-lite`), OpenAI, or DeepSeek using your own API key (BYOK)—sending only lightweight text transcripts when enabled.
+- **AI Hook Finder:** Choose included Pro credits or use your own Gemini key. The opt-in analysis sends timestamped transcript text. Direct analysis can also use OpenAI or DeepSeek with your own key.
 - **Explicit cloud boundaries:** Cloud requests are opt-in, transparent, and replaceable; Fast Interval clipping works 100% offline.
 - **Open and inspectable:** Architecture, endpoints, schemas, and test suites are documented in [`ai.md`](./ai.md).
 
@@ -21,7 +21,7 @@ Clip Robin takes a different route:
 
 Clip Robin is a three-tier hybrid desktop application:
 
-- **Next.js 16 (`16.3.5` / React `19.2.8`)** powers the responsive studio interface.
+- **Next.js 16 (`16.4.6` / React `19.2.8`)** powers the responsive studio interface.
 - **Tauri v2 (`2.12.3`)** provides the lightweight Windows desktop shell, dynamic port allocation, sidecar lifecycle, and signed auto-updates.
 - **Python 3.12+ / FastAPI** runs the local media, transcription, smart-framing, and export engine.
 
@@ -34,6 +34,7 @@ flowchart LR
 	Python --> Models[faster-whisper + YuNet ONNX]
 	Python --> Files[Local Project Files]
 	Python -. opt-in BYOK transcript .-> API[Gemini / OpenAI / DeepSeek]
+	Python -. opt-in Pro transcript .-> Hosted[Supabase credit checks and Gemini]
 	Python -. user-initiated OAuth2 .-> YT[YouTube Data API v3]
 ```
 
@@ -46,7 +47,7 @@ flowchart TD
 	Audio --> Transcribe[Transcribe on device via faster-whisper]
 	Transcribe --> Choice{Analysis Mode}
 	Choice -->|Fast Interval - Offline| Mock[Local duration chunker]
-	Choice -->|AI Hook Finder - BYOK| Remote[Gemini / OpenAI / DeepSeek]
+	Choice -->|AI Hook Finder| Remote[Gemini with Pro credits or your own key]
 	Mock --> Frame[Frame in 9:16 + YuNet Speaker Tracking]
 	Remote --> Frame
 	Frame --> Render[Progressive FFmpeg + ASS Caption & Watermark Render]
@@ -62,16 +63,17 @@ flowchart TD
 | Word-level speech transcription | User hardware (`faster-whisper`) | None (one-time model download) |
 | Active-speaker face tracking (True 9:16) | User hardware (OpenCV YuNet ONNX) | None |
 | Project storage & clip exports | User hardware | None |
-| Semantic hook & virality scoring | Selected BYOK LLM API | Optional (transcript text only) |
+| Semantic hook & virality scoring | Hosted Gemini or your configured API | Optional (transcript text only) |
 | Direct YouTube Shorts publishing | YouTube Data API v3 | Optional (explicit user action) |
 
-## Key Features (v0.1.30)
+## Key Features (v0.1.31)
 
 - **Dual Intake & Multi-Video Batch Queue:** Import local files (`.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`) or download YouTube links (`yt-dlp`), queue multiple videos sequentially, and cancel or retry items cleanly at any stage.
 - **Three 9:16 Vertical Framing Modes:**
   - **16:9 Letterbox Rounded** (`672x378` anti-aliased card on `720x1280` canvas)
   - **1:1 Rounded Square** (`660x660` anti-aliased card)
   - **True 9:16 Smart Framing:** Defaults to stationary **Locked Crop** (configurable horizontal anchor, zero face scan) with optional **Speaker Cuts** and **Follow Speaker** active-speaker tracking powered by OpenCV YuNet ONNX + Whisper VAD, plus real vertical divider detection and per-clip **Reframe** controls (`720×1280`, 30 fps MP4).
+    Speaker tracking resets at camera cuts and suppresses brief reactions that would pull the crop off the current speaker. [YuNet model license](backend/app/models/YUNET-LICENSE.txt)
 - **Flexible Clip Durations & Counter:** Generate **12s, 15s, 30s, 60s, or 90s** clips with a dynamic clip-count stepper bounded by source duration, early-exit Whisper transcription, and time-only slicing for silent media.
 - **6 High-Impact Caption Styles & Previews:** Choose **Classic**, **Robin**, **Clean**, **Punch**, **Pill**, or **Karaoke** (2 words per line, gap bridging, bundled OFL + RTL Arabic & Devanagari fonts) inside an accessible native `<dialog>` 2-pane live preview picker with platform safe-zone guides.
 - **Custom Top-Line Hooks & Brand Watermarks:** Burn custom `<=15`-word headline hooks onto individual clips without re-rendering the whole project, and overlay default or validated PNG/JPG/WebP brand logos with adjustable position and opacity (`20%–100%`).
@@ -152,19 +154,19 @@ npm.cmd run build
 
 ## Versioning & Signed Desktop Releases
 
-`frontend/package.json`, `frontend/src-tauri/Cargo.toml`, and `frontend/src-tauri/tauri.conf.json` share a single synchronized version (currently **`0.1.30`**). Always bump all three together from `frontend/`:
+`frontend/package.json`, `frontend/src-tauri/Cargo.toml`, and `frontend/src-tauri/tauri.conf.json` share a synchronized version. Run the version script with the next release number from `frontend/`:
 
 ```powershell
-npm.cmd run version:set -- 0.1.30
+npm.cmd run version:set -- 0.1.31
 npm.cmd run version:check
 ```
 
 Pushing a matching `v*` tag triggers `.github/workflows/release-tauri.yml` to build the PyInstaller sidecar, bundle the signed NSIS Windows installer, and publish Tauri updater metadata to GitHub Releases:
 
 ```powershell
-git tag v0.1.30
+git tag v0.1.31
 git push origin main
-git push origin v0.1.30
+git push origin v0.1.31
 ```
 
 Production desktop builds (`com.cliprobin.desktop`) store projects, Whisper models, logs (`backend.log`), and local credentials inside `%APPDATA%\com.cliprobin.desktop` and check for signed updates automatically on startup and every 6 hours.
@@ -195,7 +197,7 @@ GET    /api/watermark                         | POST /api/watermark/upload      
 GET    /api/youtube/status                    | POST /api/youtube/config        | GET /api/youtube/auth-url   | POST /api/youtube/upload
 ```
 
-Free local editing works without an account. To enable account sign-in and verified Pro subscriptions, follow the [Supabase and Lemon Squeezy setup](supabase/README.md). It covers a Free database project, email and optional browser sign-in, and payment testing with no live charge.
+Free local editing works without an account. Clip Robin Pro is $12 USD per month and includes 20 Gemini Hook Finder credits per billing period when hosted billing is configured. **Account & Plans** shows both the credit balance and any spending limit that reduces what customers can use immediately. The [Supabase and Polar setup](supabase/README.md) covers public email sign-in and testing checkout in Polar Sandbox.
 
 ## Contributing
 

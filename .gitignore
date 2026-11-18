@@ -46,6 +46,10 @@ frontend/src-tauri/target/
 frontend/src-tauri/gen/schemas/
 **/target/
 
+# Optional developer face models
+backend/app/models/2d106det.onnx
+backend/app/models/scrfd_2.5g_bnkps.onnx
+
 # Generated media and local work products
 *.mp4
 !frontend/public/caption-previews/*.mp4

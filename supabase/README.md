@@ -17,7 +17,16 @@ Clip Robin uses your Supabase project for Auth, Postgres, and a hosted billing f
    If you already applied `20261110000000_account_subscriptions.sql` through the Dashboard SQL Editor, verify the two billing tables and three functions before linking the CLI. Then run `supabase migration repair 20261110000000 --status applied --remote` before the next `db push` so the CLI records the existing schema change. [Supabase migration history](https://supabase.com/docs/guides/deployment/database-migrations)
 
 3. Copy `frontend/.env.example` to `frontend/.env.local` and set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` from **Connect** or **Settings → API Keys**. Restart the development server. For a release build, set the same values as GitHub Actions repository variables. Public frontend variables are embedded at build time. Keep the database password, service-role key, and payment secrets in their respective dashboards.
-4. Under **Authentication → URL Configuration**, set a Site URL and add the exact **Account & Plans** redirect URLs you use. For development, add `http://127.0.0.1:3000/subscription` and `http://localhost:3000/subscription` if you use both. For public use, serve the static Account & Plans page at an HTTPS URL, add its exact `/subscription` URL, and set `NEXT_PUBLIC_CLIPROBIN_ACCOUNT_URL` to it. A host-provided HTTPS address is sufficient. This page handles account and billing flows. Video processing still uses the local sidecar.
+4. Publish the account page on an HTTPS address before applying the public email templates. The static page handles sign-in, password reset, and account management. Video processing still uses the Windows app. Cloudflare Pages Direct Upload works with its assigned HTTPS address. From `frontend` in PowerShell, run:
+
+   ```powershell
+   $env:NEXT_PUBLIC_CLIPROBIN_ACCOUNT_SITE = '1'
+   npm run build -- --webpack
+   node scripts/package-account-site.mjs ../cliprobin-account-site
+   Remove-Item Env:NEXT_PUBLIC_CLIPROBIN_ACCOUNT_SITE
+   ```
+
+   Upload the contents of `cliprobin-account-site` using **Workers & Pages → Create → Drag and drop**. Verify `https://YOUR_PROJECT.pages.dev/subscription/` loads and shows **Sign in with email**. Use that exact HTTPS address for Supabase **Authentication → URL Configuration → Site URL** and add it to **Redirect URLs**. Also set `NEXT_PUBLIC_CLIPROBIN_ACCOUNT_URL` to that address in the desktop build and GitHub Actions repository variables. Keep `http://127.0.0.1:3000/subscription` and `http://localhost:3000/subscription` in the allowlist if you develop on both. [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/) · [Supabase redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls)
 
 ## 2. Pick sign-in methods
 
@@ -26,28 +35,43 @@ Clip Robin uses your Supabase project for Auth, Postgres, and a hosted billing f
 - **Google** can be enabled for browser sign-in using the Google Cloud OAuth client and Supabase callback. Test with the project's assigned callback and Google test users. Public consent and branding depend on Google's verification requirements. After configuring it in Supabase, set `NEXT_PUBLIC_CLIPROBIN_GOOGLE_AUTH=1`. [Google setup](https://supabase.com/docs/guides/auth/social-login/auth-google)
 - **ChatGPT** website identity sign-in requires OpenAI approval and an OAuth client for Clip Robin. The Supabase dashboard can offer its own Continue with ChatGPT button for you as the project owner. Clip Robin's own sign-in page uses the methods above. [OpenAI website sign-in](https://developers.openai.com/siwc/website)
 
-After connecting your SMTP sender, open **Authentication → Emails → Confirm sign up**. Set the subject to **Confirm your Clip Robin email** and paste the [Clip Robin confirmation template](templates/confirm-signup.html) into the body. The template uses Supabase's `{{ .ConfirmationURL }}` to preserve verification and the configured redirect. [Supabase email templates](https://supabase.com/docs/guides/auth/auth-email-templates)
+After connecting your SMTP sender and publishing the page, open **Authentication → Emails**. Set **Confirm sign up** to the subject **Confirm your Clip Robin email** and use the [confirmation template](templates/confirm-signup.html). Set **Reset password** to the subject **Reset your Clip Robin password** and use the [reset template](templates/reset-password.html). Switch off click tracking for these messages. The link carries a one-time Supabase token in the URL fragment. The page clears it from the address bar and verifies it when the customer clicks. Customers can use a different browser from the one where they requested the message. Test both templates with an address outside the Supabase team before opening signup. [Supabase email templates](https://supabase.com/docs/guides/auth/auth-email-templates)
 
-## 3. Connect Lemon Squeezy in test mode
+For a small pilot before buying a domain, use an SMTP sender account you control. Brevo can replace an unauthenticated sender address with its own compliant address. Verify the actual From address and test delivery before relying on it. [Brevo sender requirements](https://help.brevo.com/hc/en-us/articles/14925263522578-Comply-with-Gmail-Yahoo-and-Microsoft-s-requirements-for-email-senders)
 
-Lemon Squeezy lists Pakistan for bank payouts. Merchant activation, identity verification, and available payout methods are handled in your store dashboard. Sandbox testing uses test-mode data. [Supported countries](https://docs.lemonsqueezy.com/help/getting-started/supported-countries) · [Test mode](https://docs.lemonsqueezy.com/help/getting-started/test-mode)
+## 3. Connect Polar Sandbox
 
-1. Create a **recurring** Clip Robin Pro variant in the store's test mode. Set your price and interval in Lemon Squeezy. The app currently supports one recurring variant and shows pricing through the hosted checkout.
-2. Create a test-mode API key. In Supabase **Edge Functions → Secrets**, set the following values. Use two separate random secrets for the webhook and checkout claim. Keep these values out of frontend environment variables and source control.
+Lemon Squeezy closed new store sign-ups on November 16, 2026. Polar lists Pakistan for seller payouts. Its separate sandbox provides hosted checkout, recurring subscriptions, and a customer portal. A sandbox checkout needs no Clip Robin website or live payment. [Lemon Squeezy announcement](https://www.lemonsqueezy.com/blog/saying-goodbye-to-lemon-squeezy) · [Polar countries](https://polar.sh/docs/merchant-of-record/supported-countries) · [Polar Sandbox](https://polar.sh/docs/integrate/sandbox)
+
+1. Sign in at [Polar Sandbox](https://sandbox.polar.sh) and create a Clip Robin organization. Create one fixed-price, **recurring** Clip Robin Pro product at **12 USD per month**. Test checkout uses Polar's separate sandbox.
+2. In the sandbox organization's **Settings → Webhooks**, add `https://YOUR_PROJECT_REF.supabase.co/functions/v1/cliprobin-billing/webhook`. Select **Raw**, API version `2026-10`, the available `subscription.*` events, and `order.refunded`. Generate a new Standard Webhooks signing secret. [Polar webhook setup](https://polar.sh/docs/integrate/webhooks/endpoints) · [Signature format](https://polar.sh/docs/integrate/webhooks/delivery)
+3. Create an organization access token in **Settings → Developers** with `checkouts:write`, `subscriptions:read`, `orders:read`, and `customer_sessions:write`. In Supabase **Edge Functions → Secrets**, add the values below. Keep the token and signing secrets out of frontend variables, chat, and source control. The checkout claim secret is separate from the provider webhook secret. `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"` can generate a checkout claim secret locally.
 
    | Secret | Value |
    | --- | --- |
-   | `LEMON_SQUEEZY_API_KEY` | Test-mode API key |
-   | `LEMON_SQUEEZY_STORE_ID` | Store's numeric ID |
-   | `LEMON_SQUEEZY_VARIANT_ID` | Recurring variant's numeric ID |
-   | `LEMON_SQUEEZY_WEBHOOK_SECRET` | Webhook signing secret configured in Lemon Squeezy |
+   | `POLAR_ACCESS_TOKEN` | Sandbox organization access token |
+   | `POLAR_ORGANIZATION_ID` | Sandbox organization UUID |
+   | `POLAR_PRODUCT_ID` | Recurring Polar product UUID |
+   | `POLAR_WEBHOOK_SECRET` | Generated Standard Webhooks `whsec_…` value |
    | `CLIPROBIN_CHECKOUT_SECRET` | Separate random value with at least 32 characters |
-   | `LEMON_SQUEEZY_MODE` | `test` |
+   | `CLIPROBIN_BILLING_TEST_USER_ID` | UUID from **Supabase → Authentication → Users** for the account allowed to test Pro |
+   | `CLIPROBIN_CHECKOUT_RETURN_URL` | Optional HTTPS URL of Account & Plans, including the exact `/subscription/` path |
+   | `POLAR_ENVIRONMENT` | `sandbox` for testing. This is the default. |
+   | `CLIPROBIN_GEMINI_API_KEY` | Server-only key for included Hook Finder credits. Configure the budget below before adding the key. |
+   | `CLIPROBIN_GEMINI_MONTHLY_BUDGET_CENTS` | Positive whole number of USD cents for the project-wide monthly reservation limit. For example, `500` reserves at most $5 in a UTC calendar month. |
 
-3. In Lemon Squeezy test mode, send `subscription_created` and `subscription_updated` events to `https://YOUR_PROJECT_REF.supabase.co/functions/v1/cliprobin-billing/webhook`. The function checks `X-Signature`, verifies store and mode, and fetches the current subscription before updating the account. Initial ownership comes from the signed checkout claim. Updates can use an established subscription ID. The database ignores older provider snapshots. [Webhook events](https://docs.lemonsqueezy.com/help/webhooks/event-types) · [Signing](https://docs.lemonsqueezy.com/help/webhooks/signing-requests)
-4. Create a test user from **Account & Plans**. Verify Free, open a test checkout, use Lemon Squeezy's test payment details, then return and refresh. Confirm Pro appears only after the webhook. Verify a second account stays Free. In the portal, cancel and check that Pro remains available until the paid period ends. Verify expired, paused, and past-due subscriptions return to Free. Try duplicate event deliveries and a temporary network outage.
+4. Apply the Hook Finder and billing reliability database migrations before deploying the function. Use a current Clip Robin build with Polar link support. The `v0.1.30` installer predates Polar support. The billing function verifies the signed webhook, then checks the current provider state, organization, customer, product, and signed Clip Robin account claim. The database ignores older subscription snapshots.
+5. On the designated account, confirm Free appears before checkout. Open a test checkout and use [Polar's sandbox test card](https://polar.sh/docs/integrate/sandbox). Confirm **Test Pro is active** on return and that a second account stays on Free. Verify the declined-card and abandoned-checkout cases. Repeat successful checkout with webhook delivery paused in Sandbox to test **Refresh plan**. Restore webhooks and verify replays preserve one subscription. Use **Manage billing** to test cancellation and portal access. Test a full refund for the current invoice, a partial refund, and a refund for a prior invoice. A verified full refund ends Pro access for that billing period. The customer can still open the billing portal. Handle cancellation separately in Polar when appropriate.
 
-To launch later, use an approved store and live recurring variant, live API and webhook credentials, and `LEMON_SQUEEZY_MODE=live`. Configure those on the hosted function. Sandbox rows are isolated from live entitlements. Keep provider-backed orders and any earlier real sales separate from old `ROBIN-PRO-*` demo keys. Reconcile earlier real sales using verified order records before granting access.
+Production checkout requires an approved Polar organization, live credentials, `POLAR_ENVIRONMENT=production`, and a current Clip Robin release. Use a separate runtime environment with production-only secrets. The checkout function verifies the offered price is $12 USD per month and requires the included Hook Finder configuration before it enables paid checkout. Sandbox subscriptions remain in test-mode rows. Reconcile earlier sales against verified orders before granting access.
+
+### Included Gemini credits
+
+- Pro receives 20 credits per Polar billing period. A fresh analysis uses one credit per started 30 minutes of source video. Caption and framing changes can reuse existing hooks. When customers enable Developer Mode with their own key, Gemini bills their project and Clip Robin spends no included credits.
+- The hosted function verifies the account and reserves credits and up to $0.02 per credit before it sends a timestamped transcript to Gemini 3.5 Flash-Lite. Each credit allows 20,000 input tokens and up to 2,000 output tokens including thinking. Included analysis uses one generation attempt. The project stops accepting reservations at the configured UTC monthly limit. An account can reserve up to $1 per billing period, including failed requests. Failed requests release user credits while retaining their spend reservation for cases where the provider may have billed the attempt. The usage table records token counts and status and contains no transcript or API key.
+- Set a [monthly project spend cap in Google AI Studio](https://ai.google.dev/gemini-api/docs/billing/) as a second control. Use a dedicated Gemini project so Clip Robin's included usage can be reconciled against the provider's bill. If you have an existing Polar test subscription from before this migration, replay a subscription webhook to populate its billing-period start.
+- **Account & Plans** shows the balance and how many credits the current limits allow. Production checkout reserves room for current subscribers and outstanding checkout sessions. At a $5 monthly budget and $0.02 reserved per credit, the maximum before usage spikes or failed attempts is 12 subscribers at 20 credits each. Monitor both the included usage and the provider bill during the paid pilot.
+- Run `npm test` in `frontend` for a simulated cycle using the real migrations in embedded PostgreSQL. It covers pending checkout and missed notifications, credit usage and limits, failed Gemini calls, renewal, refunds, and cancellation with simulated Polar and Gemini responses.
 
 ### Local and hosted boundaries
 

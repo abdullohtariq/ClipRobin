@@ -5,6 +5,8 @@
 > **Target Audience:** Content Creators, Podcasters, Streamers, Video Editors, Developers, and Social Media Marketers  
 > **Primary Goal:** Convert visitors into software downloads (Windows desktop app) and GitHub stars  
 
+The customer account page is in `frontend/app/subscription`. It can be published independently on a free HTTPS static host. It handles email confirmation, password reset, and Polar billing for Clip Robin Pro. Follow the [deployment steps](supabase/README.md) before linking to Account & Plans from a landing page.
+
 ---
 
 ## 1. What the Project Is
@@ -18,7 +20,7 @@ Creators spend hours manually scrubbing through hours of footage, finding intere
 3. **Vendor Lock-in & Video Expiration:** Projects and rendered videos are often deleted or locked behind a paywall when a subscription lapses.
 
 ### Clip Robin’s Solution: "Local by Default, AI Where It Matters"
-- **Desktop Architecture:** Powered by a lightweight **Tauri v2 (`2.12.3`)** shell, **Next.js 16 (`16.3.5`)** frontend, and a high-performance **Python/FastAPI** local backend.
+- **Desktop Architecture:** Powered by a lightweight **Tauri v2 (`2.12.3`)** shell, **Next.js 16 (`16.4.6`)** frontend, and a high-performance **Python/FastAPI** local backend.
 - **Heavy Media Lifting Happens Locally:** Local audio extraction, local transcription using **CTranslate2 / `faster-whisper`**, smart face-detection reframing using **OpenCV YuNet ONNX**, and video rendering with **FFmpeg** all run directly on the user’s PC hardware for **\$0.00**.
 - **Opt-in, Cost-Effective Cloud Intelligence:** Semantic hook scoring, title/description generation, and virality ranking can run completely offline with Fast Interval mode, or connect to **Google Gemini (`gemini-3.8-flash`), OpenAI, or DeepSeek** using the creator's own API keys (Bring Your Own Key / BYOK). This turns a \$30/month bill into **\$0.02** of direct API usage.
 
@@ -96,7 +98,7 @@ flowchart TD
 ### Section-by-Section Wireframe & Copywriting Plan
 
 #### Section 1: Sticky Navigation Bar
-- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.30 Beta` badge.
+- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.31 Beta` badge.
 - **Center:** Navigation Links (`Features`, `Compare`, `Captions`, `Architecture`, `Docs`).
 - **Right:**
   - **GitHub Star Button:** Link to repository with live star count.
@@ -112,7 +114,7 @@ flowchart TD
 - **CTA Cluster:**
   - **Primary CTA:** Huge Emerald Button:  
     `⬇ Download for Windows (x64)`  
-    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.30
+    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.31
   - **Secondary CTA:** Ghost Button with GitHub Octocat:  
     `★ Star on GitHub`
 - **Zero-Friction Bullets below CTA:**

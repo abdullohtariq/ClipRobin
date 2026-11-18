@@ -2,8 +2,8 @@
 
 import { isTauri } from "@tauri-apps/api/core";
 import { isAuthError } from "@supabase/supabase-js";
-import { useState, type FormEvent } from "react";
-import { accountClient, billingRequest } from "@/src/lib/account";
+import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
+import { accountClient, billingRequest, verifyEmailCallback } from "@/src/lib/account";
 import { PLAN_FEATURES, useSubscription } from "@/src/lib/subscription-context";
 
 const inputClass = "mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm";
@@ -18,7 +18,8 @@ const oauthProviders = [
 type AuthMode = "sign-in" | "sign-up" | "reset";
 
 function AccountPanel() {
-  const { authReady, session, recovering, setRecovering, plan, planError, refreshPlan } = useSubscription();
+  const { authReady, session, recovering, setRecovering, emailCallback, setEmailCallback, callbackError,
+    setCallbackError, plan, planError, refreshPlan } = useSubscription();
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -26,8 +27,25 @@ function AccountPanel() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
-  const [billingLink, setBillingLink] = useState<{ accountId: string; url: string; action: "checkout" | "portal" } | null>(null);
+  const [billingLink, setBillingLink] = useState<{ accountId: string; url: string; action: "checkout" | "portal"; attemptId?: string } | null>(null);
   const [desktop] = useState(() => typeof window !== "undefined" && isTauri());
+  const watchingCheckout = Boolean(plan?.checkoutState);
+
+  useEffect(() => {
+    if (!watchingCheckout) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshPlan();
+    }, 10_000);
+    return () => window.clearInterval(interval);
+  }, [refreshPlan, watchingCheckout]);
+
+  function changeMode(nextMode: AuthMode) {
+    setMode(nextMode);
+    setError(null);
+    setMessage(null);
+    setCallbackError(null);
+    setPassword("");
+  }
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -37,7 +55,7 @@ function AccountPanel() {
       await action();
     } catch (err) {
       if (isAuthError(err) && err.code === "over_email_send_rate_limit") {
-        setError("Supabase has reached its email limit. Use the confirmation link already sent, or try again later.");
+        setError("Too many account emails were sent. Check for the latest email or try again in a few minutes.");
       } else if (isAuthError(err) && err.code === "email_address_not_authorized") {
         setError("This email can’t receive account messages from this Supabase project. Ask the project owner to configure public email delivery.");
       } else {
@@ -49,7 +67,36 @@ function AccountPanel() {
   }
 
   function confirmationRedirect() {
-    return accountPageUrl ?? (desktop ? undefined : `${window.location.origin}/subscription`);
+    return accountPageUrl || (desktop ? undefined : window.location.origin + window.location.pathname);
+  }
+
+  function openInBrowser(event: MouseEvent<HTMLAnchorElement>) {
+    if (!desktop) return;
+    event.preventDefault();
+    const url = event.currentTarget.href;
+    void run(async () => {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      try {
+        await openUrl(url);
+      } catch {
+        throw new Error("Clip Robin couldn’t open your browser. Copy the link and open it in your browser.");
+      }
+    });
+  }
+
+  function confirmEmailLink() {
+    if (!emailCallback) return;
+    void run(async () => {
+      const verifiedSession = await verifyEmailCallback(emailCallback);
+      if (!verifiedSession) return;
+      setEmailCallback(null);
+      changeMode("sign-in");
+      if (emailCallback.type === "recovery") setRecovering(verifiedSession.user.id);
+      else {
+        setRecovering();
+        setMessage("Email confirmed. You can also sign in on your other devices.");
+      }
+    });
   }
 
   function resendConfirmation() {
@@ -74,12 +121,12 @@ function AccountPanel() {
       if (recovering) {
         const response = await auth.updateUser({ password });
         if (response.error) throw response.error;
-        setRecovering(false);
+        setRecovering();
         setMessage("Password updated.");
       } else if (mode === "reset") {
-        const response = await auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/subscription` });
+        const response = await auth.resetPasswordForEmail(email.trim(), { redirectTo: confirmationRedirect() });
         if (response.error) throw response.error;
-        setMessage("If an account exists, check your email and open the reset link in this browser.");
+        setMessage("If an account exists, a reset link has been sent. Check your inbox and spam.");
       } else if (mode === "sign-up") {
         const response = await auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: confirmationRedirect() } });
         if (response.error) throw response.error;
@@ -106,7 +153,7 @@ function AccountPanel() {
     const auth = accountClient?.auth;
     if (!auth) return;
     void run(async () => {
-      const response = await auth.signInWithOAuth({ provider, options: { redirectTo: `${window.location.origin}/subscription` } });
+      const response = await auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin + window.location.pathname } });
       if (response.error) throw response.error;
     });
   }
@@ -115,12 +162,20 @@ function AccountPanel() {
     if (!session) return;
     setBillingLink(null);
     void run(async () => {
-      const result = await billingRequest<{ url: string }>(action, session.access_token);
+      const result = await billingRequest<{ url?: string; attemptId?: string; state?: "pending" | "preparing" | "active" }>(action, session.access_token);
+      if (result.state) {
+        await refreshPlan();
+        if (result.state === "preparing") setMessage("Checkout is being prepared. Try again in a moment.");
+        return;
+      }
+      if (!result.url) throw new Error("The billing service did not return a link. Try again shortly.");
       const url = new URL(result.url);
-      if (url.protocol !== "https:" || !url.hostname.endsWith(".lemonsqueezy.com") || url.username || url.password || url.port) {
+      const origin = plan?.testMode ? "https://sandbox.polar.sh" : "https://polar.sh";
+      if (url.protocol !== "https:" || url.origin !== origin || url.username || url.password) {
         throw new Error("Checkout returned an invalid link.");
       }
-      setBillingLink({ accountId: session.user.id, url: url.href, action });
+      setBillingLink({ accountId: session.user.id, url: url.href, action, attemptId: result.attemptId });
+      if (action === "checkout") void refreshPlan();
     });
   }
 
@@ -128,12 +183,33 @@ function AccountPanel() {
   if (!auth) return <p className="text-sm text-zinc-300">Account sign-in is unavailable in this build. You can still create and export clips on the Free plan.</p>;
   if (!authReady) return <p role="status" className="text-sm text-zinc-300">Checking sign-in…</p>;
 
-  const accountForm = !session || recovering;
+  const accountForm = !session || recovering || (!desktop && mode === "reset");
+  const credits = plan?.hookCredits;
+  const usableCredits = credits?.availableNow ?? credits?.remaining;
+  const showBillingLink = billingLink?.accountId === session?.user.id && (billingLink?.action === "portal"
+    ? plan?.portalAvailable
+    : plan?.checkoutAvailable && (billingLink?.attemptId
+      ? plan.checkoutState === "open" && billingLink.attemptId === plan.checkoutAttempt
+      : plan.checkoutState === undefined));
   return (
     <div className="space-y-4">
+      {callbackError && <p role="alert" className="text-sm text-rose-300">{callbackError}</p>}
       {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
       {message && <p role="status" className="text-sm text-emerald-300">{message}</p>}
-      {accountForm ? (
+      {emailCallback ? (
+        <div className="space-y-3">
+          <h2 className="font-semibold">{emailCallback.type === "recovery" ? "Confirm password reset" : "Confirm your Clip Robin email"}</h2>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} className={primaryClass} onClick={confirmEmailLink}>
+              {busy ? "Checking link…" : emailCallback.type === "recovery" ? "Continue to reset password" : "Confirm email"}
+            </button>
+            <button type="button" disabled={busy} className={secondaryClass} onClick={() => {
+              setEmailCallback(null);
+              changeMode(emailCallback.type === "recovery" ? "reset" : "sign-in");
+            }}>{emailCallback.type === "recovery" ? "Request a new reset link" : "Back to sign-in"}</button>
+          </div>
+        </div>
+      ) : accountForm ? (
         <>
           <form className="max-w-md space-y-4" onSubmit={submit}>
             <h2 className="font-semibold">{recovering ? "Choose a new password" : mode === "sign-up" ? "Create a free account" : mode === "reset" ? "Reset your password" : "Sign in with email"}</h2>
@@ -146,7 +222,7 @@ function AccountPanel() {
                 {busy ? "Please wait…" : recovering ? "Save password" : mode === "sign-up" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}
               </button>
               {!recovering && (
-                <button type="button" disabled={busy} className={secondaryClass} onClick={() => { setMode(mode === "sign-in" ? "sign-up" : "sign-in"); setError(null); setMessage(null); setPassword(""); }}>
+                <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode(mode === "sign-in" ? "sign-up" : "sign-in")}>
                   {mode === "sign-in" ? "Create a free account" : "Back to sign-in"}
                 </button>
               )}
@@ -157,9 +233,9 @@ function AccountPanel() {
               {unconfirmedEmail && unconfirmedEmail === email.trim() && (
                 <button type="button" disabled={busy} className={secondaryClass} onClick={resendConfirmation}>Resend confirmation email</button>
               )}
-              {desktop ? accountPageUrl && <a href={accountPageUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass}>Reset password in browser</a> : (
+              {desktop ? accountPageUrl && <a href={accountPageUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass} onClick={openInBrowser}>Reset password in browser</a> : (
                 <>
-                  <button type="button" disabled={busy} className={secondaryClass} onClick={() => { setMode("reset"); setError(null); setMessage(null); setPassword(""); }}>Forgot password?</button>
+                  <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode("reset")}>Forgot password?</button>
                   {oauthProviders.filter((provider) => provider.enabled).map((provider) => (
                     <button key={provider.id} type="button" disabled={busy} className={secondaryClass} onClick={() => socialSignIn(provider.id)}>Continue with {provider.label}</button>
                   ))}
@@ -167,21 +243,65 @@ function AccountPanel() {
               )}
             </div>
           )}
+          {desktop && !accountPageUrl && !recovering && mode === "sign-in" && (
+            <p className="text-sm text-zinc-400">Password reset is unavailable in this build.</p>
+          )}
         </>
       ) : (
         <>
           <p className="text-sm text-zinc-300">Signed in as {session.user.email}</p>
           <p role="status" className="text-sm font-semibold">
-            {planError ? "Could not verify your plan. Free features are available." : !plan ? "Checking your plan…" : plan.tier === "pro" ? "Pro is active" : "Free plan"}
+            {planError ? "Could not verify your plan. Free features are available." : !plan ? "Checking your plan…" : plan.tier === "pro" ? (plan.testMode ? "Test Pro is active" : "Pro is active") : "Free plan"}
             {plan?.status === "cancelled" && plan.activeUntil && ` until ${new Date(plan.activeUntil).toLocaleDateString()}`}
           </p>
           {planError && <p role="alert" className="text-sm text-rose-300">{planError}</p>}
-          {plan?.testMode && plan.checkoutAvailable && <p className="text-sm text-amber-300">Test checkout. Use test payment details only.</p>}
-          {plan && !plan.checkoutAvailable && !plan.portalAvailable && <p className="text-sm text-zinc-400">Paid checkout is currently unavailable.</p>}
+          {credits && (
+            <div className="space-y-1 text-sm text-zinc-300">
+              <p>{credits.remaining} of {credits.monthly} Gemini Hook Finder credits left.
+                {plan?.status === "cancelled" ? "" : ` Credits reset on ${new Date(credits.resetsAt).toLocaleDateString()}.`}</p>
+              {usableCredits !== undefined && usableCredits < credits.remaining && (
+                <p className="text-amber-300">{usableCredits === 0
+                  ? "Included Hook Finder has reached a spending limit and is temporarily unavailable."
+                  : `A spending limit currently allows ${usableCredits} of your remaining credits to be used.`}
+                  {" "}You can use Fast Interval or add your own Gemini key in Settings.</p>
+              )}
+            </div>
+          )}
+          {plan?.tier === "pro" && !credits && (
+            <p className="text-sm text-amber-300">Included Hook Finder credits are temporarily unavailable. You can use Fast Interval or add your own Gemini key in Settings.</p>
+          )}
+          {plan?.checkoutState === "pending" && (
+            <p role="status" className="text-sm text-amber-300">We’re checking your checkout with Polar. This page updates automatically. If you received a receipt and your plan still says Free, use the support contact on your receipt.</p>
+          )}
+          {plan && plan.tier === "free" && plan.checkoutUnavailableReason !== "subscription" && plan.checkoutState !== "pending" && (
+            <div className="space-y-3 rounded-xl border border-zinc-700 p-4">
+              <h2 className="font-semibold">Clip Robin Pro <span className="ml-2 text-sm font-normal text-zinc-300">$12/month</span></h2>
+              <p className="text-sm text-zinc-300">20 Gemini Hook Finder credits per billing cycle, watermark-free exports, custom logos, and all caption styles.</p>
+              <button type="button" disabled={busy || !plan.checkoutAvailable} className={primaryClass}
+                aria-describedby={plan.checkoutAvailable ? undefined : "checkout-unavailable"} onClick={() => getBillingLink("checkout")}>
+                {plan.checkoutState === "open" ? "Resume checkout" : plan.testMode && plan.checkoutAvailable ? "Test Pro checkout" : "Upgrade to Pro"}
+              </button>
+              {!plan.checkoutAvailable && (
+                <p id="checkout-unavailable" className="text-sm text-zinc-400">{plan.checkoutState === "preparing"
+                  ? "Checkout is being prepared. This page will check again shortly."
+                  : plan.checkoutUnavailableReason === "sandbox_access"
+                    ? "Checkout is in testing and available to the designated test account. Your Free plan is active."
+                    : plan.checkoutUnavailableReason === "capacity"
+                      ? "New Pro subscriptions are paused while we increase Hook Finder capacity. Your Free plan is active."
+                      : "Upgrades open once payment setup is complete. Your Free plan is active."}</p>
+              )}
+              {plan.testMode && plan.checkoutAvailable && <p className="text-sm text-amber-300">Polar Sandbox accepts test payment details.</p>}
+            </div>
+          )}
+          {plan?.tier === "free" && plan.checkoutUnavailableReason === "subscription" && (
+            <p className="text-sm text-zinc-300">{plan.status === "refunded"
+              ? "Pro access and included credits have ended for this refunded billing period. Use Manage billing to review your subscription."
+              : "Manage your existing subscription to restore access to Pro."}</p>
+          )}
           <div className="flex flex-wrap gap-2">
-            {plan?.checkoutAvailable && <button type="button" disabled={busy} className={primaryClass} onClick={() => getBillingLink("checkout")}>Get Pro checkout link</button>}
             {plan?.portalAvailable && <button type="button" disabled={busy} className={secondaryClass} onClick={() => getBillingLink("portal")}>Manage billing</button>}
             <button type="button" disabled={busy} className={secondaryClass} onClick={() => void run(refreshPlan)}>Refresh plan</button>
+            {!desktop && <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode("reset")}>Reset password</button>}
             <button type="button" disabled={busy} className={secondaryClass} onClick={() => void run(async () => {
               const response = await auth.signOut({ scope: "local" });
               if (response.error) throw response.error;
@@ -189,12 +309,12 @@ function AccountPanel() {
               setMode("sign-in");
             })}>Sign out</button>
           </div>
-          {billingLink?.accountId === session.user.id && (
+          {showBillingLink && billingLink && (
             <div className="space-y-2">
-              <a className={primaryClass} href={billingLink.url} target="_blank" rel="noopener noreferrer">
+              <a className={primaryClass} href={billingLink.url} target="_blank" rel="noopener noreferrer" onClick={openInBrowser}>
                 {billingLink.action === "portal" ? "Open billing portal" : "Open secure checkout"}
               </a>
-              {billingLink.action === "checkout" && <p className="text-sm text-zinc-400">Return here after checkout and refresh your plan. Pro appears once the payment provider confirms your subscription.</p>}
+              {billingLink.action === "checkout" && <p className="text-sm text-zinc-400">Return here after checkout. Your plan updates when Polar confirms your subscription.</p>}
             </div>
           )}
         </>
@@ -221,6 +341,7 @@ export default function SubscriptionPage() {
             <tr key={feature} className="border-t border-zinc-800"><th scope="row" className="py-3 pr-3 font-medium">{feature}</th><td className="pr-3 text-zinc-300">{free}</td><td className="text-emerald-300">{pro}</td></tr>
           ))}</tbody>
         </table>
+        <p className="mt-3 text-sm text-zinc-400">Hook Finder uses 1 credit per started 30 minutes of source video. Local clipping and exports have no monthly video quota.</p>
       </section>
     </main>
   );
