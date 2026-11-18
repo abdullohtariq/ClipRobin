@@ -6,8 +6,9 @@ import shutil
 import subprocess
 import sys
 import threading
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 import numpy as np
 
@@ -16,30 +17,35 @@ from app.services.process_utils import get_no_window_subprocess_kwargs
 logger = logging.getLogger(__name__)
 
 
-def get_yunet_model_path() -> Path:
-    """Find or return the path to face_detection_yunet_2023mar.onnx."""
+def _find_model_file(filename: str) -> Path:
+    """Locate an ONNX model file across PyInstaller bundle, service dir, or workspace."""
     # 1. PyInstaller frozen path
     if hasattr(sys, "_MEIPASS"):
-        meipass_path = Path(sys._MEIPASS) / "app" / "models" / "face_detection_yunet_2023mar.onnx"
+        meipass_path = Path(sys._MEIPASS) / "app" / "models" / filename
         if meipass_path.is_file():
             return meipass_path
 
     # 2. Relative to this service file
-    service_model = Path(__file__).resolve().parent.parent / "models" / "face_detection_yunet_2023mar.onnx"
+    service_model = Path(__file__).resolve().parent.parent / "models" / filename
     if service_model.is_file():
         return service_model
 
     # 3. Project root relative
-    root_model = Path(__file__).resolve().parents[3] / "backend" / "app" / "models" / "face_detection_yunet_2023mar.onnx"
+    root_model = Path(__file__).resolve().parents[3] / "backend" / "app" / "models" / filename
     if root_model.is_file():
         return root_model
 
     # 4. Working directory relative
-    cwd_model = Path("backend/app/models/face_detection_yunet_2023mar.onnx").resolve()
+    cwd_model = (Path("backend/app/models") / filename).resolve()
     if cwd_model.is_file():
         return cwd_model
 
-    raise FileNotFoundError("YuNet face detection ONNX model not found")
+    raise FileNotFoundError(f"Face detection ONNX model '{filename}' not found")
+
+
+def get_yunet_model_path() -> Path:
+    """Find or return the path to face_detection_yunet_2023mar.onnx."""
+    return _find_model_file("face_detection_yunet_2023mar.onnx")
 
 
 def _stream_rotation(stream: dict[str, Any]) -> int:
@@ -192,7 +198,6 @@ def _is_speech_active(t: float, speech_windows: list[tuple[float, float]]) -> bo
     return False
 
 
-
 BACKCHANNEL_WORDS = {
     "yeah", "yep", "yes", "mm", "hm", "hmm", "mm-hm", "mmhm", "mhm", "mmhmm",
     "uh", "huh", "uh-huh", "uhhuh", "right", "okay", "ok", "sure", "ah",
@@ -280,7 +285,8 @@ def _merge_short_shots(
 ) -> list[dict[str, Any]]:
     """
     Merge shots shorter than min_duration into adjacent dominant shots in Pass 2.
-    Eliminates forward-locking during frame tracking and absorbs transient blips.
+    Eliminates forward-locking during frame tracking and absorbs transient blips,
+    while respecting hard visual scene cuts (`scene_locked=True`).
     """
     if len(shots) <= 1:
         return shots
@@ -292,6 +298,8 @@ def _merge_short_shots(
         for i in range(len(shots)):
             shot = shots[i]
             dur = shot["end"] - shot["start"]
+            if shot.get("scene_locked") and dur >= 0.75:
+                continue
             if dur < min_duration:
                 if i == 0:
                     shots[1]["start"] = shot["start"]
@@ -349,25 +357,26 @@ def _compute_iou(box1: tuple[float, float, float, float], box2: tuple[float, flo
 # ---------------------------------------------------------------------------
 # Bump whenever the analysis algorithm changes so stale tracking_analysis.json
 # caches produced by older code are recomputed instead of silently reused.
-ANALYSIS_VERSION = 6
+ANALYSIS_VERSION = 8
 
 SAMPLE_FPS = 4.0             # face sampling cadence (250 ms) - enough for lip-motion cues
-SAMPLE_WIDTH = 640           # detector input width; faces >= ~20px here are reliable for YuNet
-MIN_FACE_PX = 20             # ignore detections smaller than this (in sample pixels)
-DETECTION_THRESHOLD = 0.6    # YuNet confidence
+SAMPLE_WIDTH = 640           # width in pixels for face detection
+MIN_FACE_PX = 10             # ignore detections smaller than this (in sample pixels; ~20px in 720p)
+DETECTION_THRESHOLD = 0.52   # SCRFD confidence threshold
+YUNET_THRESHOLD = 0.62       # YuNet confidence threshold
 MIN_TRACK_FRAMES = 3         # tracks seen < 3 samples (0.75 s) are treated as detector noise
 TRACK_LOST_SECONDS = 1.5     # track leaves the active set after this long unseen
 REID_SECONDS = 4.0           # a lost track can be re-identified (same id) within this window
 HOLD_SECONDS = 2.5           # keep framing a speaker this long after their face disappears
 SWITCH_FRACTION = 0.35       # target moves > 35% of crop width => hard cut
 DEAD_ZONE_FRACTION = 0.08    # target moves < 8% of crop width => ignore (micro jitter)
-TWO_SHOT_ENTER = 0.85        # kept for legacy reference; 9:16 framing centers active speaker
-TWO_SHOT_EXIT = 0.92         # kept for legacy reference
+TWO_SHOT_ENTER = 0.78        # when two faces + padding fit within 78% of crop_w, frame both
+TWO_SHOT_EXIT = 0.86         # hysteresis exit threshold for two-shot framing
 MIN_SHOT_SECONDS = 1.6       # no shot shorter than this survives (anti strobe-cut)
 PAN_SECONDS = 0.6            # same-subject re-framing eases over this long instead of jumping
 J_CUT_LEAD = 0.15            # cut to the new speaker 150 ms before their first word
 SPEECH_SCORE_FLOOR = 0.012   # minimum lip-motion score to call someone the active speaker
-SPEAKER_MARGIN = 1.2         # winner must beat the runner-up by 20% or we keep the current speaker
+SPEAKER_MARGIN = 1.22        # winner must beat the runner-up by 22% or we keep the current speaker
 
 _VIDEO_SUFFIXES = {
     ".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v", ".flv", ".ts", ".mpg", ".mpeg", ".wmv",
@@ -375,6 +384,336 @@ _VIDEO_SUFFIXES = {
 
 _ANALYSIS_LOCKS: dict[str, threading.Lock] = {}
 _ANALYSIS_LOCKS_GUARD = threading.Lock()
+_MODEL_LOCK = threading.Lock()
+_EXTERNAL_FACE_MODELS_ENV = "CLIPROBIN_FACE_MODEL_DIR"
+
+
+def _is_plausible_face(
+    bbox: tuple[float, float, float, float],
+    landmarks: np.ndarray | None,
+    frame_w: int = 640,
+    frame_h: int = 360,
+) -> bool:
+    """Validate bounding box aspect ratio and anatomical 5-point landmark geometry.
+
+    Eliminates false positives on circular wall decorations, backs of heads/necks,
+    or background objects where landmarks are inverted, collapsed, or squished into a corner.
+    """
+    x, y, w, h = bbox
+    if w < MIN_FACE_PX or h < MIN_FACE_PX:
+        return False
+    if w > frame_w * 0.92 or h > frame_h * 0.95:
+        return False
+    aspect = w / max(1.0, h)
+    if not (0.40 <= aspect <= 1.45):
+        return False
+
+    if landmarks is None or landmarks.shape != (5, 2) or not np.any(landmarks != 0):
+        return True
+
+    reye, leye, nose, rm, lm = landmarks
+    margin_x = w * 0.20
+    margin_y = h * 0.20
+    for lx, ly in landmarks:
+        if not ((x - margin_x) <= lx <= (x + w + margin_x) and (y - margin_y) <= ly <= (y + h + margin_y)):
+            return False
+
+    eye_cy = 0.5 * (float(reye[1]) + float(leye[1]))
+    mouth_cy = 0.5 * (float(rm[1]) + float(lm[1]))
+    # Eyes must be meaningfully above the mouth
+    if (mouth_cy - eye_cy) < 0.14 * h:
+        return False
+
+    # Nose must sit vertically between eye line and mouth line (with pitch tolerance)
+    nose_y = float(nose[1])
+    if nose_y < (eye_cy - 0.10 * h) or nose_y > (mouth_cy + 0.12 * h):
+        return False
+
+    # Total vertical span of landmarks must cover a reasonable fraction of the box height
+    ys = landmarks[:, 1]
+    if float(np.max(ys) - np.min(ys)) < 0.16 * h:
+        return False
+
+    return True
+
+
+def _suppress_parasite_detections(detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Suppress smaller overlapping or halo detections attached to a real higher-confidence face."""
+    if len(detections) <= 1:
+        return detections
+
+    ranked = sorted(
+        detections,
+        key=lambda d: float(d.get("score", 0.7)) * ((d["bbox"][2] * d["bbox"][3]) ** 0.25),
+        reverse=True,
+    )
+    kept: list[dict[str, Any]] = []
+    for cand in ranked:
+        cx, cy, cw, ch = cand["bbox"]
+        c_area = max(1.0, cw * ch)
+        c_center_x = cx + cw * 0.5
+        c_center_y = cy + ch * 0.5
+        c_score = float(cand.get("score", 0.7))
+        is_parasite = False
+
+        for k in kept:
+            kx, ky, kw, kh = k["bbox"]
+            k_area = max(1.0, kw * kh)
+            k_center_x = kx + kw * 0.5
+            k_center_y = ky + kh * 0.5
+            k_score = float(k.get("score", 0.7))
+
+            iou = _compute_iou(cand["bbox"], k["bbox"])
+            if iou >= 0.30:
+                is_parasite = True
+                break
+
+            xi1 = max(cx, kx)
+            yi1 = max(cy, ky)
+            xi2 = min(cx + cw, kx + kw)
+            yi2 = min(cy + ch, ky + kh)
+            inter = max(0.0, xi2 - xi1) * max(0.0, yi2 - yi1)
+            overlap_small = inter / min(c_area, k_area)
+
+            # Parasite halo attached to edge of a larger face (e.g. wall plate behind speaker's ear)
+            if cw < 0.78 * kw and (
+                overlap_small >= 0.18
+                or (
+                    abs(c_center_x - k_center_x) < 0.85 * kw
+                    and abs(c_center_y - k_center_y) < 0.65 * kh
+                    and c_score < k_score - 0.05
+                )
+            ):
+                is_parasite = True
+                break
+
+        if not is_parasite:
+            kept.append(cand)
+    return kept
+
+
+class _SCRFDDetector:
+    """Local InsightFace SCRFD-2.5G ONNX face & 5-point keypoint detector."""
+
+    def __init__(self, model_path: Path):
+        import onnxruntime as ort
+
+        sess_opts = ort.SessionOptions()
+        sess_opts.intra_op_num_threads = min(4, max(1, os.cpu_count() or 2))
+        sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_opts.log_severity_level = 3
+
+        available = ort.get_available_providers()
+        preferred = [
+            p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider", "CPUExecutionProvider")
+            if p in available
+        ] or ["CPUExecutionProvider"]
+
+        self.session = ort.InferenceSession(str(model_path), sess_options=sess_opts, providers=preferred)
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_names = [o.name for o in self.session.get_outputs()]
+        self.strides = (8, 16, 32)
+        self.num_anchors = 2
+        self._center_cache: dict[tuple[int, int, int], np.ndarray] = {}
+        self._pad_buffer: np.ndarray | None = None
+
+    def _get_anchor_centers(self, h: int, w: int, stride: int) -> np.ndarray:
+        key = (h, w, stride)
+        cached = self._center_cache.get(key)
+        if cached is not None:
+            return cached
+        anchor_centers = np.stack(np.mgrid[:h, :w][::-1], axis=-1).astype(np.float32)
+        anchor_centers = (anchor_centers * stride).reshape((-1, 2))
+        if self.num_anchors > 1:
+            anchor_centers = np.stack([anchor_centers] * self.num_anchors, axis=1).reshape((-1, 2))
+        self._center_cache[key] = anchor_centers
+        return anchor_centers
+
+    def detect(
+        self,
+        frame_bgr: np.ndarray,
+        score_thresh: float = DETECTION_THRESHOLD,
+        nms_thresh: float = 0.40,
+    ) -> list[dict[str, Any]]:
+        import cv2
+
+        orig_h, orig_w = frame_bgr.shape[:2]
+        pad_w = (orig_w + 31) & ~31
+        pad_h = (orig_h + 31) & ~31
+        if (orig_w, orig_h) == (pad_w, pad_h):
+            inp_img = frame_bgr
+        else:
+            if self._pad_buffer is None or self._pad_buffer.shape != (pad_h, pad_w, 3):
+                self._pad_buffer = np.zeros((pad_h, pad_w, 3), dtype=np.uint8)
+            else:
+                self._pad_buffer.fill(0)
+            self._pad_buffer[:orig_h, :orig_w] = frame_bgr
+            inp_img = self._pad_buffer
+
+        blob = cv2.dnn.blobFromImage(
+            inp_img, 1.0 / 128.0, (pad_w, pad_h), (127.5, 127.5, 127.5), swapRB=True
+        )
+        outs = self.session.run(self.output_names, {self.input_name: blob})
+
+        scores_list: list[np.ndarray] = []
+        bboxes_list: list[np.ndarray] = []
+        kpss_list: list[np.ndarray] = []
+        fmc = 3
+
+        for idx, stride in enumerate(self.strides):
+            scores = outs[idx]
+            bbox_preds = outs[idx + fmc] * stride
+            kps_preds = outs[idx + fmc * 2] * stride
+            if scores.ndim == 3:
+                scores = scores[0]
+                bbox_preds = bbox_preds[0]
+                kps_preds = kps_preds[0]
+
+            fh, fw = pad_h // stride, pad_w // stride
+            anchor_centers = self._get_anchor_centers(fh, fw, stride)
+
+            pos_inds = np.where(scores[:, 0] >= score_thresh)[0]
+            if pos_inds.size == 0:
+                continue
+            pos_scores = scores[pos_inds, 0]
+            pos_bbox_preds = bbox_preds[pos_inds]
+            pos_anchors = anchor_centers[pos_inds]
+
+            x1 = np.clip(pos_anchors[:, 0] - pos_bbox_preds[:, 0], 0.0, float(orig_w))
+            y1 = np.clip(pos_anchors[:, 1] - pos_bbox_preds[:, 1], 0.0, float(orig_h))
+            x2 = np.clip(pos_anchors[:, 0] + pos_bbox_preds[:, 2], 0.0, float(orig_w))
+            y2 = np.clip(pos_anchors[:, 1] + pos_bbox_preds[:, 3], 0.0, float(orig_h))
+            bboxes = np.stack([x1, y1, x2 - x1, y2 - y1], axis=-1)
+
+            pos_kps_preds = kps_preds[pos_inds].reshape((-1, 5, 2))
+            kpss = np.empty_like(pos_kps_preds)
+            kpss[:, :, 0] = pos_anchors[:, 0:1] + pos_kps_preds[:, :, 0]
+            kpss[:, :, 1] = pos_anchors[:, 1:2] + pos_kps_preds[:, :, 1]
+
+            scores_list.append(pos_scores)
+            bboxes_list.append(bboxes)
+            kpss_list.append(kpss)
+
+        if not scores_list:
+            return []
+
+        all_scores = np.concatenate(scores_list, axis=0)
+        all_bboxes = np.concatenate(bboxes_list, axis=0)
+        all_kpss = np.concatenate(kpss_list, axis=0)
+
+        indices = cv2.dnn.NMSBoxes(
+            all_bboxes.tolist(), all_scores.tolist(), score_thresh, nms_thresh
+        )
+        if len(indices) == 0:
+            return []
+
+        results: list[dict[str, Any]] = []
+        for i in np.array(indices).flatten():
+            x, y, w, h = (float(v) for v in all_bboxes[i])
+            lms = all_kpss[i].astype(np.float32)  # (5, 2): right_eye(viewer left), left_eye, nose, right_mouth, left_mouth
+            bbox = (x, y, w, h)
+            if not _is_plausible_face(bbox, lms, frame_w=orig_w, frame_h=orig_h):
+                continue
+            results.append({
+                "bbox": bbox,
+                "score": float(all_scores[i]),
+                "landmarks": lms,
+            })
+
+        return _suppress_parasite_detections(results)
+
+
+class _Landmark106Predictor:
+    """Local InsightFace 2d106det ONNX predictor for accurate lip/mouth articulation (MAR)."""
+
+    def __init__(self, model_path: Path):
+        import onnxruntime as ort
+
+        sess_opts = ort.SessionOptions()
+        sess_opts.intra_op_num_threads = min(2, max(1, os.cpu_count() or 1))
+        sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_opts.log_severity_level = 3
+
+        available = ort.get_available_providers()
+        preferred = [
+            p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CoreMLExecutionProvider", "CPUExecutionProvider")
+            if p in available
+        ] or ["CPUExecutionProvider"]
+
+        self.session = ort.InferenceSession(str(model_path), sess_options=sess_opts, providers=preferred)
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_name = self.session.get_outputs()[0].name
+
+    def predict_lip_metrics(
+        self,
+        frame_bgr: np.ndarray,
+        bbox: tuple[float, float, float, float],
+    ) -> tuple[float, float] | None:
+        """Return (inner_mar, outer_mar) from 106-point facial landmarks."""
+        import cv2
+
+        x, y, w, h = bbox
+        if w < 18.0 or h < 18.0:
+            return None
+        cx, cy = x + w * 0.5, y + h * 0.5
+        size = max(w, h) * 1.5
+        x1 = int(round(cx - size * 0.5))
+        y1 = int(round(cy - size * 0.5))
+        x2 = int(round(cx + size * 0.5))
+        y2 = int(round(cy + size * 0.5))
+
+        H, W = frame_bgr.shape[:2]
+        pad_l = max(0, -x1)
+        pad_t = max(0, -y1)
+        pad_r = max(0, x2 - W)
+        pad_b = max(0, y2 - H)
+        crop = frame_bgr[max(0, y1):min(H, y2), max(0, x1):min(W, x2)]
+        if crop.size == 0:
+            return None
+        if pad_l or pad_t or pad_r or pad_b:
+            crop = cv2.copyMakeBorder(crop, pad_t, pad_b, pad_l, pad_r, cv2.BORDER_CONSTANT, value=0)
+
+        crop_192 = cv2.resize(crop, (192, 192), interpolation=cv2.INTER_LINEAR)
+        blob = cv2.dnn.blobFromImage(crop_192, 1.0, (192, 192), (0, 0, 0), swapRB=True)
+        pred = self.session.run([self.output_name], {self.input_name: blob})[0].reshape((106, 2))
+        pts = (pred + 1.0) * (0.5 * size)
+        pts[:, 0] += x1
+        pts[:, 1] += y1
+
+        mouth_w = float(np.hypot(*(pts[61] - pts[52])))
+        if mouth_w < 3.0:
+            return None
+        inner_v1 = float(np.hypot(*(pts[66] - pts[54])))
+        inner_v2 = float(np.hypot(*(pts[62] - pts[60])))
+        inner_v3 = float(np.hypot(*(pts[70] - pts[57])))
+        outer_v = float(np.hypot(*(pts[63] - pts[53])))
+        inner_mar = (inner_v1 + inner_v2 + inner_v3) / (3.0 * mouth_w)
+        outer_mar = outer_v / mouth_w
+        return inner_mar, outer_mar
+
+
+@lru_cache(maxsize=1)
+def _load_external_face_models(model_dir: Path) -> tuple[_SCRFDDetector | None, _Landmark106Predictor | None]:
+    try:
+        detector = _SCRFDDetector(model_dir / "scrfd_2.5g_bnkps.onnx")
+    except Exception as error:
+        logger.warning("Could not initialize the configured SCRFD detector; using YuNet: %s", error)
+        return None, None
+    try:
+        landmarks = _Landmark106Predictor(model_dir / "2d106det.onnx")
+    except Exception as error:
+        logger.warning("Could not initialize the configured landmark model: %s", error)
+        landmarks = None
+    return detector, landmarks
+
+
+def _get_models() -> tuple[_SCRFDDetector | None, _Landmark106Predictor | None]:
+    """Use external experimental models only when explicitly configured."""
+    directory = os.environ.get(_EXTERNAL_FACE_MODELS_ENV, "").strip()
+    if not directory or getattr(sys, "frozen", False):
+        return None, None
+    with _MODEL_LOCK:
+        return _load_external_face_models(Path(directory).expanduser().resolve())
 
 
 def _normalize_patch(patch: np.ndarray) -> np.ndarray:
@@ -412,10 +751,12 @@ class _FaceTrack:
         self,
         track_id: int,
         bbox: tuple[float, float, float, float],
-        landmarks: np.ndarray,
+        landmarks: np.ndarray | None,
         t: float,
         center_x_orig: float,
         width_orig: float | None = None,
+        inner_mar: float | None = None,
+        outer_mar: float | None = None,
     ):
         self.track_id = track_id
         self.last_bbox = bbox
@@ -426,6 +767,8 @@ class _FaceTrack:
         self.last_mouth_patch: np.ndarray | None = None
         self.last_nose_patch: np.ndarray | None = None
         self.last_jaw_ratio: float | None = _compute_jaw_ratio(landmarks)
+        self.last_inner_mar: float | None = inner_mar
+        self.last_outer_mar: float | None = outer_mar
         # Full-length histories (no caps): Pass 2 needs scores/positions for the whole video.
         self.timestamps: list[float] = [t]
         self.centers: list[float] = [center_x_orig]
@@ -436,13 +779,15 @@ class _FaceTrack:
     def update(
         self,
         bbox: tuple[float, float, float, float],
-        landmarks: np.ndarray,
+        landmarks: np.ndarray | None,
         t: float,
         mouth_patch: np.ndarray | None,
         is_speaking_audio: bool,
         center_x_orig: float,
         nose_patch: np.ndarray | None = None,
         width_orig: float | None = None,
+        inner_mar: float | None = None,
+        outer_mar: float | None = None,
     ):
         gap = t - self.last_t
         self.last_bbox = bbox
@@ -455,17 +800,38 @@ class _FaceTrack:
 
         cur_jaw_ratio = _compute_jaw_ratio(landmarks)
 
-        # Patches more than ~1 s apart are not comparable (head turned, re-identified track):
+        # Patches/landmarks more than ~1 s apart are not comparable (head turned, re-identified track):
         # comparing them would produce fake "mouth motion".
         if gap <= 1.0:
-            motion = _patch_motion(mouth_patch, self.last_mouth_patch)
+            patch_m = _patch_motion(mouth_patch, self.last_mouth_patch)
             if nose_patch is not None and self.last_nose_patch is not None:
                 # Subtract a damped fraction of rigid nose motion so nodding listeners are
                 # suppressed without zeroing out an active speaker who moves their head while talking.
-                motion = max(0.0, motion - 0.45 * _patch_motion(nose_patch, self.last_nose_patch))
-            if cur_jaw_ratio is not None and self.last_jaw_ratio is not None:
-                jaw_delta = min(0.25, abs(cur_jaw_ratio - self.last_jaw_ratio) * 1.2)
-                motion = motion + jaw_delta
+                patch_m = max(0.0, patch_m - 0.45 * _patch_motion(nose_patch, self.last_nose_patch))
+
+            if (
+                inner_mar is not None
+                and outer_mar is not None
+                and self.last_inner_mar is not None
+                and self.last_outer_mar is not None
+            ):
+                # 106-landmark Mouth Aspect Ratio (MAR) temporal articulation
+                d_outer = abs(outer_mar - self.last_outer_mar)
+                d_inner = abs(inner_mar - self.last_inner_mar)
+                mar_delta = min(0.35, d_outer * 2.2 + d_inner * 2.6)
+                # Active lip-parting bonus only when mouth is actually articulating (never rewards static open mouths)
+                open_bonus = (
+                    min(0.10, max(0.0, inner_mar - 0.025) * 1.1)
+                    if (d_outer > 0.008 or d_inner > 0.006 or patch_m > 0.015)
+                    else 0.0
+                )
+                motion = 0.65 * (mar_delta + open_bonus) + 0.35 * patch_m
+            else:
+                motion = patch_m
+                if cur_jaw_ratio is not None and self.last_jaw_ratio is not None:
+                    jaw_delta = min(0.25, abs(cur_jaw_ratio - self.last_jaw_ratio) * 1.2)
+                    motion = motion + jaw_delta
+
             speech_score = motion * (1.5 if is_speaking_audio else 0.1)
             self.score_times.append(t)
             self.scores.append(speech_score)
@@ -476,6 +842,10 @@ class _FaceTrack:
             self.last_nose_patch = nose_patch
         if cur_jaw_ratio is not None:
             self.last_jaw_ratio = cur_jaw_ratio
+        if inner_mar is not None:
+            self.last_inner_mar = inner_mar
+        if outer_mar is not None:
+            self.last_outer_mar = outer_mar
 
     def recent_speech_score(self, window_seconds: float = 1.0) -> float:
         if not self.scores:
@@ -544,7 +914,10 @@ _Visible = tuple[int, float, float]
 class _FaceTracker:
     """Associates per-frame detections into persistent face tracks.
 
-    Detections are dicts with keys: bbox (sample px), landmarks, mouth_patch, nose_patch.
+    Detections are dicts with keys: bbox (sample px), landmarks, mouth_patch, nose_patch,
+    inner_mar, outer_mar.
+    Resets active tracks on hard visual scene cuts so two different camera angles are never
+    merged into the same track.
     """
 
     def __init__(self, scale_to_orig: float = 1.0):
@@ -552,6 +925,7 @@ class _FaceTracker:
         self.all_tracks: dict[int, _FaceTrack] = {}
         self.active: dict[int, _FaceTrack] = {}
         self.next_id = 1
+        self.last_scene_cut_t: float = -1e9
 
     @staticmethod
     def _match_score(track_bbox, det_bbox) -> float:
@@ -570,10 +944,20 @@ class _FaceTracker:
         dist = ((tcx - dcx) ** 2 + (tcy - dcy) ** 2) ** 0.5 / max(tw, dw)
         return (1.0 - dist) if dist < 0.6 else 0.0
 
-    def process(self, t: float, detections: list[dict[str, Any]], is_speech: bool) -> list[_Visible]:
-        for tid, tr in list(self.active.items()):
-            if t - tr.last_t > TRACK_LOST_SECONDS:
-                self.active.pop(tid, None)
+    def process(
+        self,
+        t: float,
+        detections: list[dict[str, Any]],
+        is_speech: bool,
+        is_scene_cut: bool = False,
+    ) -> list[_Visible]:
+        if is_scene_cut:
+            self.active.clear()
+            self.last_scene_cut_t = t
+        else:
+            for tid, tr in list(self.active.items()):
+                if t - tr.last_t > TRACK_LOST_SECONDS:
+                    self.active.pop(tid, None)
 
         # Global greedy assignment (best pairs first) - independent of dict iteration order.
         pairs = []
@@ -591,24 +975,26 @@ class _FaceTracker:
             used_tracks.add(tid)
             assigned[di] = tid
 
-        # Re-identify unmatched detections against recently lost tracks (same person
-        # re-appearing after a head turn / occlusion keeps their id and history).
-        for di, det in enumerate(detections):
-            if di in assigned:
-                continue
-            best_tid, best_s = None, 0.0
-            for tid, tr in self.all_tracks.items():
-                if tid in self.active or tid in used_tracks:
+        # Re-identify unmatched detections against recently lost tracks ONLY within the same visual scene
+        if not is_scene_cut:
+            for di, det in enumerate(detections):
+                if di in assigned:
                     continue
-                if not (0 < t - tr.last_t <= REID_SECONDS):
-                    continue
-                s = self._match_score(tr.last_bbox, det["bbox"])
-                if s > best_s:
-                    best_tid, best_s = tid, s
-            if best_tid is not None:
-                assigned[di] = best_tid
-                used_tracks.add(best_tid)
-                self.active[best_tid] = self.all_tracks[best_tid]
+                best_tid, best_s = None, 0.0
+                for tid, tr in self.all_tracks.items():
+                    if tid in self.active or tid in used_tracks:
+                        continue
+                    if tr.last_t < self.last_scene_cut_t:
+                        continue
+                    if not (0 < t - tr.last_t <= REID_SECONDS):
+                        continue
+                    s = self._match_score(tr.last_bbox, det["bbox"])
+                    if s > best_s:
+                        best_tid, best_s = tid, s
+                if best_tid is not None:
+                    assigned[di] = best_tid
+                    used_tracks.add(best_tid)
+                    self.active[best_tid] = self.all_tracks[best_tid]
 
         visible: list[_Visible] = []
         for di, det in enumerate(detections):
@@ -618,19 +1004,50 @@ class _FaceTracker:
             tid = assigned.get(di)
             if tid is not None:
                 self.active[tid].update(
-                    bbox, det.get("landmarks"), t, det.get("mouth_patch"), is_speech, cx,
-                    nose_patch=det.get("nose_patch"), width_orig=w,
+                    bbox,
+                    det.get("landmarks"),
+                    t,
+                    det.get("mouth_patch"),
+                    is_speech,
+                    cx,
+                    nose_patch=det.get("nose_patch"),
+                    width_orig=w,
+                    inner_mar=det.get("inner_mar"),
+                    outer_mar=det.get("outer_mar"),
                 )
             else:
                 tid = self.next_id
                 self.next_id += 1
-                tr = _FaceTrack(tid, bbox, det.get("landmarks"), t, cx, width_orig=w)
+                tr = _FaceTrack(
+                    tid,
+                    bbox,
+                    det.get("landmarks"),
+                    t,
+                    cx,
+                    width_orig=w,
+                    inner_mar=det.get("inner_mar"),
+                    outer_mar=det.get("outer_mar"),
+                )
                 tr.last_mouth_patch = det.get("mouth_patch")
                 tr.last_nose_patch = det.get("nose_patch")
                 self.active[tid] = tr
                 self.all_tracks[tid] = tr
             visible.append((tid, cx, w))
         return visible
+
+
+def _detect_scene_cut(curr_grid: np.ndarray, prev_grid: np.ndarray | None) -> bool:
+    """Detect a hard editorial camera cut between two downsampled 32x18 BGR grids."""
+    if prev_grid is None or curr_grid.shape != prev_grid.shape:
+        return False
+    cell_diff = np.mean(np.abs(curr_grid - prev_grid), axis=2)
+    mean_l1 = float(np.mean(cell_diff))
+    frac_changed = float(np.mean(cell_diff > 15.0))
+    if mean_l1 >= 14.0 and frac_changed >= 0.50:
+        return True
+    if mean_l1 >= 22.0 and float(np.mean(cell_diff > 12.0)) >= 0.40:
+        return True
+    return False
 
 
 def _frame_has_vertical_center_divider(gray: np.ndarray) -> bool:
@@ -644,12 +1061,9 @@ def _frame_has_vertical_center_divider(gray: np.ndarray) -> bool:
         return False
     mid = W // 2
     band = gray[y0:y1, max(0, mid - 3) : min(W, mid + 4)].astype(np.float32)
-    col_stds = np.std(band, axis=0)
-    if float(np.min(col_stds)) <= 10.0:
-        if float(np.std(gray[y0:y1, :])) >= 14.0:
-            return True
-    center_diffs = np.mean(np.abs(np.diff(band, axis=1)), axis=0)
-    center_edge = float(np.max(center_diffs)) if center_diffs.size > 0 else 0.0
+    center_diffs = np.abs(np.diff(band, axis=1))
+    center_edges = np.mean(center_diffs, axis=0)
+    continuity = np.mean(center_diffs >= 18.0, axis=0)
     l_band = gray[y0:y1, max(0, mid - 24) : max(1, mid - 8)].astype(np.float32)
     r_band = gray[y0:y1, min(W - 1, mid + 8) : min(W, mid + 24)].astype(np.float32)
     bg_diffs: list[float] = []
@@ -658,7 +1072,26 @@ def _frame_has_vertical_center_divider(gray: np.ndarray) -> bool:
     if r_band.shape[1] >= 2:
         bg_diffs.append(float(np.median(np.abs(np.diff(r_band, axis=1)))))
     bg_med = max(bg_diffs) if bg_diffs else 0.0
-    return center_edge >= 22.0 and center_edge >= bg_med * 3.0
+    return bool(np.any((continuity >= 0.75) & (center_edges >= max(22.0, bg_med * 3.0))))
+
+
+def _try_two_shot_center(
+    visible: list[_Visible],
+    crop_w: int,
+    split_divider_present: bool = False,
+) -> float | None:
+    """When two co-subjects sit close enough that both faces + margin fit inside the 9:16 crop,
+    return their shared midpoint so neither person is cut in half.
+    """
+    if split_divider_present or len(visible) != 2:
+        return None
+    (_, cx1, w1), (_, cx2, w2) = visible[0], visible[1]
+    left_edge = min(cx1 - w1 * 0.60, cx2 - w2 * 0.60)
+    right_edge = max(cx1 + w1 * 0.60, cx2 + w2 * 0.60)
+    span = right_edge - left_edge
+    if span <= crop_w * TWO_SHOT_ENTER:
+        return 0.5 * (left_edge + right_edge)
+    return None
 
 
 def _clamp_split_screen_target(
@@ -695,6 +1128,7 @@ class _Pass1Director:
         self.last_face_t = -1e9
         self.speaker_id: int | None = None
         self.last_switch_t = -1e9
+        self.last_scene_cut_t = -1e9
 
     def choose(
         self,
@@ -703,22 +1137,35 @@ class _Pass1Director:
         tracks: dict[int, _FaceTrack],
         is_speech: bool,
         split_divider_present: bool = False,
+        is_scene_cut: bool = False,
     ) -> float:
+        if is_scene_cut:
+            self.last_scene_cut_t = t
+            self.speaker_id = None
+
         if not visible:
-            if self.last_cx is not None and t - self.last_face_t <= HOLD_SECONDS:
+            if (
+                not is_scene_cut
+                and self.last_cx is not None
+                and (t - self.last_face_t) <= HOLD_SECONDS
+                and self.last_face_t >= self.last_scene_cut_t
+            ):
                 return self.last_cx
-            # No face for a while (B-roll, slides, screen share): natural center.
+            # No face for a while (B-roll, slides, screen share) or clean scene cut to B-roll: natural center.
             self.speaker_id = None
             return self.frame_center
         self.last_face_t = t
 
         if len(visible) == 1:
             tid, cx, _ = visible[0]
-            if self.speaker_id is not None and tid != self.speaker_id:
-                # If the active speaker just blinked/turned away for a moment, keep holding on them
-                # rather than snapping to a bystander on a 1-frame dropout.
+            if not is_scene_cut and self.speaker_id is not None and tid != self.speaker_id:
                 prev_tr = tracks.get(self.speaker_id)
-                if prev_tr is not None and (t - prev_tr.last_t) <= HOLD_SECONDS and (t - self.last_switch_t) < MIN_SHOT_SECONDS:
+                if (
+                    prev_tr is not None
+                    and prev_tr.last_t >= self.last_scene_cut_t
+                    and (t - prev_tr.last_t) <= HOLD_SECONDS
+                    and (t - self.last_switch_t) < MIN_SHOT_SECONDS
+                ):
                     held_cx = prev_tr.center_x_at_time(t, max_gap=HOLD_SECONDS)
                     if held_cx is not None:
                         self.last_cx = held_cx
@@ -728,9 +1175,14 @@ class _Pass1Director:
             self.last_cx = cx
             return cx
 
+        two_shot_cx = _try_two_shot_center(visible, self.crop_w, split_divider_present=split_divider_present)
+        if two_shot_cx is not None:
+            self.last_cx = two_shot_cx
+            return two_shot_cx
+
         scored = sorted(((tracks[v[0]].recent_speech_score(), v) for v in visible), key=lambda s: s[0], reverse=True)
         (best, best_v), (second, _) = scored[0], scored[1]
-        can_switch = (t - self.last_switch_t) >= MIN_SHOT_SECONDS or self.speaker_id is None
+        can_switch = is_scene_cut or (t - self.last_switch_t) >= MIN_SHOT_SECONDS or self.speaker_id is None
 
         if is_speech and best >= SPEECH_SCORE_FLOOR and best >= SPEAKER_MARGIN * second and can_switch:
             chosen = best_v
@@ -739,14 +1191,16 @@ class _Pass1Director:
             if current_v is not None:
                 chosen = current_v
             else:
-                # Active speaker temporarily missing from `visible` while other faces are present:
-                # hold on the active speaker's last known position during HOLD_SECONDS!
-                prev_tr = tracks.get(self.speaker_id) if self.speaker_id is not None else None
-                held_cx = prev_tr.center_x_at_time(t, max_gap=HOLD_SECONDS) if prev_tr is not None else None
+                prev_tr = tracks.get(self.speaker_id) if (self.speaker_id is not None and not is_scene_cut) else None
+                held_cx = (
+                    prev_tr.center_x_at_time(t, max_gap=HOLD_SECONDS)
+                    if (prev_tr is not None and prev_tr.last_t >= self.last_scene_cut_t)
+                    else None
+                )
                 if held_cx is not None:
                     self.last_cx = held_cx
                     return held_cx
-                chosen = max(visible, key=lambda v: v[2])
+                chosen = best_v if best >= SPEECH_SCORE_FLOOR else max(visible, key=lambda v: v[2])
 
         if chosen[0] != self.speaker_id:
             self.last_switch_t = t
@@ -762,8 +1216,8 @@ class _Pass1Director:
         return clamped_cx
 
 
-def _expand_utterance_windows(utterances: list[dict[str, Any]], target_chunk: float = 1.6) -> list[dict[str, Any]]:
-    """Split long substantive utterances into ~1.6s sub-windows so speaker changes mid-segment are caught."""
+def _expand_utterance_windows(utterances: list[dict[str, Any]], target_chunk: float = 1.8) -> list[dict[str, Any]]:
+    """Split long substantive utterances into ~1.8s sub-windows so speaker changes mid-segment are caught."""
     expanded: list[dict[str, Any]] = []
     for u in utterances:
         if u.get("is_backchannel", False):
@@ -802,8 +1256,9 @@ def _assign_speakers(
     utterances: list[dict[str, Any]],
     tracks: dict[int, _FaceTrack],
     start_offset: float = 0.0,
+    scene_cuts: list[float] | None = None,
 ) -> list[tuple[float, int]]:
-    """Map substantive utterances to face tracks.
+    """Map substantive utterances to face tracks while aligning transitions to visual scene cuts.
 
     Returns speaker changes as (start_time, track_id). The first entry always starts at
     start_offset (0.0 for full scans) so a clip opens on its first speaker immediately.
@@ -812,13 +1267,14 @@ def _assign_speakers(
     assignments: list[tuple[float, int]] = []
     prev_id: int | None = None
     last_switch_t: float = -1e9
+    cuts = sorted(scene_cuts or [])
 
     windows = _expand_utterance_windows(utterances)
     for w in windows:
         s, e = float(w["start"]), float(w["end"])
         cands = [
             tr for tr in eligible
-            if tr.first_t <= e + 0.6 and tr.last_t >= s - 0.6 and tr.samples_in_window(s - 0.6, e + 0.6) > 0
+            if tr.first_t <= e + 0.5 and tr.last_t >= s - 0.5 and tr.samples_in_window(s - 0.4, e + 0.4) > 0
         ]
         if not cands:
             continue
@@ -830,15 +1286,36 @@ def _assign_speakers(
             if top >= SPEECH_SCORE_FLOOR and top >= SPEAKER_MARGIN * second:
                 best = top_tr
             else:
-                # Ambiguous lip evidence: keep the current speaker (stability beats guessing),
-                # otherwise the most prominent (largest) face.
+                # Ambiguous lip evidence: keep the current speaker if still present in this scene,
+                # otherwise prefer the track with higher overall scene speech score, then largest width.
                 best = next((tr for tr in cands if tr.track_id == prev_id), None) or max(
-                    cands, key=lambda tr: tr.mean_width_in_window(s, e)
+                    cands,
+                    key=lambda tr: (
+                        round(float(np.mean(tr.scores)) if tr.scores else 0.0, 3),
+                        tr.mean_width_in_window(s, e),
+                    ),
                 )
+
         if best.track_id != prev_id:
             cut_t = max(start_offset, s - J_CUT_LEAD)
-            if prev_id is not None and (cut_t - last_switch_t) < MIN_SHOT_SECONDS:
-                # Suppress rapid ping-pong switches shorter than MIN_SHOT_SECONDS
+            # Snap speaker cut to visual camera cut if the new track began at a scene cut
+            best_scene_cut = None
+            for sc in cuts:
+                if abs(best.first_t - sc) <= 0.30 and (sc - 0.50 <= cut_t <= sc + 1.80):
+                    best_scene_cut = sc
+                    break
+            if best_scene_cut is not None:
+                cut_t = max(start_offset, best_scene_cut)
+            else:
+                # Never let a 150ms J-cut step backward across a visual scene cut where best wasn't visible yet
+                if best.first_t > cut_t and (best.first_t - cut_t) <= 0.50:
+                    for sc in cuts:
+                        if cut_t < sc <= best.first_t + 0.05:
+                            cut_t = sc
+                            break
+
+            if prev_id is not None and best_scene_cut is None and (cut_t - last_switch_t) < MIN_SHOT_SECONDS:
+                # Suppress rapid ping-pong switches within the same camera angle
                 continue
             assignments.append((cut_t, best.track_id))
             prev_id = best.track_id
@@ -846,6 +1323,33 @@ def _assign_speakers(
 
     if assignments:
         assignments[0] = (start_offset, assignments[0][1])
+
+    # Absorb brief A -> B -> A listener-reaction blips (< 3.5s) within the same visual scene
+    if len(assignments) >= 3:
+        cleaned_assignments = list(assignments)
+        changed = True
+        while changed and len(cleaned_assignments) >= 3:
+            changed = False
+            for i in range(1, len(cleaned_assignments) - 1):
+                t_prev, tid_prev = cleaned_assignments[i - 1]
+                t_curr, tid_curr = cleaned_assignments[i]
+                t_next, tid_next = cleaned_assignments[i + 1]
+                blip_dur = t_next - t_curr
+                if tid_prev == tid_next and tid_curr != tid_prev and blip_dur < 3.5:
+                    # Only absorb if no visual scene cut occurred inside [t_curr, t_next]
+                    has_cut_inside = any((t_curr - 0.15) <= sc <= (t_next + 0.15) for sc in cuts)
+                    tr_prev = tracks.get(tid_prev)
+                    if (
+                        not has_cut_inside
+                        and tr_prev is not None
+                        and tr_prev.samples_in_window(t_curr, t_next) > 0
+                    ):
+                        cleaned_assignments.pop(i + 1)
+                        cleaned_assignments.pop(i)
+                        changed = True
+                        break
+        assignments = cleaned_assignments
+
     return assignments
 
 
@@ -858,8 +1362,8 @@ def _build_target_timeline(
 ) -> list[tuple[float, float, bool]]:
     """Per-sample desired crop center: [(t, center_x, is_speaker_switch)].
 
-    Always centers on a single speaker's face (never the empty midpoint between two faces).
-    Speaker switches are emitted at their exact J-cut time (not snapped to the sample grid).
+    Centers on the active speaker's face (or a clean two-shot when two faces sit shoulder-to-shoulder).
+    Respects visual scene cuts so pre-cut positions are never held across camera changes.
     """
     switch_px = SWITCH_FRACTION * crop_w
     if not assignments:
@@ -867,7 +1371,8 @@ def _build_target_timeline(
         prev_p1: float | None = None
         for item in frames:
             t, _, p1 = item[0], item[1], item[2]
-            is_cut = prev_p1 is not None and abs(p1 - prev_p1) > switch_px
+            is_scene_cut = bool(item[4]) if len(item) >= 5 else False
+            is_cut = is_scene_cut or (prev_p1 is not None and abs(p1 - prev_p1) > switch_px)
             timeline_p1.append((t, p1, is_cut))
             prev_p1 = p1
         return timeline_p1
@@ -876,26 +1381,68 @@ def _build_target_timeline(
     timeline: list[tuple[float, float, bool]] = []
     ai = 0
     prev_target: float | None = None
+    last_scene_cut_t = -1e9
 
     for item in frames:
         t, visible, pass1_cx = item[0], item[1], item[2]
         has_divider = bool(item[3]) if len(item) >= 4 else False
-        switched = False
-        while ai + 1 < len(assignments) and assignments[ai + 1][0] <= t:
+        is_scene_cut = bool(item[4]) if len(item) >= 5 else False
+        if is_scene_cut:
+            last_scene_cut_t = t
+
+        switched = is_scene_cut
+        while ai + 1 < len(assignments) and assignments[ai + 1][0] <= t + 1e-4:
             ai += 1
             switched = True
         speaker = assignments[ai][1]
 
         vis = {tid: (cx, w) for tid, cx, w in visible if tid in eligible_ids or tid == speaker}
-        if speaker in vis:
+        two_shot_cx = _try_two_shot_center(
+            [(tid, cx, w) for tid, (cx, w) in vis.items()],
+            crop_w,
+            split_divider_present=has_divider,
+        )
+
+        if two_shot_cx is not None:
+            target = two_shot_cx
+        elif speaker in vis:
             scx, _ = vis[speaker]
             target = _clamp_split_screen_target(
                 scx, visible, orig_w, crop_w, split_divider_present=has_divider
             )
         else:
-            held = tracks[speaker].interpolated_center_x_at_time(t, max_gap=HOLD_SECONDS) if speaker in tracks else None
-            # Speaker briefly off-screen: hold/interpolate on them. Long gone (B-roll): Pass 1 framing.
-            raw_target = held if held is not None else pass1_cx
+            # Only dead-reckon hold if the speaker was seen in the CURRENT visual scene
+            sp_track = tracks.get(speaker)
+            can_hold = (
+                sp_track is not None
+                and sp_track.last_t >= last_scene_cut_t - 1e-4
+                and sp_track.first_t <= t + 1e-4
+            )
+            held = sp_track.interpolated_center_x_at_time(t, max_gap=HOLD_SECONDS) if can_hold else None
+            if held is not None:
+                raw_target = held
+            elif vis:
+                # If an upcoming assignment within 1.5s uses one of the currently visible tracks, snap to it now
+                upcoming_tid = None
+                if ai + 1 < len(assignments) and (assignments[ai + 1][0] - t) <= 1.5:
+                    cand_tid = assignments[ai + 1][1]
+                    if cand_tid in vis:
+                        upcoming_tid = cand_tid
+                if upcoming_tid is not None:
+                    raw_target = vis[upcoming_tid][0]
+                else:
+                    # Pick visible track with best overall speech score in this scene
+                    best_vis_tid = max(
+                        vis.keys(),
+                        key=lambda tid: (
+                            round(tracks[tid].recent_speech_score(1.5), 3) if tid in tracks else 0.0,
+                            vis[tid][1],
+                        ),
+                    )
+                    raw_target = vis[best_vis_tid][0]
+            else:
+                raw_target = pass1_cx
+
             target = _clamp_split_screen_target(
                 raw_target, visible, orig_w, crop_w, split_divider_present=has_divider
             )
@@ -905,10 +1452,10 @@ def _build_target_timeline(
             switched = True
         prev_target = target
 
-        if switched:
+        if switched and not is_scene_cut:
             cut_t = assignments[ai][0] if assignments[ai][0] <= t else t
             prev_t = timeline[-1][0] if timeline else -1.0
-            if prev_t < cut_t < t and (t - cut_t) <= 0.5:
+            if max(prev_t, last_scene_cut_t) < cut_t < t and (t - cut_t) <= 0.5:
                 timeline.append((cut_t, target, True))
                 timeline.append((t, target, False))
                 continue
@@ -932,41 +1479,72 @@ def _build_shots(
     """Turn the target timeline into stationary speaker-cut shots (optional ease if enabled)."""
     switch_px = SWITCH_FRACTION * crop_w
     dead_px = DEAD_ZONE_FRACTION * crop_w
+    recenter_px = max(dead_px * 2.2, 0.24 * crop_w)
+
+    # First partition by hard switches / large cross-frame jumps so each stationary shot
+    # locks onto the robust median position of the speaker rather than the first raw sample.
+    segments: list[list[tuple[float, float]]] = []
+    cur_seg: list[tuple[float, float]] = []
+    for t, cx, is_switch in timeline:
+        if cur_seg and (
+            (is_switch and abs(cx - float(np.median([p[1] for p in cur_seg]))) > dead_px)
+            or abs(cx - cur_seg[-1][1]) > switch_px
+        ):
+            segments.append(cur_seg)
+            cur_seg = []
+        cur_seg.append((t, cx))
+    if cur_seg:
+        segments.append(cur_seg)
 
     shots: list[dict[str, Any]] = []
-    start = timeline[0][0]
-    anchor = timeline[0][1]
-    pending = 0
-    for t, cx, is_switch in timeline[1:]:
-        d = abs(cx - anchor)
-        reframe = False
-        if d > switch_px or (is_switch and d > dead_px):
-            reframe = True
-        elif d > dead_px:
-            # Subject drifted: only re-frame once the new position persists for 2 samples,
-            # so a single bad detection never moves the camera.
-            pending += 1
-            reframe = pending >= 2
+    for seg_idx, seg in enumerate(segments):
+        seg_end_t = (
+            segments[seg_idx + 1][0][0]
+            if seg_idx + 1 < len(segments)
+            else (timeline[-1][0] + frame_interval + 10.0)
+        )
+        cxs = [p[1] for p in seg]
+        if max(cxs) - min(cxs) <= recenter_px:
+            med_cx = float(np.median(cxs))
+            shots.append({
+                "start": round(seg[0][0], 3),
+                "end": round(seg_end_t, 3),
+                "x": _even_left(med_cx, crop_w, orig_w),
+            })
         else:
+            # Speaker genuinely walked across the frame within a single segment: step only on large sustained shifts
+            sub_start = seg[0][0]
+            anchor = seg[0][1]
+            sub_cxs = [anchor]
             pending = 0
-        if reframe:
-            shots.append({"start": round(start, 3), "end": round(t, 3), "x": _even_left(anchor, crop_w, orig_w)})
-            start, anchor, pending = t, cx, 0
-
-    shots.append({
-        "start": round(start, 3),
-        "end": round(timeline[-1][0] + frame_interval + 10.0, 3),
-        "x": _even_left(anchor, crop_w, orig_w),
-    })
+            for t, cx in seg[1:]:
+                if abs(cx - anchor) > recenter_px:
+                    pending += 1
+                    if pending >= 3:
+                        shots.append({
+                            "start": round(sub_start, 3),
+                            "end": round(t, 3),
+                            "x": _even_left(float(np.median(sub_cxs)), crop_w, orig_w),
+                        })
+                        sub_start, anchor, sub_cxs, pending = t, cx, [cx], 0
+                else:
+                    pending = 0
+                    sub_cxs.append(cx)
+            shots.append({
+                "start": round(sub_start, 3),
+                "end": round(seg_end_t, 3),
+                "x": _even_left(float(np.median(sub_cxs)), crop_w, orig_w),
+            })
 
     merged = _merge_short_shots(shots, min_duration=MIN_SHOT_SECONDS, crop_width=crop_w)
 
     consolidated: list[dict[str, Any]] = []
     for shot in merged:
-        if consolidated and abs(consolidated[-1]["x"] - shot["x"]) <= 4:
-            consolidated[-1]["end"] = shot["end"]
+        shot_clean = {k: v for k, v in shot.items() if k != "scene_locked"}
+        if consolidated and abs(consolidated[-1]["x"] - shot_clean["x"]) <= 8:
+            consolidated[-1]["end"] = shot_clean["end"]
         else:
-            consolidated.append(dict(shot))
+            consolidated.append(shot_clean)
 
     # Stationary Speaker Cuts mode keeps crop stationary between cuts unless allow_ease=True.
     if allow_ease:
@@ -1025,7 +1603,12 @@ def _smooth_and_simplify_segment(
     crop_w: int,
     max_left: int,
 ) -> list[tuple[float, int]]:
-    """Convert raw 4 Hz single-speaker samples into smooth, low-count camera keyframes."""
+    """Convert raw 4 Hz single-speaker samples into smooth, low-count camera keyframes.
+
+    Uses a generous conversational comfort deadzone so seated speakers who naturally gesture
+    with their head do not trigger sea-sick back-and-forth camera swaying, while genuine
+    subject movements across the frame are tracked with smooth gimbal glides.
+    """
     n = len(seg)
     if n <= 1:
         return list(seg)
@@ -1041,21 +1624,21 @@ def _smooth_and_simplify_segment(
             med_xs[i] = sorted([xs[i - 1], xs[i], xs[i + 1]])[1]
         med_xs[-1] = sorted([xs[-3], xs[-2], xs[-1]])[1]
 
-    # 2. Zero-phase Gaussian low-pass filter (sigma = 0.65s) for lag-free trajectory smoothing
+    # 2. Zero-phase Gaussian low-pass filter (sigma = 0.75s) for lag-free trajectory smoothing
     import bisect
 
-    sigma = 0.65
+    sigma = 0.75
     inv_two_sigma_sq = -0.5 / (sigma * sigma)
     smooth_xs: list[float] = []
     for i in range(n):
         ti = times[i]
-        lo = bisect.bisect_left(times, ti - 2.0)
-        hi = bisect.bisect_right(times, ti + 2.0)
+        lo = bisect.bisect_left(times, ti - 2.2)
+        hi = bisect.bisect_right(times, ti + 2.2)
         w_sum = 0.0
         x_sum = 0.0
         for j in range(lo, hi):
             dt = times[j] - ti
-            if abs(dt) > 2.0:
+            if abs(dt) > 2.2:
                 continue
             w = float(np.exp(inv_two_sigma_sq * (dt * dt)))
             w_sum += w
@@ -1063,34 +1646,44 @@ def _smooth_and_simplify_segment(
         val = x_sum / w_sum if w_sum > 0 else med_xs[i]
         smooth_xs.append(max(0.0, min(float(max_left), val)))
 
-    deadzone = max(18.0, 0.06 * crop_w)
+    # 3. Conversational comfort deadzone (~22% of crop_w): if the speaker stays within this zone
+    # for the entire shot, lock the virtual tripod at the median position (zero swaying).
+    tripod_span_limit = max(32.0, 0.22 * crop_w)
     span = max(smooth_xs) - min(smooth_xs)
-
-    # 3. If the speaker stays within the comfort deadzone for the whole segment, lock the tripod
-    if span <= deadzone * 1.25:
+    if span <= tripod_span_limit:
         steady_x = int(round(float(np.median(smooth_xs)))) & ~1
         steady_x = max(0, min(max_left, steady_x))
         return [(times[0], steady_x), (times[-1], steady_x)]
 
-    # 4. Simplify trajectory into inflection-point keyframes via Ramer-Douglas-Peucker
-    pts = list(zip(times, smooth_xs))
-    rdp_eps = max(16.0, 0.04 * crop_w)
+    # 4. Apply hysteresis deadband filter so small conversational head bobbles during a larger pan
+    # are absorbed before RDP simplification.
+    deadband = max(14.0, 0.065 * crop_w)
+    stabilized_xs: list[float] = [smooth_xs[0]]
+    anchor = smooth_xs[0]
+    for sx in smooth_xs[1:]:
+        diff = sx - anchor
+        if abs(diff) > deadband:
+            anchor = sx - (deadband if diff > 0 else -deadband)
+        stabilized_xs.append(anchor)
+
+    pts = list(zip(times, stabilized_xs))
+    rdp_eps = max(18.0, 0.055 * crop_w)
     kf_indices = _rdp_indices(pts, rdp_eps)
 
-    # 5. Enforce minimum pan duration (>= 0.8s) between consecutive keyframes to prevent stepping
-    min_pan_dt = 0.8
+    # 5. Enforce minimum pan duration (>= 1.0s) between consecutive keyframes to prevent stepping
+    min_pan_dt = 1.0
     filtered_indices = [kf_indices[0]]
     for idx in kf_indices[1:-1]:
         if (times[idx] - times[filtered_indices[-1]]) >= min_pan_dt:
             filtered_indices.append(idx)
     if kf_indices[-1] != filtered_indices[-1]:
-        if len(filtered_indices) > 1 and (times[kf_indices[-1]] - times[filtered_indices[-1]]) < 0.4:
+        if len(filtered_indices) > 1 and (times[kf_indices[-1]] - times[filtered_indices[-1]]) < 0.5:
             filtered_indices[-1] = kf_indices[-1]
         else:
             filtered_indices.append(kf_indices[-1])
 
     waypoints: list[tuple[float, int]] = []
-    snap_px = max(18, int(round(0.055 * crop_w)))
+    snap_px = max(22, int(round(0.08 * crop_w)))
     for idx in filtered_indices:
         t = times[idx]
         x = max(0, min(max_left, int(round(smooth_xs[idx])) & ~1))
@@ -1110,7 +1703,7 @@ def _build_smooth_tracking_shots(
 ) -> list[dict[str, Any]]:
     """Build smooth tracking shots with continuous camera gliding for speaker face tracking in 9:16.
 
-    - Hard cuts on speaker switches or large cross-frame jumps (> 35% of crop_w).
+    - Hard cuts on speaker switches, scene cuts, or large cross-frame jumps (> 35% of crop_w).
     - Absorbs short transient segments (< MIN_SHOT_SECONDS) to prevent whip-pans and strobe cuts.
     - Zero-phase Gaussian smoothing + Ramer-Douglas-Peucker keyframe simplification within each shot.
     - Smoothstep (3u^2 - 2u^3) easing between inflection keyframes for continuous gimbal-like follow.
@@ -1131,7 +1724,7 @@ def _build_smooth_tracking_shots(
         even_left = int(round(raw_left)) & ~1
 
         if current_seg and prev_left is not None and (
-            (is_switch and abs(even_left - prev_left) > switch_px * 0.5)
+            (is_switch and abs(even_left - prev_left) > switch_px * 0.30)
             or abs(even_left - prev_left) > switch_px
         ):
             raw_segments.append(current_seg)
@@ -1295,8 +1888,9 @@ def _scan_faces(
     progress_callback: Any | None,
     max_duration: float | None = None,
     start_offset: float = 0.0,
-) -> tuple[list[tuple[float, list[_Visible], float]], dict[int, _FaceTrack], float]:
-    """Decode sampled frames, detect faces, track them and record Pass 1 targets."""
+) -> tuple[list[tuple[Any, ...]], dict[int, _FaceTrack], float]:
+    """Decode sampled frames, detect faces and camera cuts, and record speaking targets.
+    """
     import cv2
 
     sample_w = min(SAMPLE_WIDTH, orig_w)
@@ -1305,14 +1899,17 @@ def _scan_faces(
     sample_h += sample_h % 2
     scale_to_orig = orig_w / float(sample_w)
 
-    detector = cv2.FaceDetectorYN.create(
-        model=str(get_yunet_model_path()),
-        config="",
-        input_size=(sample_w, sample_h),
-        score_threshold=DETECTION_THRESHOLD,
-        nms_threshold=0.3,
-        top_k=5000,
-    )
+    scrfd_detector, lm106_predictor = _get_models()
+    yunet_detector = None
+    if scrfd_detector is None:
+        yunet_detector = cv2.FaceDetectorYN.create(
+            model=str(get_yunet_model_path()),
+            config="",
+            input_size=(sample_w, sample_h),
+            score_threshold=YUNET_THRESHOLD,
+            nms_threshold=0.3,
+            top_k=5000,
+        )
 
     frame_interval = 1.0 / SAMPLE_FPS
     frame_bytes = sample_w * sample_h * 3
@@ -1344,9 +1941,12 @@ def _scan_faces(
 
     tracker = _FaceTracker(scale_to_orig)
     director = _Pass1Director(orig_w, crop_w)
-    frames: list[tuple[float, list[_Visible], float]] = []
+    frames: list[tuple[Any, ...]] = []
     report_every = max(1, int(SAMPLE_FPS * 5))
     frame_idx = 0
+    prev_grid: np.ndarray | None = None
+    prev_was_split: bool = False
+
     try:
         while True:
             if cancel_event is not None and cancel_event.is_set():
@@ -1368,39 +1968,72 @@ def _scan_faces(
 
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((sample_h, sample_w, 3))
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            curr_grid = cv2.resize(frame, (32, 18), interpolation=cv2.INTER_AREA).astype(np.float32)
+            is_scene_cut = _detect_scene_cut(curr_grid, prev_grid)
+            prev_grid = curr_grid
+
             is_speech = _is_speech_active(t, speech_windows)
 
-            _, faces = detector.detect(frame)
-            detections: list[dict[str, Any]] = []
-            if faces is not None:
-                for f in faces:
-                    x, y, w, h = float(f[0]), float(f[1]), float(f[2]), float(f[3])
-                    if w < MIN_FACE_PX or h < MIN_FACE_PX:
-                        continue
-                    lms = f[4:14].reshape((5, 2))  # right_eye, left_eye, nose, right_mouth, left_mouth
-                    reye, leye, nose, rm, lm = lms
-                    mouth_w = max(12, int(abs(lm[0] - rm[0]) * 1.5))
-                    eye_dist = max(8.0, float(np.hypot(*(leye - reye))))
-                    nose_sz = max(8, int(eye_dist * 0.5))
-                    detections.append({
-                        "bbox": (x, y, w, h),
-                        "landmarks": lms,
-                        "mouth_patch": _crop_patch(
-                            gray, (rm[0] + lm[0]) / 2.0, (rm[1] + lm[1]) / 2.0, mouth_w, max(10, int(mouth_w * 0.7)), (24, 16)
-                        ),
-                        "nose_patch": _crop_patch(gray, nose[0], nose[1], nose_sz, nose_sz, (16, 16)),
-                    })
+            raw_dets: list[dict[str, Any]] = []
+            if scrfd_detector is not None:
+                raw_dets = scrfd_detector.detect(frame, score_thresh=DETECTION_THRESHOLD)
+            elif yunet_detector is not None:
+                _, faces = yunet_detector.detect(frame)
+                if faces is not None:
+                    for f in faces:
+                        x, y, w, h = float(f[0]), float(f[1]), float(f[2]), float(f[3])
+                        lms = f[4:14].reshape((5, 2)).astype(np.float32)
+                        score = float(f[14]) if len(f) > 14 else 0.7
+                        bbox = (x, y, w, h)
+                        if _is_plausible_face(bbox, lms, frame_w=sample_w, frame_h=sample_h):
+                            raw_dets.append({"bbox": bbox, "score": score, "landmarks": lms})
+                    raw_dets = _suppress_parasite_detections(raw_dets)
 
-            has_divider = _frame_has_vertical_center_divider(gray)
-            visible = tracker.process(t, detections, is_speech)
+            # Run 106-point lip landmark predictor when disambiguating multiple faces or active speech
+            run_lm106 = lm106_predictor is not None and (len(raw_dets) >= 2 or is_speech)
+            detections: list[dict[str, Any]] = []
+            for di, d in enumerate(raw_dets):
+                x, y, w, h = d["bbox"]
+                lms = d["landmarks"]
+                reye, leye, nose, rm, lm = lms
+                mouth_w = max(12, int(abs(lm[0] - rm[0]) * 1.5))
+                eye_dist = max(8.0, float(np.hypot(*(leye - reye))))
+                nose_sz = max(8, int(eye_dist * 0.5))
+
+                inner_mar: float | None = None
+                outer_mar: float | None = None
+                if run_lm106 and di < 3:
+                    lip_res = lm106_predictor.predict_lip_metrics(frame, d["bbox"])
+                    if lip_res is not None:
+                        inner_mar, outer_mar = lip_res
+
+                detections.append({
+                    "bbox": d["bbox"],
+                    "score": d.get("score", 0.7),
+                    "landmarks": lms,
+                    "mouth_patch": _crop_patch(
+                        gray, (rm[0] + lm[0]) / 2.0, (rm[1] + lm[1]) / 2.0, mouth_w, max(10, int(mouth_w * 0.7)), (24, 16)
+                    ),
+                    "nose_patch": _crop_patch(gray, nose[0], nose[1], nose_sz, nose_sz, (16, 16)),
+                    "inner_mar": inner_mar,
+                    "outer_mar": outer_mar,
+                })
+
+            is_split = _frame_has_vertical_center_divider(gray)
+            if frame_idx > 0 and is_split != prev_was_split:
+                is_scene_cut = True
+            prev_was_split = is_split
+
+            visible = tracker.process(t, detections, is_speech, is_scene_cut=is_scene_cut)
             p1_cx = director.choose(
                 t,
                 visible,
                 tracker.all_tracks,
                 is_speech,
-                split_divider_present=has_divider,
+                split_divider_present=is_split,
+                is_scene_cut=is_scene_cut,
             )
-            frames.append((t, visible, p1_cx, has_divider))
+            frames.append((t, visible, p1_cx, is_split, is_scene_cut))
             frame_idx += 1
     finally:
         if process.poll() is None:
@@ -1534,7 +2167,7 @@ def analyze_speaker_tracking(
     Resolve 9:16 crop timeline for a project:
     - 'locked': Fixed stationary crop at crop_anchor_x without invoking face detection.
     - 'cuts': Stationary speaker-cut framing between active speakers (no pan motion).
-    - 'follow': Smooth YuNet + VAD active-speaker camera gliding.
+    - 'follow': Smooth active-speaker camera gliding.
     """
     key = str(Path(project_directory).resolve())
     with _ANALYSIS_LOCKS_GUARD:
@@ -1611,12 +2244,19 @@ def _analyze_speaker_tracking_locked(
             "shots": [{"start": 0.0, "end": 999999.0, "x": locked_x}],
         }
 
+    model_directory = os.environ.get(_EXTERNAL_FACE_MODELS_ENV, "").strip()
+    model_signature = (
+        hashlib.sha256(model_directory.encode()).hexdigest()
+        if model_directory and not getattr(sys, "frozen", False)
+        else None
+    )
     if cached_data is not None:
         try:
             cached_transcript = cached_data.get("transcript") or {"exists": False}
             if (
                 cached_data.get("version") == ANALYSIS_VERSION
                 and cached_transcript == transcript_sig
+                and cached_data.get("face_model_signature") == model_signature
                 and not cached_data.get("fallback_reason")
             ):
                 if cached_data.get("already_vertical") and "shots" in cached_data:
@@ -1680,6 +2320,7 @@ def _analyze_speaker_tracking_locked(
         "version": ANALYSIS_VERSION,
         "source": signature,
         "transcript": transcript_sig,
+        "face_model_signature": model_signature,
         "source_width": orig_w,
         "source_height": orig_h,
         "crop_width": crop_w,
@@ -1759,12 +2400,18 @@ def _analyze_speaker_tracking_locked(
         _write_cache(analysis_cache, result)
         return result
 
+    scene_cuts = [float(f[0]) for f in frames if len(f) >= 5 and f[4]]
     relevant_utterances = (
         [u for u in speech_utterances if float(u.get("end", 0.0)) >= scan_start_offset]
         if scan_start_offset > 0.0
         else speech_utterances
     )
-    assignments = _assign_speakers(relevant_utterances, tracks, start_offset=scan_start_offset)
+    assignments = _assign_speakers(
+        relevant_utterances,
+        tracks,
+        start_offset=scan_start_offset,
+        scene_cuts=scene_cuts,
+    )
     timeline = _build_target_timeline(frames, tracks, assignments, crop_w, orig_w=orig_w)
     shots_tracked = _build_smooth_tracking_shots(timeline, crop_w, orig_w, frame_interval)
     shots_static = _build_shots(timeline, crop_w, orig_w, frame_interval, allow_ease=False)

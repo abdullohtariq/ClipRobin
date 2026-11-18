@@ -1079,8 +1079,9 @@ function ClipModalViewer({
 // Main Clips Studio Component
 function ProjectClipsContent({ projectId }: { projectId: string }) {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
-  const { isPro, openUpgradeModal, isCaptionStyleAllowed } = useSubscription();
-  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
+  const { isPro, openUpgradeModal, isCaptionStyleAllowed, plan, session } = useSubscription();
+  const hostedHookAccountId = !aiDeveloperStatus?.ai_enabled && plan?.hookCredits ? session?.user.id : undefined;
+  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled || hostedHookAccountId);
   const router = useRouter();
   const [clips, setClips] = useState<Clip[]>([]);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
@@ -1117,11 +1118,11 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
   }, [maxClips, clipCount]);
 
   useEffect(() => {
-    if (aiDeveloperStatus && !aiDeveloperStatus.ai_enabled && generationMode === "ai") {
+    if (aiDeveloperStatus && plan && !aiModeEnabled && generationMode === "ai") {
       setGenerationMode("random");
       try { localStorage.setItem("cliprobin_generation_mode", "random"); } catch {}
     }
-  }, [aiDeveloperStatus, generationMode]);
+  }, [aiDeveloperStatus, aiModeEnabled, generationMode, plan]);
   const [showCaptions, setShowCaptions] = useState(true);
   const [showWatermark, setShowWatermark] = useState(true);
 
@@ -1540,6 +1541,7 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
         {
           trackingMode: effectiveTrackingMode,
           cropAnchorX,
+          hostedHookAccountId,
         },
       );
 
@@ -1943,6 +1945,8 @@ function ProjectClipsContent({ projectId }: { projectId: string }) {
               <ClipSettings
                 variant="compact"
                 aiModeEnabled={aiModeEnabled}
+                includedHookCredits={hostedHookAccountId ? plan?.hookCredits?.availableNow ?? plan?.hookCredits?.remaining : undefined}
+                sourceDuration={sourceDuration}
                 aiModeDisabledReason={aiDeveloperStatus?.reason}
                 generationMode={generationMode}
                 onGenerationModeChange={(mode) => {

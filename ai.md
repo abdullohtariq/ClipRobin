@@ -1,6 +1,6 @@
 # Clip Robin — AI Context, Codebase Audit & Engineering Handbook
 
-> **Clip Robin v0.1.30 engineering handbook.** Section 5 separates current audit findings from the historical changelog. Use the open findings and their acceptance checks when planning fixes or assessing release readiness.
+> **Clip Robin v0.1.31 engineering handbook.** Section 5 records current audit findings and their acceptance checks.
 >
 > **Do NOT delete or overwrite this file.** Maintain and update this context as the project evolves.
 
@@ -14,7 +14,7 @@
 1. **Local by Default**: Media extraction, audio ripping, transcription, active-speaker face tracking, clip slicing, and subtitle/watermark burn-in execute entirely on the user's local machine via FFmpeg, CTranslate2 (`faster-whisper`), OpenCV YuNet ONNX, and Python.
 2. **Optional cloud analysis.** The Studio's AI Hook Finder uses Gemini and sends timestamped transcript text with the user's configured key. The direct `/api/analyze` route also has OpenAI and DeepSeek adapters. Media processing runs locally. YouTube link intake contacts YouTube, and a user-initiated YouTube upload sends the selected rendered clip to YouTube. The first Whisper run may need to download model files.
 3. **Explicit Desktop Boundaries**: Built as a three-tier hybrid desktop architecture:
-   - **Frontend**: Next.js 16 (`16.3.5`, React `19.2.8`, Tailwind CSS v4, TypeScript 5, static export `output: "export"`).
+   - **Frontend**: Next.js 16 (`16.4.6`, React `19.2.8`, Tailwind CSS v4, TypeScript 5, static export `output: "export"`).
    - **Desktop Shell**: Tauri v2 (`2.12.3` Rust crate & `@tauri-apps/api`, NSIS Windows bundle, dynamic port IPC, signed updater).
    - **Local Backend**: FastAPI (Python 3.12+, Uvicorn, `faster-whisper`, `yt-dlp`, OpenCV YuNet ONNX, `httpx`, FFmpeg 7+/9+).
 
@@ -30,7 +30,7 @@ flowchart TD
         TauriPortFinder["Dynamic Port Allocator (TCP 127.0.0.1:0)"]
     end
 
-    subgraph Frontend["Frontend (Next.js 16.3.5 / React 19.2.8)"]
+    subgraph Frontend["Frontend (Next.js 16.4.6 / React 19.2.8)"]
         UI["App Router Pages (/, /projects, /clips, /settings, /subscription)"]
         Providers["QueueProvider & SubscriptionProvider"]
         ClipSettings["Unified ClipSettings, CaptionStylePicker & CustomWatermarkSettings"]
@@ -60,7 +60,7 @@ flowchart TD
         CloudLLM["Gemini in Studio; Gemini, OpenAI, or DeepSeek via /api/analyze"]
         YouTubeAPI["YouTube CDN & YouTube Data API v3"]
         AccountService["Supabase Auth, Postgres and billing function"]
-        PaymentProvider["Lemon Squeezy hosted checkout and signed webhooks"]
+        PaymentProvider["Polar Sandbox hosted checkout and signed webhooks"]
     end
 
     UI --> Providers --> ClipSettings --> ApiClient
@@ -188,7 +188,7 @@ ClipRobin/
 │   │   ├── __tests__/
 │   │   │   ├── project-name-utils.test.mjs # Project name validation & duplicate-check unit tests (4 tests)
 │   │   │   └── version-scripts.test.mjs    # Manifest version synchronization unit tests (2 tests)
-│   │   ├── check-version.mjs          # Verifies package.json, Cargo.toml & tauri.conf.json match (0.1.30)
+│   │   ├── check-version.mjs          # Verifies package.json, Cargo.toml & tauri.conf.json match (0.1.31)
 │   │   ├── set-version.mjs            # Updates version across all 3 manifests simultaneously
 │   │   └── take_screenshots.mjs       # Playwright visual snapshot utility
 │   ├── src/
@@ -220,9 +220,9 @@ ClipRobin/
 │   │   ├── src/
 │   │   │   ├── lib.rs                 # Ephemeral port binding, cliprobin-api sidecar spawn & cleanup
 │   │   │   └── main.rs                # Desktop entry point
-│   │   ├── Cargo.toml                 # Rust crate manifest (v0.1.30)
-│   │   └── tauri.conf.json            # Tauri bundle & updater configuration (v0.1.30)
-│   ├── package.json                   # Frontend manifest (v0.1.30)
+│   │   ├── Cargo.toml                 # Rust crate manifest (v0.1.31)
+│   │   └── tauri.conf.json            # Tauri bundle & updater configuration (v0.1.31)
+│   ├── package.json                   # Frontend manifest (v0.1.31)
 │   ├── tsconfig.json
 │   └── next.config.ts                 # Static export configuration (`output: "export"`)
 ├── requirements/
@@ -285,7 +285,7 @@ ClipRobin/
 | `POST /api/youtube/disconnect` | `routes.youtube` | Clears stored YouTube OAuth tokens (`youtube_auth.json`). |
 | `POST /api/youtube/upload` | `routes.youtube` | Streams rendered clip in 256 KB chunks to YouTube Data API v3 resumable upload. |
 
-Accounts and subscriptions use the hosted `cliprobin-billing` function. Signed-in clients can read their plan, create a hosted checkout, or request a customer portal link. Lemon Squeezy sends signed lifecycle events to the function's `/webhook` endpoint. See the [database and billing setup](supabase/README.md) for the schema and deployment steps.
+Accounts use the hosted `cliprobin-billing` function. The current source connects that function to Polar Sandbox and restricts test checkout and portal sessions to one designated Supabase account. Polar sends signed lifecycle events to `/webhook`. See the [database and billing setup](supabase/README.md) for the schema, secrets, and deployment steps.
 
 ### 4.2 Environment Variables
 
@@ -431,9 +431,53 @@ The November 10, 2026 audit covered the `v0.1.29` checkout. Fixes and regression
 #### P1 Verified billing requires hosted setup and sandbox testing — Local fixes complete; hosted sandbox pending
 
 - **Original reproduction.** Earlier releases allowed local license-key spoofing and unauthenticated local webhook mutations; those paths are removed.
-- **Current status.** Supabase Auth + server-owned Lemon Squeezy verification (`supabase/functions/cliprobin-billing/index.ts`) enforce account ownership and current provider state (`frontend/tests/billing-edge-function.test.mjs`), and `PLAN_FEATURES` matches actual `720×1280, 30 fps` renderer limits.
-- **Still needed.** Provision hosted Supabase Auth + Lemon Squeezy sandbox merchant store and test live checkout, multi-account isolation, idempotent webhook replay, and downgrade transitions externally.
+- **Current status.** Supabase Auth is hosted. Lemon Squeezy closed new store sign-ups on November 16, 2026. The current source integrates Polar checkout and its customer portal with signed webhooks, account-scoped links, and ordered billing updates. Sandbox is the default billing environment. `PLAN_FEATURES` matches actual `720×1280, 30 fps` renderer limits.
+- **Plan and Gemini cost controls.** Pro is priced at $12 USD per month with 20 Hook Finder credits per billing period. Each fresh analysis uses one credit per started 30 minutes. `20261117000000_hook_credits.sql` reserves credits and a conservative spend estimate before Google receives a request, with $1 per-account and configurable project-wide limits. The function pins Gemini 3.5 Flash-Lite and records input, output, and thinking tokens. The existing local cache and bring-your-own-key path are available in the desktop app. The signed-in plan screen explains when checkout is unavailable and shows the credit balance when configured.
+- **Verification.** `frontend/scripts/__tests__/billing.test.mjs` runs both migrations in embedded PostgreSQL and tests a full simulated cycle with Polar and Gemini responses. It exercises activation, account isolation, failed generation, concurrent requests, exhaustion, renewal, cancellation, and loss of access when the subscription ends.
+- **Still needed.** Finish Polar Sandbox sign-in and create the organization, $12 recurring product, restricted API token and webhook. Apply the credit migration, configure secrets and the Google project budget, deploy the Edge Function, and verify checkout, credit use, and renewal against Polar Sandbox from a build that accepts Polar links. The `v0.1.30` installer accepts Lemon Squeezy links. Production requires an approved Polar organization and an updated app release. See the [setup and test instructions](supabase/README.md).
 - **Code.** [Subscription context](frontend/src/lib/subscription-context.tsx) · [Plans page](frontend/app/subscription/page.tsx) · [Billing function](supabase/functions/cliprobin-billing/index.ts) · [Setup and acceptance](supabase/README.md)
+
+#### Account, payment, and credit audit (November 18, 2026)
+
+**Hosted checks.** The existing confirmed account stayed signed in and refreshed to Free in the local app connected to the real Supabase project. The Pro card showed $12/month and disabled checkout with an explanation. Supabase has email signup and confirmation enabled, uses the built-in mail sender, and has Google and GitHub disabled. The Site URL is `http://localhost:3000`. Both allowed account redirects point to loopback addresses. The dashboard listed the original subscription and checkout tables. `billing_hook_requests` and the required custom Polar and Gemini settings were absent. Polar Sandbox was at sign-in.
+
+**Local checks.** The static frontend built successfully. All 13 Node tests and 65 Python tests in the account-adjacent analysis and clip-generation suites passed. Isolated browser tests covered signup prompts, resend, invalid credentials, unconfirmed email, email delivery and rate-limit errors, session persistence, sign-out, a failed plan refresh and retry, checkout link validation, the portal link, Pro activation and balance, cancellation, and the account screen at 390 px. Same-browser password recovery passed on the exported frontend with three simulated response speeds. The development preview missed the reset form with the immediate response and passed with delayed responses. The browser test used simulated Auth email callbacks.
+
+**Credit and payment checks.** The real migrations ran against embedded PostgreSQL with simulated Polar and Gemini APIs. Checkout rejected a production price mismatch. The cycle covered activation, concurrent reservations, exhaustion, invalid or oversized input, failed Gemini output, renewal, failed payment and recovery, cancellation, and expiration. A 30-minute source used one credit and a 30-minute-and-one-second source used two. A synthetic video also rendered through the real local clip route with a simulated Hook Finder response. Changing captions reused the hooks. An out-of-credits response switched generation to Fast Interval and preserved the reason in the job status. These checks incurred no payments, provider calls for Gemini, or outgoing account emails.
+
+| Priority | Finding | Work before launch |
+| --- | --- | --- |
+| Blocker | New public accounts cannot reliably receive confirmation or reset email. Supabase's built-in sender is restricted to project team addresses and is rate-limited. Loopback redirects only reach the account screen when a local server is running on the customer's computer. | Configure an SMTP sender, publish Account & Plans at an HTTPS address, and put its exact URL in Supabase's redirect allowlist and `NEXT_PUBLIC_CLIPROBIN_ACCOUNT_URL` for the desktop build. Test signup, resend, confirmation, and reset with a non-team inbox. [Supabase email delivery](https://supabase.com/docs/guides/auth/auth-smtp) · [Supabase redirects](https://supabase.com/docs/guides/auth/redirect-urls) |
+| Blocker | Paid checkout and included credits are unavailable in the hosted project. The current GitHub `v0.1.30` source accepts Lemon Squeezy billing links. | Finish Polar Sandbox onboarding and create the $12 monthly product and signed webhook. Apply the Hook Finder migration before deploying the updated function. Configure the restricted Polar credentials and the dedicated Gemini key and budget. Verify sandbox checkout from the updated Windows build before publishing it. Verify a second account stays Free. [Setup steps](supabase/README.md) · [Polar Sandbox](https://polar.sh/docs/integrate/sandbox) |
+| High | Expired email links and links opened in another browser returned to sign-in with no explanation. Desktop offers password reset only when the build has a hosted Account & Plans URL. Web sign-in with Google or GitHub requires the providers and frontend flags. | Display safe callback errors with an expired-link or wrong-browser recovery action. Test a fresh reset, an expired link, a different browser, and restart during recovery on the packaged app. Keep the email route usable regardless of optional social sign-in. [Supabase PKCE](https://supabase.com/docs/guides/auth/sessions/pkce-flow) |
+| High | A simulated payment already recorded by Polar left Clip Robin on Free until the signed subscription event was delivered. **Refresh plan** reads Supabase's last subscription state. Repeated refreshes did not recover a missing notification. | Add a payment-pending screen, a server-side way to reconcile the expected checkout against Polar, and help for a confirmed payment that is still pending in the app. Store the checkout identifier and prevent a replacement charge while the first checkout is unresolved. Verify delayed delivery, replay, and repeated checkout attempts. [Polar webhook delivery and redelivery](https://polar.sh/docs/integrate/webhooks/delivery) |
+| High | A simulated order refund left Pro and its credits available while Polar still reported the subscription as active. A failed renewal removed Pro and showed the billing portal, and a later active event restored it. | Define when a current-period refund should end access. Until an entitlement change is implemented, verify the corresponding subscription cancellation or revocation in Polar after any applicable refund. Test full and partial refunds, an older-order refund, and recovery from a failed renewal. [Polar refund behavior](https://polar.sh/docs/api-reference/refunds/create) |
+| High | The project spend cap correctly stopped Gemini, but **Account & Plans** still showed the unused per-account credits. At the documented $5 budget and $0.02 reserved per credit, the shared project can reserve 250 credits per UTC month, equivalent to 12 full 20-credit allowances with 10 left, before counting failed attempts. | Size the paid pilot to the shared budget, show temporary service exhaustion separately from the customer's credit balance, and account for this shared limit when accepting new subscriptions. Verify the cap and alerts with the provider configuration before allowing paid upgrades. |
+| Medium | **Open secure checkout** stayed visible after the same account refreshed to Pro. A simulated provider outage also held the checkout slot until its 30-second reservation expired. | Clear or hide the old link when checkout is no longer available. Show confirmed or pending payment after returning from Polar and make retry feedback explain a checkout that is still being prepared. |
+
+**External acceptance still open.** Test delivery to an ordinary inbox, initial sign-in from a fresh Windows installation, checkout in the external browser, a successful and declined test card, any verification challenge Polar displays, receipt and portal access, a renewal or failed-renewal event from Polar, and use of the hosted credit function with the intended capped Gemini project. No cloud configuration was changed during the audit.
+
+#### Account and billing fixes (November 18, 2026)
+
+| Audit item | Fix in the working copy | Hosted acceptance |
+| --- | --- | --- |
+| Public signup and reset email | The Account & Plans export can be uploaded to Cloudflare Pages at its free HTTPS address. The Clip Robin confirmation and reset templates send customers to that page. Customers confirm the action on the page before the app sends the one-time token to Supabase. The template works across browsers and keeps the token in the URL fragment until the page reads it. | Publish the account page, configure an SMTP sender and the exact HTTPS redirect, and install both templates. Verify signup, resend, and reset with a non-team inbox. |
+| Expired links and password recovery | Account & Plans displays errors for expired, used, or wrong-browser links. It explicitly exchanges legacy PKCE codes after registering the password-recovery listener. After verification it keeps a short account-scoped recovery marker so a page reload can reopen the password form. The Windows build uses Tauri's browser opener for the configured account URL and for Polar links. | Verify the two email link formats and a reset from an installed Windows build. Legacy PKCE requires the browser that requested the link. Configure each optional social provider in Supabase before enabling its sign-in button. |
+| Missing or delayed checkout notification | The billing function records the Polar checkout ID. It checks the provider state on plan refresh, validates the purchase with the signed Clip Robin account claim, and syncs the matching subscription. Confirmed checkouts stay pending until Polar records the payment. Repeated clicks reuse an open link and cannot create a new checkout while Polar reports the previous one unresolved. The app hides the old link when the attempt or plan changes. A failed attempt to create a link releases its slot immediately. | Deploy the new SQL and function. Verify a declined test card and a successful sandbox payment with webhook delivery paused. Re-enable delivery and replay the event. |
+| Refunds and billing portal | The function verifies the order and subscription directly with Polar for an `order.refunded` event. A full refund for the current subscription period ends Pro and its included credits immediately, while the billing portal stays available. The database persists the affected period so a replayed active subscription event cannot restore it. Partial and older refunds preserve the current plan. A later paid period gets a new allowance. | Enable `order.refunded` delivery and `orders:read`. Test a full first-order refund, full renewal refund, a partial refund, an old-order refund, and access to the portal. Manage cancellation in Polar when appropriate. |
+| Shared Gemini budget | The UI shows the balance and the amount available now. The server checks both before reserving a generation and deducts a shared spending reservation for every attempt. Production checkout holds room for current subscriptions and unresolved checkouts before it offers another paid plan. At $5/month, 12 full 20-credit allowances fit before counting additional attempts or usage at differing points in each customer's billing cycle. | Set a dedicated Gemini key and a matching provider-side budget. Check the ledger against actual Gemini usage during the pilot. |
+
+**Verification.** All 13 Node tests passed, including the real migrations in embedded PostgreSQL. The combined scenario covered simultaneous production checkout reservations, immediate retry after a failed provider request, confirmation pending, activation without a webhook, credit reservation and exhaustion, a Gemini error, cancellation, a partial refund, a full current refund, an older invoice refund, and renewal. The 65 related Python tests passed. Deno type checking, ESLint on the changed frontend routes, version manifest checks, and both static builds passed. The packaged account site was served and tested in Edge at 390 px with simulated Supabase and billing responses. The browser covered signup, resend, invalid credentials, expired and wrong-browser links, cross-browser confirmation and password reset, reload during recovery, pending checkout, Pro activation, the portal link, the credit-cap notice, refund, and sign-out. The 58-file ZIP is in `frontend/build/ClipRobin-Account-Site.zip`. These tests incurred no checkout or Gemini charges.
+
+**Dependencies.** Next.js and its ESLint configuration were updated to 16.4.6, and the locked source-map dependency was updated to 1.2.2. The production dependency audit reported zero vulnerabilities after those updates. [Next.js advisory](https://github.com/advisories/GHSA-vcvr-r3jv-pc5j) · [Source map advisory](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)
+
+**Hosted steps pending.** Supabase CLI access needs owner sign-in. The Windows browser connection stopped because it could not verify the dashboard address. Publish the package to the free HTTPS host and configure Supabase email delivery and redirects. Apply `20261117000000_hook_credits.sql` and `20261118000000_billing_reliability.sql` in order, then deploy `cliprobin-billing`. Configure the account URL in the desktop build and in Polar's checkout return settings. Add the Polar Sandbox credentials and connect the capped Gemini project before running the full hosted checkout cycle. The existing `v0.1.30` release predates these changes. Local Windows packaging requires the MSVC linker. [Deployment and verification steps](supabase/README.md)
+
+#### v0.1.31 face tracking and Windows packaging
+
+- **Smart Framing.** Speaker Cuts and Follow Speaker use the bundled YuNet detector with new face geometry checks, camera-cut detection, and suppression of brief cuts to a listener. Divider detection requires a visible edge near the center across most of the frame. Locked Crop uses the chosen anchor without scanning faces. The change invalidates old tracking caches.
+- **Model distribution.** The Windows installer packages OpenCV's MIT-licensed YuNet model and its copyright notice. The SCRFD and 106-point landmark integration is available for source experiments with an explicitly configured `CLIPROBIN_FACE_MODEL_DIR`, a local `onnxruntime` install, and model files the experimenter has rights to use. [YuNet license](backend/app/models/YUNET-LICENSE.txt) · [InsightFace model terms](https://github.com/deepinsight/insightface/tree/master/python-package#license)
+- **Release check.** GitHub Actions starts the packaged Windows backend and verifies the authenticated health endpoint before building the signed NSIS installer and updater metadata. Public account email and Polar checkout still require the hosted configuration above.
 
 #### P1 Queue recovery, silent sources, and project ownership — Resolved on `fixes`
 
@@ -471,7 +515,7 @@ The November 10, 2026 audit covered the `v0.1.29` checkout. Fixes and regression
 #### Release checklist remaining items
 
 1. **MSVC Windows Build & Packaged Verification.** On a Windows build machine with MSVC `link.exe`, build the Tauri NSIS bundle and smoke-test launch, dynamic port + `X-ClipRobin-Token` auth handshake, updater notice, native Save As dialogs, and first-run Whisper model setup.
-2. **Hosted Billing & Live External Flows.** Run Lemon Squeezy sandbox checkout/webhook verification with Supabase Auth, real Gemini/YouTube OAuth test accounts, and qualitative multi-speaker real-footage framing evaluation.
+2. **Hosted Billing & Live External Flows.** Run Polar Sandbox checkout and webhook verification with Supabase Auth, real Gemini/YouTube OAuth test accounts, and qualitative multi-speaker real-footage framing evaluation.
 3. **Keep release documentation aligned.** Verify `ai.md`, `README.md`, `frontend/README.md`, and `website.md` remain synchronized on every version bump via `npm run version:check`.
 
 ### Historical milestones
@@ -612,7 +656,7 @@ The numbered entries below describe earlier changes. They do not close the curre
 | Frontend tests & static checks | **11 passed** (`node --test` across `frontend/tests/`), TypeScript (`npx tsc --noEmit`), ESLint (`npm run lint`), and `npm run version:check` (`0.1.30`) all exited 0. |
 | Production web build | `npm run build -- --webpack` exited 0 and exported static pages for `/`, `/clips`, `/projects`, `/settings`, `/subscription`, and `/_not-found`. |
 | Playwright E2E browser walkthrough | **10/10 online steps + offline Engine Unavailable check exited 0** in headless Microsoft Edge against isolated ephemeral FastAPI (`uvicorn`) + static `frontend/out` + real FFmpeg silent & speech test videos: verified `EngineStatus`, mounted `Change` mouse + keyboard replacement, `Locked Crop` default + `25%` anchor CSS preview, silent video intake + `Time Slice` generation, single-clip `/reframe` (`0.75`), native `<ModalDialog>` `Prepare for TikTok` + `Escape`, `CaptionStylePicker` arrow navigation across `Classic` -> `Robin` -> `Clean` without `UpgradeModal` focus hijack, bidirectional project switching without stale leakage, Settings `720×1280` honesty + switch labels, and backend stop/offline `Engine Unavailable` UI. Zero unexpected HTTP `>=400` responses or page errors (filtering out Next 16 static-export `.__PAGE__.txt?_rsc=` prefetch probes that fall back cleanly to `.html`). |
-| Native & external boundaries | Rust compilation (`cargo check --offline`) blocked locally because MSVC `link.exe` is unavailable on this workstation; Windows NSIS packaging, native `backend_token` IPC startup, native Save As dialogs, and auto-updater remain unverified until built on an MSVC host. Live YouTube OAuth, Gemini API keys, hosted Supabase + Lemon Squeezy sandbox checkout, and qualitative multi-speaker real-footage evaluation were not run against live external accounts. |
+| Native & external boundaries | Rust compilation (`cargo check --offline`) blocked locally because MSVC `link.exe` is unavailable on this workstation; Windows NSIS packaging, native `backend_token` IPC startup, native Save As dialogs, and auto-updater remain unverified until built on an MSVC host. Live YouTube OAuth, Gemini API keys, hosted Polar Sandbox checkout with Supabase, and qualitative multi-speaker real-footage evaluation still need manual verification. |
 
 For a clean setup, install `pytest` as a development dependency before running the backend suite (`setup.ps1` installs backend runtime dependencies).
 
@@ -664,7 +708,7 @@ For a clean setup, install `pytest` as a development dependency before running t
 
 When modifying or extending the Clip Robin codebase, all AI models and contributors must observe the following constraints:
 
-1. **Maintain the Local-First Privacy Boundary**: Never transmit raw video, audio tracks, or local filesystem paths to external network endpoints unless explicitly initiated by the user (e.g., direct YouTube Shorts upload). Only sanitized text transcripts may be sent to user-configured LLM providers.
+1. **Maintain the Local-First Privacy Boundary**: Keep raw video, audio tracks, and filesystem paths on device unless the user explicitly initiates an upload. Opt-in Hook Finder sends timestamped transcript text to Gemini through either the included-credit service or the user's own API key.
 2. **Preserve Documentation Integrity**: Preserve existing docstrings, type annotations, and comments. Keep `ai.md`, `README.md`, `frontend/README.md`, and `website.md` synchronized when routes, versions, or schemas change.
 3. **Cross-Platform & Frozen-Build Path Hygiene**: Always resolve runtime mutable files via `get_projects_dir()` / `CLIPROBIN_PROJECTS_DIR` (never write mutable state under `Path(__file__)`, which points to ephemeral `_MEIPASS` in PyInstaller builds). Use atomic temp-file + `os.replace()` for JSON persistence.
 4. **Non-Blocking & Cancellable Execution**: Offload heavy media/network operations (`yt-dlp`, `faster-whisper`, `ffmpeg`, `cv2`) from request threads and honor `threading.Event` cancellation promptly.

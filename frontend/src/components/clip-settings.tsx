@@ -43,6 +43,8 @@ export interface ClipSettingsProps {
   showWatermark: boolean;
   onShowWatermarkChange: (show: boolean) => void;
   aiModeEnabled: boolean;
+  includedHookCredits?: number;
+  sourceDuration?: number | null;
   aiModeDisabledReason?: string | null;
   faceTracking?: boolean;
   onFaceTrackingChange?: (enabled: boolean) => void;
@@ -75,6 +77,8 @@ export function ClipSettings({
   showWatermark,
   onShowWatermarkChange,
   aiModeEnabled,
+  includedHookCredits,
+  sourceDuration,
   aiModeDisabledReason,
   faceTracking = false,
   onFaceTrackingChange,
@@ -159,7 +163,7 @@ export function ClipSettings({
       label: "AI Hook Finder",
       sublabel: "Gemini moments",
       badge: isPro ? (
-        <Badge variant="purple" size="sm">{aiModeEnabled ? "Dev" : "Off"}</Badge>
+        <Badge variant="purple" size="sm">{includedHookCredits !== undefined ? `${includedHookCredits} credits` : aiModeEnabled ? "Own key" : "Off"}</Badge>
       ) : (
         <Badge variant="amber" size="sm">PRO ✦</Badge>
       ),
@@ -167,7 +171,7 @@ export function ClipSettings({
       tooltip: !isPro
         ? "Gemini AI Hook Finder is a Pro feature. Click to unlock."
         : aiModeEnabled
-        ? "AI Developer Mode uses Gemini to find high-engagement moments"
+        ? "Gemini analyzes the timestamped transcript to find hooks"
         : aiModeDisabledReason || "Add Gemini API Key in Settings to unlock AI Hook Finder",
     },
   ];
@@ -179,6 +183,7 @@ export function ClipSettings({
     }
     onGenerationModeChange(mode);
   };
+  const estimatedCredits = sourceDuration && sourceDuration > 0 ? Math.ceil(sourceDuration / 1800) : null;
 
   const handleWatermarkToggle = (checked: boolean) => {
     if (!checked && !isPro) {
@@ -220,7 +225,10 @@ export function ClipSettings({
             />
             {isPro && aiModeEnabled && generationMode === "ai" && (
               <p className="mt-1.5 text-[11px] text-purple-300/90">
-                Sends timestamped transcript text to Gemini when generating clips.
+                {includedHookCredits === undefined
+                  ? "Sends timestamped transcript text to Gemini using your key."
+                  : "Sends the timestamped transcript to Clip Robin’s hosted service and Gemini. Fresh analyses use 1 credit per started 30 minutes."}
+                {includedHookCredits !== undefined && estimatedCredits !== null && ` Estimated cost for a fresh analysis: ${estimatedCredits} ${estimatedCredits === 1 ? "credit" : "credits"}.`}
               </p>
             )}
           </div>

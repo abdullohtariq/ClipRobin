@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import logging
 import os
@@ -99,6 +101,42 @@ def analyze_transcript(
     validated["provider"] = selected_provider
     if used_model:
         validated["model"] = used_model
+    return validated
+
+
+def analyze_included_hooks(
+    transcript: dict[str, Any], access_token: str, duration: float,
+    max_clip_seconds: int, max_clips: int,
+) -> dict[str, Any]:
+    segments = validate_transcript(transcript)
+    try:
+        payload = access_token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        issuer = claims.get("iss", "")
+    except (AttributeError, binascii.Error, IndexError, ValueError) as error:
+        raise AIAnalyzerError("Sign in again to use included Hook Finder credits.") from error
+    # Restrict the relay to the Supabase project that issued this token. The hosted
+    # function verifies the token before it accesses billing or sends data to Gemini.
+    if not isinstance(issuer, str) or not re.fullmatch(r"https://[a-z0-9]+\.supabase\.co/auth/v1", issuer):
+        raise AIAnalyzerError("Included Hook Finder needs a hosted Supabase account.")
+    endpoint = issuer.removesuffix("/auth/v1") + "/functions/v1/cliprobin-billing"
+    body = {
+        "action": "hooks",
+        "durationSeconds": max(duration, max(segment["end"] for segment in segments)),
+        "clipSeconds": max_clip_seconds,
+        "clipCount": min(max_clips, 100),
+        "segments": [{key: segment[key] for key in ("start", "end", "text")} for segment in segments],
+    }
+    try:
+        response = httpx.post(endpoint, headers={"Authorization": f"Bearer {access_token}"}, json=body, timeout=110)
+        result = response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        raise AIAnalyzerError("Could not reach included Hook Finder.") from error
+    if response.is_error:
+        detail = result.get("error") if isinstance(result, dict) else None
+        raise AIAnalyzerError(detail if isinstance(detail, str) else "Included Hook Finder was unavailable.")
+    validated = validate_analysis(result, segments, max_clip_seconds=max_clip_seconds)
+    validated.update(provider="gemini", model=result.get("model"))
     return validated
 
 

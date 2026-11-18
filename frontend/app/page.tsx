@@ -85,8 +85,9 @@ const getFileDuration = (file: File): Promise<number | null> => {
 
 export default function Home() {
   const { status: aiDeveloperStatus } = useAIDeveloperStatus();
-  const { isPro, isCaptionStyleAllowed, openUpgradeModal } = useSubscription();
-  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled);
+  const { isPro, isCaptionStyleAllowed, openUpgradeModal, plan, session } = useSubscription();
+  const hostedHookAccountId = !aiDeveloperStatus?.ai_enabled && plan?.hookCredits ? session?.user.id : undefined;
+  const aiModeEnabled = Boolean(aiDeveloperStatus?.ai_enabled || hostedHookAccountId);
 
   // Global Video Queue
   const {
@@ -215,13 +216,13 @@ export default function Home() {
   }, [isPro, isCaptionStyleAllowed]);
 
   useEffect(() => {
-    if (aiDeveloperStatus && !aiDeveloperStatus.ai_enabled && generationMode === "ai") {
+    if (aiDeveloperStatus && plan && !aiModeEnabled && generationMode === "ai") {
       setGenerationMode("random");
       try {
         localStorage.setItem("cliprobin_generation_mode", "random");
       } catch {}
     }
-  }, [aiDeveloperStatus, generationMode]);
+  }, [aiDeveloperStatus, aiModeEnabled, generationMode, plan]);
 
   const refreshProjectsList = useCallback(async () => {
     try {
@@ -511,6 +512,7 @@ export default function Home() {
         clipDurationSeconds,
         clipCount,
         generationMode: effectiveGenerationMode,
+        hostedHookAccountId: effectiveGenerationMode === "ai" ? hostedHookAccountId : undefined,
         captionStyle: effectiveCaptionStyle,
         captionAnimation: effectiveCaptionStyle === "classic" ? null : captionAnimation,
         showCaptions,
@@ -1094,6 +1096,8 @@ export default function Home() {
                   variant="full"
                   hideFraming={true}
                   aiModeEnabled={aiModeEnabled}
+                  includedHookCredits={hostedHookAccountId ? plan?.hookCredits?.availableNow ?? plan?.hookCredits?.remaining : undefined}
+                  sourceDuration={sourceDuration}
                   aiModeDisabledReason={aiDeveloperStatus?.reason}
                   generationMode={generationMode}
                   onGenerationModeChange={(mode) => {

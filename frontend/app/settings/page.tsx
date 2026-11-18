@@ -30,7 +30,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 export default function SettingsPage() {
   const { status: aiDevStatus, refresh: refreshAiStatus } = useAIDeveloperStatus();
-  const { isPro, openUpgradeModal, isCaptionStyleAllowed } = useSubscription();
+  const { isPro, plan, openUpgradeModal, isCaptionStyleAllowed } = useSubscription();
 
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isSaved, setIsSaved] = useState(false);
@@ -355,7 +355,7 @@ export default function SettingsPage() {
             </div>
 
             <p className="text-xs text-zinc-400">
-              Gemini finds high-engagement clip moments. When AI Hook Finder runs, timestamped transcript text is sent to Gemini over HTTPS; your API key stays local on this computer.
+              Pro uses included Hook Finder credits when available. Enable Developer Mode to use your own Gemini key. Google bills that usage to your Gemini project.
             </p>
 
             <div className="grid grid-cols-2 gap-3 text-xs">
@@ -366,7 +366,7 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-                <div className="text-zinc-500">AI Hook Finder</div>
+                <div className="text-zinc-500">Hook Finder with your key</div>
                 <div className={aiDevStatus?.ai_enabled ? "mt-1 font-medium text-emerald-400" : "mt-1 font-medium text-zinc-300"}>
                   {aiDevStatus?.ai_enabled ? "Active & Ready" : "Disabled"}
                 </div>
@@ -405,8 +405,15 @@ export default function SettingsPage() {
             </form>
 
             {aiSettingsError && <p role="alert" className="text-xs text-rose-400">{aiSettingsError}</p>}
-            {!aiSettingsError && !aiDevStatus?.ai_enabled && <p className="text-xs text-amber-300/90">{aiDevStatus?.reason || "Checking Gemini status..."}</p>}
-            {aiDevStatus?.ai_enabled && <p className="text-xs text-emerald-300">AI generation is unlocked. The AI Hook Finder option is available in clip settings.</p>}
+            {!aiSettingsError && !aiDevStatus?.ai_enabled && !plan?.hookCredits && <p className="text-xs text-amber-300/90">{aiDevStatus?.reason || "Checking Gemini status..."}</p>}
+            {plan?.hookCredits && !aiDevStatus?.ai_enabled && (
+              <p className="text-xs text-emerald-300">
+                {plan.hookCredits.availableNow ?? plan.hookCredits.remaining} included Hook Finder credits available now.{" "}
+                {(plan.hookCredits.availableNow ?? plan.hookCredits.remaining) < plan.hookCredits.remaining &&
+                  `Your balance is ${plan.hookCredits.remaining}. You can use your own Gemini key or Fast Interval while the spending limit is in effect.`}
+              </p>
+            )}
+            {aiDevStatus?.ai_enabled && <p className="text-xs text-emerald-300">Hook Finder uses your Gemini key. Turn off Developer Mode to use included credits when available.</p>}
           </section>
 
           {/* YouTube Integration Section */}

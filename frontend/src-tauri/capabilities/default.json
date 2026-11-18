@@ -7,6 +7,15 @@
   ],
   "permissions": [
     "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://polar.sh/**" },
+        { "url": "https://sandbox.polar.sh/**" },
+        { "url": "https://*/subscription/" },
+        { "url": "https://*/subscription" }
+      ]
+    },
     "process:allow-restart",
     "updater:default"
   ]

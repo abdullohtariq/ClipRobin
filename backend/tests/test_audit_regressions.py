@@ -722,7 +722,7 @@ def test_locked_crop_zero_face_scan_divider_detection_and_reframe(
     split_frame[:, 318:322] = 5
     assert _frame_has_vertical_center_divider(split_frame) is True
 
-    shared_frame = np.tile(np.linspace(110, 140, 640, dtype=np.uint8), (360, 1))
+    shared_frame = np.tile(np.linspace(20, 220, 640, dtype=np.uint8), (360, 1))
     assert _frame_has_vertical_center_divider(shared_frame) is False
 
     # 2. Locked Crop must never call _scan_faces and honors crop_anchor_x

@@ -604,3 +604,115 @@ def test_get_crop_filter_safe_decimation_on_many_shots():
     # Verify smoothstep parameter is clamped with clip(...,0,1) so decimated shots never overshoot
     assert "clip(" in expr
 
+
+def test_external_face_models_are_opt_in_for_source_runs(tmp_path, monkeypatch):
+    from app.services import smart_framing
+
+    models = (object(), object())
+    directories = []
+
+    def load(directory):
+        directories.append(directory)
+        return models
+
+    monkeypatch.setattr(smart_framing, "_load_external_face_models", load)
+    monkeypatch.delenv("CLIPROBIN_FACE_MODEL_DIR", raising=False)
+    assert smart_framing._get_models() == (None, None)
+    monkeypatch.setenv("CLIPROBIN_FACE_MODEL_DIR", str(tmp_path))
+    monkeypatch.setattr(smart_framing.sys, "frozen", True, raising=False)
+    assert smart_framing._get_models() == (None, None)
+    assert not directories
+    monkeypatch.setattr(smart_framing.sys, "frozen", False)
+    assert smart_framing._get_models() == models
+    assert directories == [tmp_path.resolve()]
+
+
+def test_plausible_face_geometry_and_parasite_suppression():
+    """Verify anatomical landmark checks and parasite halo suppression reject false positives."""
+    import numpy as np
+    from app.services.smart_framing import _is_plausible_face, _suppress_parasite_detections
+
+    # Valid frontal face at (200, 100, 80, 100)
+    valid_lms = np.array([
+        [222.0, 135.0],  # right eye
+        [258.0, 135.0],  # left eye
+        [240.0, 158.0],  # nose
+        [225.0, 178.0],  # right mouth
+        [255.0, 178.0],  # left mouth
+    ], dtype=np.float32)
+    assert _is_plausible_face((200.0, 100.0, 80.0, 100.0), valid_lms) is True
+
+    # Invalid hallucination on back of neck where all 5 landmarks are squished into bottom corner
+    squished_lms = np.array([
+        [270.0, 190.0],
+        [274.0, 192.0],
+        [272.0, 193.0],
+        [271.0, 195.0],
+        [275.0, 195.0],
+    ], dtype=np.float32)
+    assert _is_plausible_face((200.0, 100.0, 80.0, 100.0), squished_lms) is False
+
+    # Parasite wall-plate detection overlapping right temple of real speaker face
+    real_det = {"bbox": (130.0, 65.0, 82.0, 110.0), "score": 0.91, "landmarks": valid_lms}
+    parasite_det = {"bbox": (195.0, 71.0, 42.0, 56.0), "score": 0.69, "landmarks": valid_lms}
+    kept = _suppress_parasite_detections([real_det, parasite_det])
+    assert len(kept) == 1
+    assert kept[0]["bbox"] == real_det["bbox"]
+
+
+def test_scene_cut_isolates_tracks_and_prevents_pre_cut_pan():
+    """Verify hard camera cuts start a clean track and do not merge distinct shots."""
+    import numpy as np
+    from app.services.smart_framing import _FaceTracker, _detect_scene_cut
+
+    tracker = _FaceTracker(scale_to_orig=2.0)
+    lms = np.zeros((5, 2), dtype=np.float32)
+    det_shot_a = [{"bbox": (280.0, 60.0, 80.0, 100.0), "landmarks": lms}]
+    det_shot_b = [{"bbox": (310.0, 65.0, 80.0, 100.0), "landmarks": lms}]
+
+    vis1 = tracker.process(1.0, det_shot_a, is_speech=True, is_scene_cut=False)
+    vis2 = tracker.process(1.25, det_shot_a, is_speech=True, is_scene_cut=False)
+    assert vis1[0][0] == vis2[0][0] == 1
+
+    # Hard camera cut at t=1.50s even though bbox overlaps near center
+    vis3 = tracker.process(1.50, det_shot_b, is_speech=True, is_scene_cut=True)
+    assert vis3[0][0] == 2
+
+    grid_a = np.full((18, 32, 3), 40.0, dtype=np.float32)
+    grid_b = np.full((18, 32, 3), 140.0, dtype=np.float32)
+    assert _detect_scene_cut(grid_b, grid_a) is True
+    assert _detect_scene_cut(grid_a, grid_a) is False
+
+
+def test_aba_listener_reaction_blip_suppression():
+    """Verify brief A -> B -> A listener reaction blips within the same scene are absorbed into A."""
+    import numpy as np
+    from app.services.smart_framing import _FaceTrack, _assign_speakers
+
+    lms = np.zeros((5, 2), dtype=np.float32)
+    tr_a = _FaceTrack(1, (450.0, 60.0, 80.0, 100.0), lms, 0.0, 960.0, width_orig=160.0)
+    tr_b = _FaceTrack(2, (150.0, 60.0, 80.0, 100.0), lms, 0.0, 320.0, width_orig=160.0)
+
+    for i in range(1, 60):
+        t = i * 0.25
+        tr_a.timestamps.append(t)
+        tr_a.centers.append(960.0)
+        tr_a.widths.append(160.0)
+        tr_a.last_t = t
+        tr_a.frame_count += 1
+        tr_a.score_times.append(t)
+        # Track A speaks throughout except a 2.0s pause at t=5..7s where Track B nods
+        tr_a.scores.append(0.02 if 5.0 <= t <= 7.0 else 0.25)
+
+        tr_b.timestamps.append(t)
+        tr_b.centers.append(320.0)
+        tr_b.widths.append(160.0)
+        tr_b.last_t = t
+        tr_b.frame_count += 1
+        tr_b.score_times.append(t)
+        tr_b.scores.append(0.18 if 5.0 <= t <= 7.0 else 0.01)
+
+    utterances = [{"start": 0.0, "end": 14.5, "text": "Continuous monologue from speaker A", "is_backchannel": False}]
+    assignments = _assign_speakers(utterances, {1: tr_a, 2: tr_b}, start_offset=0.0, scene_cuts=[])
+    assert assignments == [(0.0, 1)]
+

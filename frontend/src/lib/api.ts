@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { accountClient } from "./account";
 
 const WEB_API_URL = "http://127.0.0.1:8000";
 let desktopApiUrl: Promise<string> | undefined;
@@ -514,6 +515,7 @@ export async function generateClips(
     onJobCreated?: (jobId: string) => void;
     trackingMode?: TrackingMode;
     cropAnchorX?: number;
+    hostedHookAccountId?: string;
   },
 ): Promise<{ clips: Clip[]; cancelled: boolean }> {
   const apiUrl = await getApiUrl();
@@ -529,9 +531,17 @@ export async function generateClips(
   const anchorQuery = options?.cropAnchorX !== undefined
     ? `&crop_anchor_x=${encodeURIComponent(String(options.cropAnchorX))}`
     : "";
+  let headers: Record<string, string> | undefined;
+  if (generationMode === "ai" && options?.hostedHookAccountId) {
+    const session = (await accountClient?.auth.getSession())?.data.session;
+    if (!session || session.user.id !== options.hostedHookAccountId) {
+      throw new Error("Sign in with the account that requested this Hook Finder job, or switch to Fast Interval.");
+    }
+    headers = { Authorization: `Bearer ${session.access_token}` };
+  }
   const response = await apiFetch(
     `${apiUrl}/api/projects/${encodeURIComponent(projectId)}/generate-clips?show_subtitles=${showSubtitles}&clip_duration_seconds=${clipDurationSeconds}&show_watermark=${showWatermark}${framingQuery}${captionQuery}${animQuery}${countQuery}${modeQuery}${faceTrackingQuery}${trackingModeQuery}${anchorQuery}`,
-    { method: "POST", signal: options?.signal },
+    { method: "POST", signal: options?.signal, headers },
   );
   if (!response.ok) {
     const payload: unknown = await response.json().catch(() => null);
@@ -587,6 +597,9 @@ export async function generateClips(
     }
 
     onProgress?.(job);
+    if (headers && (job.status === "failed" || job.status === "cancelled" || job.status === "completed")) {
+      dispatchWindowEvent("cliprobin:hook-usage-changed");
+    }
     if (job.status === "failed") {
       throw new Error(job.error ?? "Clip generation failed");
     }

@@ -8,10 +8,10 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -360,10 +360,12 @@ def generate_project_clips(
     face_tracking: bool | None = None,
     tracking_mode: str | None = None,
     crop_anchor_x: float | None = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> dict[str, str]:
     if generation_mode not in {"random", "ai"}:
         raise HTTPException(status_code=422, detail="Generation mode must be 'random' or 'ai'.")
-    if generation_mode == "ai":
+    hosted_token = authorization.removeprefix("Bearer ") if authorization and authorization.startswith("Bearer ") else None
+    if generation_mode == "ai" and not hosted_token:
         ai_status = get_ai_developer_status()
         if not ai_status["ai_enabled"]:
             raise HTTPException(status_code=403, detail=ai_status["reason"] or "AI Developer Mode is disabled.")
@@ -431,6 +433,8 @@ def generate_project_clips(
         bg_kwargs["crop_anchor_x"] = crop_anchor_x
     if expected_uid is not None:
         bg_kwargs["expected_uid"] = expected_uid
+    if generation_mode == "ai" and hosted_token:
+        bg_kwargs["hosted_hook_token"] = hosted_token
 
     background_tasks.add_task(
         run_clip_generation,
@@ -469,6 +473,7 @@ def run_clip_generation(
     tracking_mode: str | None = None,
     crop_anchor_x: float | None = None,
     expected_uid: str | None = None,
+    hosted_hook_token: str | None = None,
 ) -> None:
     if expected_uid is None:
         expected_uid = get_project_uid(project_directory)
@@ -539,6 +544,8 @@ def run_clip_generation(
             "face_tracking": face_tracking,
             "job_id": job_id,
         }
+        if hosted_hook_token:
+            gen_kwargs["hosted_hook_token"] = hosted_hook_token
         if tracking_mode is not None:
             gen_kwargs["tracking_mode"] = tracking_mode
         if crop_anchor_x is not None:
