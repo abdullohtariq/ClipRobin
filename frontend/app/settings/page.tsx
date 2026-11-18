@@ -19,22 +19,12 @@ import { CustomWatermarkSettings } from "@/src/components/custom-watermark-setti
 const SETTINGS_STORAGE_KEY = "cliprobin.settings";
 
 interface AppSettings {
-  directory: string;
-  openClips: boolean;
   confirmDelete: boolean;
-  outputFormat: string;
-  aspectRatio: string;
-  quality: string;
   defaultCaptionStyle: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  directory: "data/projects",
-  openClips: true,
   confirmDelete: true,
-  outputFormat: "MP4",
-  aspectRatio: "9:16 (Vertical)",
-  quality: "High",
   defaultCaptionStyle: "classic",
 };
 
@@ -201,8 +191,7 @@ export default function SettingsPage() {
         const candidate = normalizeStyle(parsed.defaultCaptionStyle || activeStyle);
         const safeStyle = isCaptionStyleAllowed(candidate) ? candidate : "classic";
         const nextSettings: AppSettings = {
-          ...DEFAULT_SETTINGS,
-          ...parsed,
+          confirmDelete: parsed.confirmDelete !== false,
           defaultCaptionStyle: safeStyle,
         };
         setSettings(nextSettings);
@@ -231,7 +220,7 @@ export default function SettingsPage() {
     });
   };
 
-  const { directory, openClips, confirmDelete, outputFormat, aspectRatio, quality, defaultCaptionStyle } = settings;
+  const { confirmDelete, defaultCaptionStyle } = settings;
 
   return (
     <main className="min-h-screen bg-[#09090b] text-white p-6 lg:p-10">
@@ -292,103 +281,37 @@ export default function SettingsPage() {
             </p>
             <CustomWatermarkSettings />
           </section>
-          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-5">
-            <h2 className="text-base font-semibold text-white">General</h2>
-            <div>
-              <label htmlFor="settings-directory-input" className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Default project directory
-              </label>
-              <input
-                id="settings-directory-input"
-                value={directory}
-                onChange={(event) => updateSetting("directory", event.target.value)}
-                className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3.5 py-2.5 text-sm text-white placeholder:text-zinc-500 transition-all duration-150 focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-              />
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5">
-                <span className="text-xs text-zinc-300">Automatically open generated clips</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={openClips}
-                  onClick={() => updateSetting("openClips", !openClips)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                    openClips ? "bg-[#10b981]" : "bg-zinc-800"
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                      openClips ? "translate-x-4" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5">
-                <span className="text-xs text-zinc-300">Confirm before deleting projects</span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={confirmDelete}
-                  onClick={() => updateSetting("confirmDelete", !confirmDelete)}
-                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
-                    confirmDelete ? "bg-[#10b981]" : "bg-zinc-800"
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                      confirmDelete ? "translate-x-4" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-          </section>
-
           <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm transition-all duration-150 space-y-4">
-            <h2 className="text-base font-semibold text-white">Video Defaults</h2>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <h2 className="text-base font-semibold text-white">General &amp; Export Behavior</h2>
+
+            <div className="flex items-center justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5">
               <div>
-                <label htmlFor="settings-format-select" className="block text-xs font-medium text-zinc-400 mb-1.5">Output format</label>
-                <select
-                  id="settings-format-select"
-                  value={outputFormat}
-                  onChange={(e) => updateSetting("outputFormat", e.target.value)}
-                  className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                >
-                  <option value="MP4">MP4</option>
-                  <option value="MOV">MOV</option>
-                  <option value="MKV">MKV</option>
-                </select>
+                <span className="text-xs font-medium text-zinc-200">Confirm before deleting projects</span>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  Show a confirmation prompt before removing local project files.
+                </p>
               </div>
-              <div>
-                <label htmlFor="settings-aspect-select" className="block text-xs font-medium text-zinc-400 mb-1.5">Aspect ratio</label>
-                <select
-                  id="settings-aspect-select"
-                  value={aspectRatio}
-                  onChange={(e) => updateSetting("aspectRatio", e.target.value)}
-                  className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                >
-                  <option value="9:16 (Vertical)">9:16 (Vertical)</option>
-                  <option value="Original">Original</option>
-                  <option value="16:9 (Horizontal)">16:9 (Horizontal)</option>
-                </select>
-              </div>
-              <div>
-                <label htmlFor="settings-quality-select" className="block text-xs font-medium text-zinc-400 mb-1.5">Quality</label>
-                <select
-                  id="settings-quality-select"
-                  value={quality}
-                  onChange={(e) => updateSetting("quality", e.target.value)}
-                  className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3 py-2 text-xs text-white focus:border-[#10b981] focus:outline-none focus:ring-2 focus:ring-[#10b981]"
-                >
-                  <option value="High">High</option>
-                  <option value="Original">Original</option>
-                  <option value="Standard">Standard</option>
-                </select>
-              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label="Confirm before deleting projects"
+                aria-checked={confirmDelete}
+                onClick={() => updateSetting("confirmDelete", !confirmDelete)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+                  confirmDelete ? "bg-[#10b981]" : "bg-zinc-800"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
+                    confirmDelete ? "translate-x-4" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="rounded-xl border border-zinc-800/80 bg-[#0c0c0e] p-3.5 text-xs text-zinc-400 flex flex-wrap items-center justify-between gap-2">
+              <span>Output encoding specification</span>
+              <span className="font-mono text-zinc-200">720×1280 • 30 fps H.264/AAC MP4</span>
             </div>
           </section>
 
@@ -432,7 +355,7 @@ export default function SettingsPage() {
             </div>
 
             <p className="text-xs text-zinc-400">
-              Gemini finds high-engagement clip moments from your transcript. Your Gemini API key stays on this computer and is used locally by the backend.
+              Gemini finds high-engagement clip moments. When AI Hook Finder runs, timestamped transcript text is sent to Gemini over HTTPS; your API key stays local on this computer.
             </p>
 
             <div className="grid grid-cols-2 gap-3 text-xs">

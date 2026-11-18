@@ -10,6 +10,7 @@ import { QueueProvider } from "@/src/lib/queue-context";
 import { SubscriptionProvider } from "@/src/lib/subscription-context";
 import { UpgradeModal } from "@/src/components/upgrade-modal";
 import { SubscriptionBadge } from "@/src/components/subscription-badge";
+import { EngineStatus } from "@/src/components/engine-status";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -57,10 +58,7 @@ export default function RootLayout({
               </div>
 
               <div className="hidden md:block pt-4 border-t border-[#232326]">
-                <div className="flex items-center justify-center xl:justify-start gap-2 text-xs text-zinc-500" title="Local Engine Ready">
-                  <span className="size-2 rounded-full bg-[#10b981] animate-pulse shrink-0" />
-                  <span className="hidden xl:inline">Local Engine Ready</span>
-                </div>
+                <EngineStatus variant="sidebar" />
               </div>
             </aside>
 

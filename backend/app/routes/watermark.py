@@ -1,3 +1,4 @@
+import io
 import json
 import logging
 import os
@@ -7,6 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from PIL import Image, ImageFile, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from app.services.project_manager import get_projects_dir
@@ -19,6 +21,8 @@ ALLOWED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 LEGACY_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".svg"}
 ALLOWED_POSITIONS = {"top_right", "top_left", "bottom_right", "bottom_left", "center"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_WATERMARK_DIMENSION = 4096
+MAX_WATERMARK_PIXELS = MAX_WATERMARK_DIMENSION * MAX_WATERMARK_DIMENSION
 
 
 class WatermarkSettingsPayload(BaseModel):
@@ -77,6 +81,38 @@ def _has_valid_image_header(content: bytes, suffix: str) -> bool:
     if suffix == ".webp":
         return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP"
     return False
+
+
+def _validate_and_decode_image(content: bytes, suffix: str) -> None:
+    if not _has_valid_image_header(content, suffix):
+        raise ValueError("Uploaded file is not a valid image")
+    expected_formats = {
+        ".png": {"PNG"},
+        ".jpg": {"JPEG", "MPO"},
+        ".jpeg": {"JPEG", "MPO"},
+        ".webp": {"WEBP"},
+    }.get(suffix, set())
+    prev_max = Image.MAX_IMAGE_PIXELS
+    prev_truncated = ImageFile.LOAD_TRUNCATED_IMAGES
+    try:
+        Image.MAX_IMAGE_PIXELS = MAX_WATERMARK_PIXELS
+        ImageFile.LOAD_TRUNCATED_IMAGES = False
+        with Image.open(io.BytesIO(content)) as img:
+            if expected_formats and (img.format or "").upper() not in expected_formats:
+                raise ValueError("Image format does not match filename extension")
+            w, h = img.size
+            if w <= 0 or h <= 0 or w > MAX_WATERMARK_DIMENSION or h > MAX_WATERMARK_DIMENSION:
+                raise ValueError(f"Watermark image dimensions must be between 1x1 and {MAX_WATERMARK_DIMENSION}x{MAX_WATERMARK_DIMENSION} pixels")
+            if w * h > MAX_WATERMARK_PIXELS:
+                raise ValueError("Watermark image pixel count exceeds safety limit")
+            img.load()
+    except ValueError:
+        raise
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError, SyntaxError) as error:
+        raise ValueError("Malformed or corrupt image file") from error
+    finally:
+        Image.MAX_IMAGE_PIXELS = prev_max
+        ImageFile.LOAD_TRUNCATED_IMAGES = prev_truncated
 
 
 def find_saved_custom_watermark() -> Path | None:
@@ -144,19 +180,12 @@ async def upload_custom_watermark(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Uploaded image file is empty")
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="File too large (maximum 10MB)")
-    if not _has_valid_image_header(content, suffix):
-        raise HTTPException(status_code=400, detail="Uploaded file is not a valid image")
+    try:
+        _validate_and_decode_image(content, suffix)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     wm_dir = get_watermarks_dir()
-    # Remove existing custom watermarks
-    for ext in LEGACY_IMAGE_EXTENSIONS:
-        old_file = wm_dir / f"custom_watermark{ext}"
-        if old_file.is_file():
-            try:
-                old_file.unlink()
-            except Exception:
-                pass
-
     destination = wm_dir / f"custom_watermark{suffix}"
     tmp = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
     try:
@@ -165,6 +194,17 @@ async def upload_custom_watermark(file: UploadFile = File(...)):
     except OSError:
         tmp.unlink(missing_ok=True)
         destination.write_bytes(content)
+
+    # Remove other extension variants only after the new validated watermark is safely in place
+    for ext in LEGACY_IMAGE_EXTENSIONS:
+        if ext == suffix:
+            continue
+        old_file = wm_dir / f"custom_watermark{ext}"
+        if old_file.is_file():
+            try:
+                old_file.unlink()
+            except Exception:
+                pass
     logger.info("Saved custom watermark to %s (%d bytes)", destination, len(content))
 
     return {

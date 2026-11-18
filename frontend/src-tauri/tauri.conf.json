@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' tauri: asset: https://asset.localhost; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost tauri: http://tauri.localhost https://tauri.localhost http://127.0.0.1:* http://localhost:* https://*.supabase.co wss://*.supabase.co; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:* https://*.ytimg.com https://yt3.ggpht.com; media-src 'self' blob: http://127.0.0.1:* http://localhost:*; font-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'"
     }
   },
   "bundle": {

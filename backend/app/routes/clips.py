@@ -16,11 +16,22 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
+from app.services.ai_analyzer import is_safe_clip_id
 from app.services.ai_developer_mode import get_ai_developer_status
 from app.services.caption_styles import ANIMATIONS, CAPTION_STYLES, STYLE_ALIASES
-from app.services.clip_generator import generate_clips, render_single_clip
+from app.services.clip_generator import (
+    cleanup_staged_job,
+    generate_clips,
+    recover_project_generation_state,
+    render_single_clip,
+)
 from app.services.process_utils import get_no_window_subprocess_kwargs
-from app.services.project_manager import get_clips_directory, get_project_directory
+from app.services.project_manager import (
+    get_clips_directory,
+    get_project_directory,
+    get_project_uid,
+    verify_project_ownership,
+)
 from app.services.video_editor import (
     ClipGenerationCancelled,
     VideoEditorError,
@@ -37,6 +48,15 @@ class TopLineRequest(BaseModel):
     caption_style: str | None = None
     caption_animation: str | None = None
     face_tracking: bool | None = None
+    tracking_mode: str | None = None
+    crop_anchor_x: float | None = None
+
+
+class ReframeClipRequest(BaseModel):
+    framing_mode: str | None = None
+    face_tracking: bool | None = None
+    tracking_mode: str | None = None
+    crop_anchor_x: float | None = None
 
 
 router = APIRouter(prefix="/api/projects")
@@ -84,6 +104,8 @@ def _validate_render_options(
     framing_mode: str | None,
     caption_style: str | None,
     caption_animation: str | None,
+    tracking_mode: str | None = None,
+    crop_anchor_x: float | None = None,
 ) -> None:
     if framing_mode is not None and framing_mode not in {"standard", "square_rounded", "true_9_16"}:
         raise HTTPException(
@@ -100,6 +122,64 @@ def _validate_render_options(
         raise HTTPException(
             status_code=422,
             detail=f"Caption animation must be one of: {sorted(ANIMATIONS.keys())}",
+        )
+    if tracking_mode is not None and tracking_mode not in {"locked", "cuts", "follow"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Tracking mode must be 'locked', 'cuts', or 'follow'",
+        )
+    if crop_anchor_x is not None and not (0.0 <= float(crop_anchor_x) <= 1.0):
+        raise HTTPException(
+            status_code=422,
+            detail="Crop anchor must be between 0.0 and 1.0",
+        )
+
+
+def _job_matches_project(
+    job: dict[str, Any],
+    project_id: str,
+    project_directory: Path | None = None,
+    project_uid: str | None = None,
+) -> bool:
+    if job.get("project_id") != project_id:
+        return False
+    job_dir = job.get("project_dir")
+    if project_directory is not None and job_dir:
+        try:
+            if Path(job_dir).resolve() != project_directory.resolve():
+                return False
+        except OSError:
+            if str(job_dir) != str(project_directory):
+                return False
+    job_uid = job.get("project_uid")
+    if project_uid and job_uid and job_uid != project_uid:
+        return False
+    return True
+
+
+def _active_stage_ids_for_project(
+    project_id: str,
+    project_directory: Path | None = None,
+) -> set[str]:
+    expected_uid = get_project_uid(project_directory) if project_directory is not None else None
+    with JOBS_LOCK:
+        return {
+            job["job_id"]
+            for job in GENERATION_JOBS.values()
+            if _job_matches_project(job, project_id, project_directory, expected_uid)
+            and job.get("status") in {"queued", "processing", "cancelling"}
+            and isinstance(job.get("job_id"), str)
+        }
+
+
+def _assert_no_active_generation(
+    project_id: str,
+    project_directory: Path | None = None,
+) -> None:
+    if _active_stage_ids_for_project(project_id, project_directory):
+        raise HTTPException(
+            status_code=409,
+            detail="Wait for clip generation to finish before editing individual clips",
         )
 
 
@@ -234,18 +314,12 @@ def project_or_404(project_id: str) -> Path:
 
 def finish_cancelled_job(job_id: str, project_id: str) -> None:
     try:
-        clips_directory = get_clips_directory(project_id)
-        for generated_clip in clips_directory.glob("*.mp4"):
-            generated_clip.unlink()
-        for partial_clip in clips_directory.glob(".rendering_*.mp4"):
-            try:
-                partial_clip.unlink()
-            except OSError:
-                pass
-    except FileNotFoundError:
+        project_directory = get_project_directory(project_id)
+        cleanup_staged_job(project_directory, job_id)
+    except (FileNotFoundError, ValueError):
         pass
     except OSError as error:
-        logger.exception("Could not remove generated clips after cancelling project %s", project_id)
+        logger.exception("Could not clean up staged job %s after cancelling project %s", job_id, project_id)
         with JOBS_LOCK:
             job = GENERATION_JOBS.get(job_id)
             if job is not None:
@@ -263,7 +337,7 @@ def finish_cancelled_job(job_id: str, project_id: str) -> None:
         if job is not None:
             job.update({
                 "status": "cancelled",
-                "step": "Cancelled; generated clips removed",
+                "step": "Cancelled; previous clips kept",
                 "ready_clips": [],
                 "completed_clips": 0,
             })
@@ -284,6 +358,8 @@ def generate_project_clips(
     caption_style: str | None = None,
     caption_animation: str | None = None,
     face_tracking: bool | None = None,
+    tracking_mode: str | None = None,
+    crop_anchor_x: float | None = None,
 ) -> dict[str, str]:
     if generation_mode not in {"random", "ai"}:
         raise HTTPException(status_code=422, detail="Generation mode must be 'random' or 'ai'.")
@@ -301,16 +377,23 @@ def generate_project_clips(
             status_code=422,
             detail="Clip count must be at least 1",
         )
-    _validate_render_options(framing_mode, caption_style, caption_animation)
+    _validate_render_options(
+        framing_mode,
+        caption_style,
+        caption_animation,
+        tracking_mode=tracking_mode,
+        crop_anchor_x=crop_anchor_x,
+    )
 
     project_directory = project_or_404(project_id)
+    expected_uid = get_project_uid(project_directory)
     job_id = uuid.uuid4().hex
     global _JOB_SEQ
     with JOBS_LOCK:
         active_job = next(
             (
                 job for job in GENERATION_JOBS.values()
-                if job["project_id"] == project_id
+                if _job_matches_project(job, project_id, project_directory, expected_uid)
                 and job["status"] in {"queued", "processing", "cancelling"}
             ),
             None,
@@ -326,16 +409,28 @@ def generate_project_clips(
         GENERATION_JOBS[job_id] = {
             "job_id": job_id,
             "project_id": project_id,
+            "project_dir": str(project_directory.resolve()),
+            "project_uid": expected_uid,
             "status": "queued",
             "step": "Preparing clip analysis",
             "progress": 0,
             "completed_clips": 0,
             "total_clips": 0,
             "ready_clips": [],
+            "requested_generation_mode": generation_mode,
+            "applied_generation_mode": generation_mode,
             "created_seq": _JOB_SEQ,
             "created_at": time.monotonic(),
         }
         CANCEL_EVENTS[job_id] = cancel_event
+
+    bg_kwargs: dict[str, Any] = {}
+    if tracking_mode is not None:
+        bg_kwargs["tracking_mode"] = tracking_mode
+    if crop_anchor_x is not None:
+        bg_kwargs["crop_anchor_x"] = crop_anchor_x
+    if expected_uid is not None:
+        bg_kwargs["expected_uid"] = expected_uid
 
     background_tasks.add_task(
         run_clip_generation,
@@ -352,6 +447,7 @@ def generate_project_clips(
         caption_style,
         caption_animation,
         face_tracking,
+        **bg_kwargs,
     )
     return {"job_id": job_id}
 
@@ -370,14 +466,20 @@ def run_clip_generation(
     caption_style: str | None = None,
     caption_animation: str | None = None,
     face_tracking: bool | None = None,
+    tracking_mode: str | None = None,
+    crop_anchor_x: float | None = None,
+    expected_uid: str | None = None,
 ) -> None:
+    if expected_uid is None:
+        expected_uid = get_project_uid(project_directory)
+
     def report_progress(
         step: str,
         completed_clips: int,
         total_clips: int,
         clip_metadata: dict[str, Any] | None = None,
     ) -> None:
-        if cancel_event.is_set():
+        if cancel_event.is_set() or not verify_project_ownership(project_directory, expected_uid):
             return
         if step == "Preparing clip analysis":
             progress = 3
@@ -398,7 +500,6 @@ def run_clip_generation(
                     pct_val = int(step.split(":")[-1].replace("%", "").strip())
                 except Exception:
                     pct_val = 0
-            # Scale from 10% to 25% smoothly during tracking analysis
             progress = 10 + round((pct_val / 100.0) * 15)
         elif step == "Rendering clips":
             progress = 25 + round(completed_clips / max(total_clips, 1) * 70)
@@ -411,6 +512,8 @@ def run_clip_generation(
                     ready = job.setdefault("ready_clips", [])
                     if not any(c.get("id") == clip_metadata.get("id") for c in ready):
                         ready.append(clip_metadata)
+                    if "applied_generation_mode" in clip_metadata:
+                        job["applied_generation_mode"] = clip_metadata["applied_generation_mode"]
                 job.update({
                     "status": "processing",
                     "step": step,
@@ -420,20 +523,27 @@ def run_clip_generation(
                 })
 
     try:
-        clips = generate_clips(
-            project_directory,
-            show_subtitles=show_subtitles,
-            show_watermark=show_watermark,
-            progress_callback=report_progress,
-            cancel_event=cancel_event,
-            max_clip_seconds=clip_duration_seconds,
-            requested_clip_count=clip_count,
-            generation_mode=generation_mode,
-            framing_mode=framing_mode,
-            caption_style=caption_style,
-            caption_animation=caption_animation,
-            face_tracking=face_tracking,
-        )
+        if not verify_project_ownership(project_directory, expected_uid):
+            raise ClipGenerationCancelled("Project was deleted or replaced")
+        gen_kwargs: dict[str, Any] = {
+            "show_subtitles": show_subtitles,
+            "show_watermark": show_watermark,
+            "progress_callback": report_progress,
+            "cancel_event": cancel_event,
+            "max_clip_seconds": clip_duration_seconds,
+            "requested_clip_count": clip_count,
+            "generation_mode": generation_mode,
+            "framing_mode": framing_mode,
+            "caption_style": caption_style,
+            "caption_animation": caption_animation,
+            "face_tracking": face_tracking,
+            "job_id": job_id,
+        }
+        if tracking_mode is not None:
+            gen_kwargs["tracking_mode"] = tracking_mode
+        if crop_anchor_x is not None:
+            gen_kwargs["crop_anchor_x"] = crop_anchor_x
+        clips = generate_clips(project_directory, **gen_kwargs)
     except ClipGenerationCancelled:
         finish_cancelled_job(job_id, project_id)
         return
@@ -442,6 +552,10 @@ def run_clip_generation(
             finish_cancelled_job(job_id, project_id)
             return
         logger.exception("Clip generation failed for project %s", project_id)
+        try:
+            cleanup_staged_job(project_directory, job_id)
+        except Exception:
+            pass
         with JOBS_LOCK:
             job = GENERATION_JOBS.get(job_id)
             if job is not None:
@@ -455,6 +569,16 @@ def run_clip_generation(
             CANCEL_EVENTS.pop(job_id, None)
             evict_old_generation_jobs()
         return
+
+    committed_opts: dict[str, Any] = {}
+    analysis_file = project_directory / "analysis.json"
+    if analysis_file.is_file():
+        try:
+            loaded_analysis = json.loads(analysis_file.read_text(encoding="utf-8"))
+            if isinstance(loaded_analysis, dict) and isinstance(loaded_analysis.get("generation_options"), dict):
+                committed_opts = loaded_analysis["generation_options"]
+        except Exception:
+            committed_opts = {}
 
     with JOBS_LOCK:
         if cancel_event.is_set():
@@ -471,6 +595,13 @@ def run_clip_generation(
                     "total_clips": len(clips),
                     "clips": clips,
                     "ready_clips": clips,
+                    "requested_generation_mode": committed_opts.get("requested_generation_mode", generation_mode),
+                    "applied_generation_mode": committed_opts.get("applied_generation_mode", generation_mode),
+                    "ai_provider": committed_opts.get("ai_provider"),
+                    "ai_model": committed_opts.get("ai_model"),
+                    "ai_fallback_reason": committed_opts.get("ai_fallback_reason"),
+                    "applied_tracking_mode": committed_opts.get("applied_tracking_mode"),
+                    "tracking_fallback_reason": committed_opts.get("tracking_fallback_reason"),
                 })
             CANCEL_EVENTS.pop(job_id, None)
             evict_old_generation_jobs()
@@ -480,20 +611,22 @@ def run_clip_generation(
 
 @router.get("/{project_id}/generation-jobs/{job_id}")
 def get_clip_generation_job(project_id: str, job_id: str) -> dict[str, Any]:
-    project_or_404(project_id)
+    project_directory = project_or_404(project_id)
+    expected_uid = get_project_uid(project_directory)
     with JOBS_LOCK:
         job = GENERATION_JOBS.get(job_id)
-        if job is None or job["project_id"] != project_id:
+        if job is None or not _job_matches_project(job, project_id, project_directory, expected_uid):
             raise HTTPException(status_code=404, detail="Clip generation job not found")
         return _snapshot_job(job)
 
 
 @router.post("/{project_id}/generation-jobs/{job_id}/cancel")
 def cancel_clip_generation(project_id: str, job_id: str) -> dict[str, Any]:
-    project_or_404(project_id)
+    project_directory = project_or_404(project_id)
+    expected_uid = get_project_uid(project_directory)
     with JOBS_LOCK:
         job = GENERATION_JOBS.get(job_id)
-        if job is None or job["project_id"] != project_id:
+        if job is None or not _job_matches_project(job, project_id, project_directory, expected_uid):
             raise HTTPException(status_code=404, detail="Clip generation job not found")
         if job["status"] not in {"queued", "processing", "cancelling"}:
             return _snapshot_job(job)
@@ -503,18 +636,19 @@ def cancel_clip_generation(project_id: str, job_id: str) -> dict[str, Any]:
         cancel_event.set()
         job.update({
             "status": "cancelling",
-            "step": "Cancelling and removing generated clips",
+            "step": "Cancelling generation; keeping previous clips",
         })
         return _snapshot_job(job)
 
 
 @router.get("/{project_id}/generation-jobs")
 def get_latest_clip_generation_job(project_id: str) -> dict[str, Any]:
-    project_or_404(project_id)
+    project_directory = project_or_404(project_id)
+    expected_uid = get_project_uid(project_directory)
     with JOBS_LOCK:
         project_jobs = [
             job for job in GENERATION_JOBS.values()
-            if job["project_id"] == project_id
+            if _job_matches_project(job, project_id, project_directory, expected_uid)
         ]
         if not project_jobs:
             return {"job": None}
@@ -533,6 +667,10 @@ def get_latest_clip_generation_job(project_id: str) -> dict[str, Any]:
 @router.get("/{project_id}/clips")
 def get_project_clips(project_id: str) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
+    recover_project_generation_state(
+        project_directory,
+        active_stage_ids=_active_stage_ids_for_project(project_id, project_directory),
+    )
     clips_directory = get_clips_directory(project_id)
     analysis_path = project_directory / "analysis.json"
     analysis_clips = {}
@@ -541,25 +679,45 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
     caption_style = "classic"
     caption_animation = None
     face_tracking = True
+    tracking_mode = "follow"
+    crop_anchor_x = 0.5
     if analysis_path.is_file():
         try:
             analysis_data = json.loads(analysis_path.read_text(encoding="utf-8"))
-            analysis_clips = {clip["id"]: clip for clip in analysis_data.get("clips", []) if isinstance(clip, dict) and "id" in clip}
-            generation_options = analysis_data.get("generation_options", {}) if isinstance(analysis_data.get("generation_options"), dict) else {}
+            analysis_clips = {
+                clip["id"]: clip
+                for clip in analysis_data.get("clips", [])
+                if isinstance(clip, dict) and is_safe_clip_id(clip.get("id"))
+            }
+            generation_options = (
+                analysis_data.get("generation_options", {})
+                if isinstance(analysis_data.get("generation_options"), dict)
+                else {}
+            )
             framing_mode = generation_options.get("framing_mode", "standard")
             caption_style = generation_options.get("caption_style", "classic")
             caption_animation = generation_options.get("caption_animation")
             face_tracking = bool(generation_options.get("face_tracking", True))
-        except json.JSONDecodeError:
+            tracking_mode = str(
+                generation_options.get("tracking_mode") or ("follow" if face_tracking else "locked")
+            )
+            crop_anchor_x = float(generation_options.get("crop_anchor_x", 0.5) or 0.5)
+        except (json.JSONDecodeError, TypeError, ValueError):
             analysis_clips = {}
 
     clips = []
     for path in sorted(clips_directory.glob("*.mp4")):
-        if path.name.startswith("."):
+        if path.name.startswith(".") or not is_safe_clip_id(path.stem):
             continue
         metadata = analysis_clips.get(path.stem, {})
         start = metadata.get("start", 0.0)
         end = metadata.get("end", 0.0)
+        clip_ft = bool(metadata.get("face_tracking", face_tracking))
+        clip_tm = str(
+            metadata.get("tracking_mode")
+            or (tracking_mode if metadata.get("tracking_mode") is None else metadata.get("tracking_mode"))
+            or ("follow" if clip_ft else "locked")
+        )
         clips.append({
             **metadata,
             "id": path.stem,
@@ -570,7 +728,11 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
             "framing_mode": metadata.get("framing_mode", framing_mode),
             "caption_style": metadata.get("caption_style", caption_style),
             "caption_animation": metadata.get("caption_animation", caption_animation),
-            "face_tracking": bool(metadata.get("face_tracking", face_tracking)),
+            "face_tracking": clip_ft,
+            "tracking_mode": clip_tm,
+            "crop_anchor_x": float(metadata.get("crop_anchor_x", crop_anchor_x)),
+            "requested_generation_mode": generation_options.get("requested_generation_mode"),
+            "applied_generation_mode": generation_options.get("applied_generation_mode", generation_options.get("generation_mode")),
             "status": "ready",
         })
 
@@ -610,6 +772,71 @@ def get_project_clips(project_id: str) -> dict[str, Any]:
     }
 
 
+@router.get("/{project_id}/crop-preview")
+def get_project_crop_preview(
+    project_id: str,
+    start: float = 0.0,
+    end: float = 15.0,
+    tracking_mode: str = "locked",
+    crop_anchor_x: float = 0.5,
+) -> dict[str, Any]:
+    project_directory = project_or_404(project_id)
+    if tracking_mode not in {"locked", "cuts", "follow"}:
+        raise HTTPException(status_code=422, detail="Tracking mode must be 'locked', 'cuts', or 'follow'")
+    if not (0.0 <= crop_anchor_x <= 1.0):
+        raise HTTPException(status_code=422, detail="Crop anchor must be between 0.0 and 1.0")
+    try:
+        from app.services.smart_framing import analyze_speaker_tracking, build_clip_crop_preview
+        from app.services.video_editor import find_ffmpeg
+        td = analyze_speaker_tracking(
+            project_directory=project_directory,
+            ffmpeg_path=find_ffmpeg(),
+            max_duration=max(1.0, end + 1.0),
+            face_tracking=(tracking_mode == "follow"),
+            tracking_mode=tracking_mode,
+            crop_anchor_x=crop_anchor_x,
+        )
+        return build_clip_crop_preview(td, start, end)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.post("/{project_id}/clips/{clip_id}/reframe")
+def reframe_single_clip(
+    project_id: str,
+    clip_id: str,
+    payload: ReframeClipRequest,
+) -> dict[str, Any]:
+    project_directory = project_or_404(project_id)
+    _assert_no_active_generation(project_id, project_directory)
+    raw_clip_id = _validate_clip_stem(clip_id)
+    _validate_render_options(
+        payload.framing_mode,
+        None,
+        None,
+        tracking_mode=payload.tracking_mode,
+        crop_anchor_x=payload.crop_anchor_x,
+    )
+    try:
+        updated_clip = render_single_clip(
+            project_directory=project_directory,
+            clip_id=raw_clip_id,
+            framing_mode=payload.framing_mode,
+            face_tracking=payload.face_tracking,
+            tracking_mode=payload.tracking_mode,
+            crop_anchor_x=payload.crop_anchor_x,
+            preserve_project_options=True,
+            keep_existing_top_line=True,
+        )
+        return {"clip": updated_clip}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except VideoEditorError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
 @router.post("/{project_id}/clips/{clip_id}/top-line")
 def update_clip_top_line(
     project_id: str,
@@ -617,20 +844,32 @@ def update_clip_top_line(
     payload: TopLineRequest,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
+    _assert_no_active_generation(project_id, project_directory)
     raw_clip_id = _validate_clip_stem(clip_id)
-    _validate_render_options(payload.framing_mode, payload.caption_style, payload.caption_animation)
+    _validate_render_options(
+        payload.framing_mode,
+        payload.caption_style,
+        payload.caption_animation,
+        tracking_mode=payload.tracking_mode,
+        crop_anchor_x=payload.crop_anchor_x,
+    )
     try:
-        updated_clip = render_single_clip(
-            project_directory=project_directory,
-            clip_id=raw_clip_id,
-            top_line=payload.top_line,
-            show_watermark=payload.show_watermark,
-            show_subtitles=payload.show_subtitles,
-            framing_mode=payload.framing_mode,
-            caption_style=payload.caption_style,
-            caption_animation=payload.caption_animation,
-            face_tracking=payload.face_tracking,
-        )
+        render_kwargs: dict[str, Any] = {
+            "project_directory": project_directory,
+            "clip_id": raw_clip_id,
+            "top_line": payload.top_line,
+            "show_watermark": payload.show_watermark,
+            "show_subtitles": payload.show_subtitles,
+            "framing_mode": payload.framing_mode,
+            "caption_style": payload.caption_style,
+            "caption_animation": payload.caption_animation,
+            "face_tracking": payload.face_tracking,
+        }
+        if payload.tracking_mode is not None:
+            render_kwargs["tracking_mode"] = payload.tracking_mode
+        if payload.crop_anchor_x is not None:
+            render_kwargs["crop_anchor_x"] = payload.crop_anchor_x
+        updated_clip = render_single_clip(**render_kwargs)
         return {"clip": updated_clip}
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -650,22 +889,36 @@ def delete_clip_top_line(
     caption_style: str | None = None,
     caption_animation: str | None = None,
     face_tracking: bool | None = None,
+    tracking_mode: str | None = None,
+    crop_anchor_x: float | None = None,
 ) -> dict[str, Any]:
     project_directory = project_or_404(project_id)
+    _assert_no_active_generation(project_id, project_directory)
     raw_clip_id = _validate_clip_stem(clip_id)
-    _validate_render_options(framing_mode, caption_style, caption_animation)
+    _validate_render_options(
+        framing_mode,
+        caption_style,
+        caption_animation,
+        tracking_mode=tracking_mode,
+        crop_anchor_x=crop_anchor_x,
+    )
     try:
-        updated_clip = render_single_clip(
-            project_directory=project_directory,
-            clip_id=raw_clip_id,
-            top_line=None,
-            show_watermark=show_watermark,
-            show_subtitles=show_subtitles,
-            framing_mode=framing_mode,
-            caption_style=caption_style,
-            caption_animation=caption_animation,
-            face_tracking=face_tracking,
-        )
+        render_kwargs: dict[str, Any] = {
+            "project_directory": project_directory,
+            "clip_id": raw_clip_id,
+            "top_line": None,
+            "show_watermark": show_watermark,
+            "show_subtitles": show_subtitles,
+            "framing_mode": framing_mode,
+            "caption_style": caption_style,
+            "caption_animation": caption_animation,
+            "face_tracking": face_tracking,
+        }
+        if tracking_mode is not None:
+            render_kwargs["tracking_mode"] = tracking_mode
+        if crop_anchor_x is not None:
+            render_kwargs["crop_anchor_x"] = crop_anchor_x
+        updated_clip = render_single_clip(**render_kwargs)
         return {"clip": updated_clip}
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
@@ -677,7 +930,11 @@ def delete_clip_top_line(
 
 @router.get("/{project_id}/clips/download-all")
 def download_all_project_clips(project_id: str) -> FileResponse:
-    project_or_404(project_id)
+    project_directory = project_or_404(project_id)
+    recover_project_generation_state(
+        project_directory,
+        active_stage_ids=_active_stage_ids_for_project(project_id, project_directory),
+    )
     clip_paths = [p for p in sorted(get_clips_directory(project_id).glob("*.mp4")) if not p.name.startswith(".")]
     if not clip_paths:
         raise HTTPException(status_code=404, detail="No clips are available to download")
@@ -701,12 +958,35 @@ def download_all_project_clips(project_id: str) -> FileResponse:
 
 
 @router.get("/{project_id}/clips/{clip_id}")
-def serve_clip(project_id: str, clip_id: str, download: bool = False) -> FileResponse:
-    project_or_404(project_id)
+def serve_clip(
+    project_id: str,
+    clip_id: str,
+    download: bool = False,
+    stage_job_id: str | None = None,
+) -> FileResponse:
+    project_directory = project_or_404(project_id)
     if not clip_id.endswith(".mp4") or Path(clip_id).name != clip_id:
         raise HTTPException(status_code=400, detail="Invalid clip filename")
     _validate_clip_stem(clip_id)
-    clip_path = get_clips_directory(project_id) / clip_id
+
+    clip_path: Path | None = None
+    if stage_job_id:
+        if stage_job_id in _active_stage_ids_for_project(project_id, project_directory):
+            safe_stage = stage_job_id
+            if not safe_stage.replace("-", "").replace("_", "").isalnum():
+                raise HTTPException(status_code=400, detail="Invalid stage job identifier")
+            staged_candidate = (project_directory / f".staging_{safe_stage}" / clip_id).resolve()
+            staging_root = (project_directory / f".staging_{safe_stage}").resolve()
+            if staged_candidate.is_relative_to(staging_root) and staged_candidate.is_file():
+                clip_path = staged_candidate
+
+    if clip_path is None:
+        recover_project_generation_state(
+            project_directory,
+            active_stage_ids=_active_stage_ids_for_project(project_id, project_directory),
+        )
+        clip_path = get_clips_directory(project_id) / clip_id
+
     if not clip_path.is_file():
         raise HTTPException(status_code=404, detail="Clip not found")
     response_headers = {"Cache-Control": "no-cache"}
@@ -722,7 +1002,11 @@ def serve_clip(project_id: str, clip_id: str, download: bool = False) -> FileRes
 
 @router.post("/{project_id}/clips/{clip_id}/save-dialog")
 def export_clip_with_dialog(project_id: str, clip_id: str) -> dict[str, Any]:
-    project_or_404(project_id)
+    project_directory = project_or_404(project_id)
+    recover_project_generation_state(
+        project_directory,
+        active_stage_ids=_active_stage_ids_for_project(project_id, project_directory),
+    )
     stem = _validate_clip_stem(clip_id)
     raw_clip_id = f"{stem}.mp4"
     clip_path = get_clips_directory(project_id) / raw_clip_id
@@ -743,7 +1027,11 @@ def export_clip_with_dialog(project_id: str, clip_id: str) -> dict[str, Any]:
 
 @router.post("/{project_id}/clips/download-all-dialog")
 def export_all_clips_with_dialog(project_id: str) -> dict[str, Any]:
-    project_or_404(project_id)
+    project_directory = project_or_404(project_id)
+    recover_project_generation_state(
+        project_directory,
+        active_stage_ids=_active_stage_ids_for_project(project_id, project_directory),
+    )
     clip_paths = [p for p in sorted(get_clips_directory(project_id).glob("*.mp4")) if not p.name.startswith(".")]
     if not clip_paths:
         raise HTTPException(status_code=404, detail="No clips are available to download")

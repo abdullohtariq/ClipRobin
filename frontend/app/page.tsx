@@ -17,8 +17,10 @@ import {
   FramingMode,
   CaptionStyle,
   CaptionAnimation,
+  TrackingMode,
 } from "@/src/lib/api";
 import { DashboardProjectSkeleton } from "@/src/components/skeletons";
+import { EngineStatus } from "@/src/components/engine-status";
 import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
 import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
 import { LiveMovingCaptions } from "@/src/components/live-moving-captions";
@@ -107,7 +109,8 @@ export default function Home() {
   // Step 2 State: Aspect Ratio
   const [hasSelectedRatio, setHasSelectedRatio] = useState(false);
   const [framingMode, setFramingMode] = useState<FramingMode>("standard");
-  const [faceTracking, setFaceTracking] = useState<boolean>(true);
+  const [trackingMode, setTrackingMode] = useState<TrackingMode>("locked");
+  const [cropAnchorX, setCropAnchorX] = useState<number>(0.5);
   const [compatibilityNotice, setCompatibilityNotice] = useState<string | null>(null);
 
   // Step 3 State: Project Name & Remaining Options
@@ -163,9 +166,16 @@ export default function Home() {
         if (savedFraming && ["standard", "square_rounded", "true_9_16"].includes(savedFraming)) {
           setFramingMode(savedFraming as FramingMode);
         }
-        const savedFaceTracking = localStorage.getItem("cliprobin_face_tracking");
-        if (savedFaceTracking !== null) {
-          setFaceTracking(savedFaceTracking === "true");
+        const savedTrackingMode = localStorage.getItem("cliprobin_tracking_mode");
+        if (savedTrackingMode && ["locked", "cuts", "follow"].includes(savedTrackingMode)) {
+          setTrackingMode(savedTrackingMode as TrackingMode);
+        }
+        const savedAnchor = localStorage.getItem("cliprobin_crop_anchor_x");
+        if (savedAnchor !== null) {
+          const parsedAnchor = Number(savedAnchor);
+          if (!Number.isNaN(parsedAnchor) && parsedAnchor >= 0 && parsedAnchor <= 1) {
+            setCropAnchorX(parsedAnchor);
+          }
         }
         const savedDuration = localStorage.getItem("cliprobin_clip_duration");
         if (savedDuration && [12, 15, 30, 60, 90].includes(Number(savedDuration))) {
@@ -408,17 +418,32 @@ export default function Home() {
       if (mode === "square_rounded") {
         setCompatibilityNotice("Selected 1:1 Rounded square canvas. Subtitle safe-margins adjusted to centered square framing.");
       } else if (mode === "true_9_16") {
-        setCompatibilityNotice("Selected Full 9:16 Crop. Smooth AI face tracking enabled.");
+        setCompatibilityNotice(
+          trackingMode === "locked"
+            ? "Selected Full 9:16 Crop. Locked Crop is active (fixed horizontal anchor, zero face scan)."
+            : trackingMode === "cuts"
+            ? "Selected Full 9:16 Crop. Speaker Cuts active (stationary shot per speaker)."
+            : "Selected Full 9:16 Crop. Follow Speaker active (smooth camera tracking).",
+        );
       } else {
         setCompatibilityNotice("Selected 16:9 Letterbox widescreen canvas.");
       }
     }
   };
 
-  const handleToggleFaceTracking = (enabled: boolean) => {
-    setFaceTracking(enabled);
+  const handleTrackingModeChange = (mode: TrackingMode) => {
+    setTrackingMode(mode);
     try {
-      localStorage.setItem("cliprobin_face_tracking", String(enabled));
+      localStorage.setItem("cliprobin_tracking_mode", mode);
+      localStorage.setItem("cliprobin_face_tracking", String(mode === "follow"));
+    } catch {}
+  };
+
+  const handleCropAnchorXChange = (anchor: number) => {
+    const clamped = Math.max(0, Math.min(1, anchor));
+    setCropAnchorX(clamped);
+    try {
+      localStorage.setItem("cliprobin_crop_anchor_x", String(clamped));
     } catch {}
   };
 
@@ -490,7 +515,9 @@ export default function Home() {
         captionAnimation: effectiveCaptionStyle === "classic" ? null : captionAnimation,
         showCaptions,
         showWatermark: effectiveWatermark,
-        faceTracking: framingMode === "true_9_16" ? faceTracking : false,
+        faceTracking: framingMode === "true_9_16" ? trackingMode === "follow" : false,
+        trackingMode: framingMode === "true_9_16" ? trackingMode : "locked",
+        cropAnchorX,
       },
     });
 
@@ -522,7 +549,7 @@ export default function Home() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant="emerald" size="md">Local Engine Ready</Badge>
+              <EngineStatus variant="badge" />
               {queueCount > 0 && (
                 <Badge variant={isAtLimit ? "amber" : "emerald"} size="md">
                   Queue: {queueCount}/{maxQueueSize}
@@ -623,6 +650,16 @@ export default function Home() {
                 )}
               </div>
 
+              {/* Keep file input mounted so "Change" works even after a file is active */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*,.mkv,.avi,.webm"
+                onChange={handleFileChange}
+                className="sr-only"
+                aria-label="Choose video file"
+              />
+
               {/* Once source is valid: Display active video banner */}
               {activeVideo ? (
                 <div className="rounded-xl border border-zinc-700/80 bg-[#0c0c0e] p-4 transition-all duration-200 animate-fade-in">
@@ -691,33 +728,28 @@ export default function Home() {
                 </div>
               ) : importTab === "file" ? (
                 /* Choice A: Drag & Drop File Zone */
-                <div className="space-y-3">
-                  <div
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setIsDragging(true);
-                    }}
-                    onDragEnter={(e) => {
-                      e.preventDefault();
-                      setIsDragging(true);
-                    }}
-                    onDragLeave={() => setIsDragging(false)}
-                    onDrop={handleDrop}
+                <div
+                  className="space-y-3"
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragEnter={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                >
+                  <button
+                    type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className={`group relative flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all duration-200 ${
+                    className={`group relative w-full flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 text-center transition-all duration-200 focus-ring ${
                       isDragging
                         ? "border-[#10b981] bg-[#10b981]/10 text-emerald-400 shadow-lg shadow-emerald-950/20"
                         : "border-zinc-800 bg-[#0c0c0e]/60 hover:border-zinc-700 hover:bg-[#0c0c0e]"
                     }`}
                   >
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="video/*,.mkv,.avi,.webm"
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-
                     <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 group-hover:text-emerald-400 group-hover:border-emerald-500/30 transition-all duration-150">
                       <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
@@ -736,7 +768,7 @@ export default function Home() {
                       <span>•</span>
                       <span>Processed 100% on device</span>
                     </div>
-                  </div>
+                  </button>
 
                   {inlineSourceError && (
                     <div className="rounded-xl border border-red-500/30 bg-red-950/20 p-3 text-xs text-red-300 animate-fade-in flex items-center gap-2">
@@ -856,8 +888,8 @@ export default function Home() {
                   {/* Option 3: Full 9:16 Crop */}
                   <OptionCard
                     title="Full 9:16 Crop"
-                    subtitle="Speaker tracking"
-                    badge={<Badge variant="purple" size="sm">AI</Badge>}
+                    subtitle="Fill 9:16 frame"
+                    badge={<Badge variant="purple" size="sm">9:16</Badge>}
                     selected={hasSelectedRatio && framingMode === "true_9_16"}
                     onClick={() => handleSelectFramingMode("true_9_16")}
                     previewGraphic={
@@ -873,49 +905,117 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Face Tracking Option - Exclusively active in 9:16 */}
+                {/* 9:16 Crop Framing Mode - Exclusively active in 9:16 */}
                 {framingMode === "true_9_16" ? (
-                  <div className="rounded-xl border border-purple-500/30 bg-purple-950/20 p-3.5 flex items-center justify-between gap-3 animate-fade-in transition-all">
-                    <div className="flex items-start gap-2.5">
-                      <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 mt-0.5 shrink-0">
-                        <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <circle cx="12" cy="8" r="4" />
-                          <path d="M6 20v-2a6 6 0 0 1 12 0v2" />
-                          <path d="M2 12h2M20 12h2M12 2v2M12 20v2" strokeLinecap="round" strokeDasharray="1 3" />
-                        </svg>
-                      </div>
+                  <div className="rounded-xl border border-purple-500/30 bg-purple-950/15 p-3.5 space-y-3 animate-fade-in">
+                    <div className="flex items-center justify-between gap-2">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[13px] font-semibold text-zinc-100">Smooth Face Tracking</span>
-                          <Badge variant="purple" size="sm">9:16 AI Follow</Badge>
-                        </div>
+                        <span className="text-[13px] font-semibold text-zinc-100">9:16 Crop Framing Mode</span>
                         <p className="text-xs text-zinc-400 mt-0.5">
-                          Smoothly moves the camera to keep the active speaker centered in 9:16 as they shift or move like Shorts &amp; Reels.
+                          {trackingMode === "locked"
+                            ? "Locked stationary slice with zero face detection or pan drift."
+                            : trackingMode === "cuts"
+                            ? "Stationary shot per active speaker without panning motion."
+                            : "Smoothly glides the 9:16 frame toward active speakers."}
                         </p>
                       </div>
+                      <Badge variant="purple" size="sm">9:16 Crop</Badge>
                     </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-label="Toggle smooth face tracking in 9:16"
-                      aria-checked={faceTracking}
-                      onClick={() => handleToggleFaceTracking(!faceTracking)}
-                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-150 ease-in-out focus-ring ${
-                        faceTracking ? "bg-purple-600" : "bg-zinc-700"
-                      }`}
+
+                    <div
+                      role="radiogroup"
+                      aria-label="9:16 crop tracking mode"
+                      className="grid grid-cols-1 sm:grid-cols-3 gap-2"
                     >
-                      <span
-                        className={`pointer-events-none inline-block size-4 transform rounded-full bg-white shadow-sm transition duration-150 ease-in-out ${
-                          faceTracking ? "translate-x-4" : "translate-x-0"
-                        }`}
-                      />
-                    </button>
+                      {[
+                        {
+                          value: "locked" as const,
+                          title: "Locked Crop",
+                          desc: "Fixed slice • Zero scan",
+                        },
+                        {
+                          value: "cuts" as const,
+                          title: "Speaker Cuts",
+                          desc: "Stationary cut per speaker",
+                        },
+                        {
+                          value: "follow" as const,
+                          title: "Follow Speaker",
+                          desc: "Smooth camera tracking",
+                        },
+                      ].map((opt) => {
+                        const selected = trackingMode === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            onClick={() => handleTrackingModeChange(opt.value)}
+                            className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-all focus-ring cursor-pointer ${
+                              selected
+                                ? "border-purple-400 bg-purple-500/15 text-white ring-1 ring-purple-400/50"
+                                : "border-zinc-800 bg-[#0d0d10] text-zinc-300 hover:border-zinc-700 hover:text-white"
+                            }`}
+                          >
+                            <span className="text-xs font-semibold">{opt.title}</span>
+                            <span className="text-[10px] text-zinc-400 mt-0.5">{opt.desc}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {trackingMode === "locked" && (
+                      <div className="pt-2 border-t border-purple-500/20 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <label htmlFor="wizard-crop-anchor-slider" className="font-medium text-zinc-200">
+                            Horizontal crop anchor
+                          </label>
+                          <span className="font-mono text-purple-300">
+                            {Math.round(cropAnchorX * 100)}%
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <input
+                            id="wizard-crop-anchor-slider"
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={Math.round(cropAnchorX * 100)}
+                            onChange={(e) => handleCropAnchorXChange(Number(e.target.value) / 100)}
+                            className="w-full accent-purple-400 cursor-pointer"
+                          />
+                          <div className="flex items-center gap-1 shrink-0">
+                            {[
+                              { label: "L", val: 0.25, title: "Anchor left (25%)" },
+                              { label: "C", val: 0.5, title: "Center (50%)" },
+                              { label: "R", val: 0.75, title: "Anchor right (75%)" },
+                            ].map((preset) => (
+                              <button
+                                key={preset.label}
+                                type="button"
+                                title={preset.title}
+                                onClick={() => handleCropAnchorXChange(preset.val)}
+                                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                                  Math.abs(cropAnchorX - preset.val) < 0.03
+                                    ? "border-purple-400 bg-purple-500/20 text-white"
+                                    : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+                                }`}
+                              >
+                                {preset.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-2.5 px-3 flex items-center justify-between text-xs text-zinc-500">
                     <div className="flex items-center gap-2">
                       <span className="inline-block size-1.5 rounded-full bg-zinc-600" />
-                      <span>Smooth Face Tracking is only available for <strong>Full 9:16 Crop</strong>.</span>
+                      <span>Locked Crop &amp; Speaker Tracking options apply to <strong>Full 9:16 Crop</strong>.</span>
                     </div>
                     <Badge variant="neutral" size="sm">9:16 Only</Badge>
                   </div>
@@ -1017,8 +1117,12 @@ export default function Home() {
                   maxClips={maxClips}
                   framingMode={framingMode}
                   onFramingModeChange={handleSelectFramingMode}
-                  faceTracking={faceTracking}
-                  onFaceTrackingChange={handleToggleFaceTracking}
+                  faceTracking={trackingMode === "follow"}
+                  onFaceTrackingChange={(enabled) => handleTrackingModeChange(enabled ? "follow" : "locked")}
+                  trackingMode={trackingMode}
+                  onTrackingModeChange={handleTrackingModeChange}
+                  cropAnchorX={cropAnchorX}
+                  onCropAnchorXChange={handleCropAnchorXChange}
                   showCaptions={showCaptions}
                   onShowCaptionsChange={(subs) => {
                     setShowCaptions(subs);
@@ -1126,6 +1230,7 @@ export default function Home() {
                         autoPlay
                         loop
                         playsInline
+                        style={{ objectPosition: `${Math.round(cropAnchorX * 100)}% 50%` }}
                         className="size-full object-cover"
                       />
                     ) : (
@@ -1138,10 +1243,18 @@ export default function Home() {
                             </svg>
                           </div>
                           <span className="mt-2 text-[10px] font-semibold text-purple-300">
-                            {faceTracking ? "Smooth Face Tracking" : "Full 9:16 Static Crop"}
+                            {trackingMode === "locked"
+                              ? `Locked Crop (${Math.round(cropAnchorX * 100)}%)`
+                              : trackingMode === "cuts"
+                              ? "Speaker Cuts"
+                              : "Follow Speaker"}
                           </span>
                           <span className="text-[8px] text-zinc-400 mt-0.5">
-                            {faceTracking ? "Camera smoothly follows speaker" : "Fixed center crop"}
+                            {trackingMode === "locked"
+                              ? "Fixed stationary horizontal window"
+                              : trackingMode === "cuts"
+                              ? "Stationary shot per active speaker"
+                              : "Camera smoothly follows speaker"}
                           </span>
                         </div>
                       </div>
@@ -1224,7 +1337,11 @@ export default function Home() {
                 <div className="flex flex-wrap gap-1.5">
                   <Badge variant="neutral">
                     {framingMode === "true_9_16"
-                      ? (faceTracking ? "9:16 Face Track" : "9:16 Static")
+                      ? trackingMode === "locked"
+                        ? `9:16 Locked (${Math.round(cropAnchorX * 100)}%)`
+                        : trackingMode === "cuts"
+                        ? "9:16 Cuts"
+                        : "9:16 Follow"
                       : framingMode === "square_rounded"
                       ? "1:1 Rounded"
                       : "16:9 Letterbox"}

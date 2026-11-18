@@ -5,6 +5,7 @@ import { CaptionAnimation, CaptionStyle } from "@/src/lib/api";
 import { Badge } from "@/src/components/ui/badge";
 import { Checkbox } from "@/src/components/ui/checkbox";
 import { IconButton } from "@/src/components/ui/icon-button";
+import { ModalDialog } from "@/src/components/ui/modal-dialog";
 import { useSubscription } from "@/src/lib/subscription-context";
 import { getDefaultAnimationForStyle, getEffectiveAnimation } from "./live-moving-captions";
 
@@ -200,22 +201,25 @@ interface CaptionCardProps {
   isSelected: boolean;
   isLocked?: boolean;
   onSelect: () => void;
+  buttonRef?: (el: HTMLButtonElement | null) => void;
 }
 
-function CaptionCard({ styleOption, isSelected, isLocked = false, onSelect }: CaptionCardProps) {
+function CaptionCard({
+  styleOption,
+  isSelected,
+  isLocked = false,
+  onSelect,
+  buttonRef,
+}: CaptionCardProps) {
   return (
-    <div
+    <button
+      ref={buttonRef}
+      type="button"
       role="radio"
       aria-checked={isSelected}
       tabIndex={isSelected ? 0 : -1}
       onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      className={`group relative flex flex-col rounded-xl border p-2.5 sm:p-3 transition-all duration-150 cursor-pointer text-left focus:outline-none focus-ring ${
+      className={`group relative flex flex-col w-full rounded-xl border p-2.5 sm:p-3 transition-all duration-150 cursor-pointer text-left focus:outline-none focus-ring ${
         isSelected
           ? "border-[#10b981] bg-[#10b981]/5 ring-1 ring-[#10b981] shadow-lg shadow-emerald-950/20"
           : "border-zinc-800 bg-[#121215] hover:border-zinc-700 hover:bg-[#16161b]"
@@ -258,7 +262,7 @@ function CaptionCard({ styleOption, isSelected, isLocked = false, onSelect }: Ca
       <p className="mt-1 text-[11px] sm:text-xs text-zinc-400 line-clamp-1 leading-snug">
         {styleOption.description}
       </p>
-    </div>
+    </button>
   );
 }
 
@@ -292,8 +296,8 @@ export function CaptionStylePicker({
 
   const videoRefDesktop = useRef<HTMLVideoElement>(null);
   const videoRefMobile = useRef<HTMLVideoElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const styleCardRefs = useRef<Partial<Record<CaptionStyle, HTMLButtonElement | null>>>({});
 
   // Sync state on open
   useEffect(() => {
@@ -311,16 +315,6 @@ export function CaptionStylePicker({
       } catch {}
     }
   }, [isOpen, selectedStyle, selectedAnimation]);
-
-  // Lock document body scroll while modal is active
-  useEffect(() => {
-    if (!isOpen) return;
-    const origOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = origOverflow;
-    };
-  }, [isOpen]);
 
   // Reduced motion & viewport media query detection (mount only one <video> decoder)
   useEffect(() => {
@@ -382,57 +376,29 @@ export function CaptionStylePicker({
     onClose();
   }, [isCaptionStyleAllowed, tempStyle, activeStyleDef.name, openUpgradeModal, onSelect, onSelectAnimation, tempAnimation, onClose]);
 
-  // Keyboard navigation
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
+  const handleStyleRadioKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(e.key)) {
         return;
       }
-
-      if (document.activeElement === searchInputRef.current) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          handleApply();
-        }
-        return;
-      }
-
-      if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-        e.preventDefault();
-        if (filteredStyles.length === 0) return;
-        const currentIndex = filteredStyles.findIndex((s) => s.id === tempStyle);
-        const nextIndex = (currentIndex + 1) % filteredStyles.length;
-        const candidate = filteredStyles[nextIndex];
-        if (isCaptionStyleAllowed(candidate.id)) {
-          setTempStyle(candidate.id);
-        } else {
-          openUpgradeModal(`The "${candidate.name}" Subtitle Style`);
-        }
-      } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-        e.preventDefault();
-        if (filteredStyles.length === 0) return;
-        const currentIndex = filteredStyles.findIndex((s) => s.id === tempStyle);
-        const prevIndex =
-          (currentIndex - 1 + filteredStyles.length) % filteredStyles.length;
-        const candidate = filteredStyles[prevIndex];
-        if (isCaptionStyleAllowed(candidate.id)) {
-          setTempStyle(candidate.id);
-        } else {
-          openUpgradeModal(`The "${candidate.name}" Subtitle Style`);
-        }
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        handleApply();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, tempStyle, filteredStyles, handleApply, isCaptionStyleAllowed, openUpgradeModal, onClose]);
+      e.preventDefault();
+      if (filteredStyles.length === 0) return;
+      const forward = e.key === "ArrowRight" || e.key === "ArrowDown";
+      const currentIndex = Math.max(
+        0,
+        filteredStyles.findIndex((s) => s.id === tempStyle),
+      );
+      const nextIndex = forward
+        ? (currentIndex + 1) % filteredStyles.length
+        : (currentIndex - 1 + filteredStyles.length) % filteredStyles.length;
+      const candidate = filteredStyles[nextIndex];
+      // Allow arrow navigation to preview any style cleanly without yanking focus into UpgradeModal;
+      // clicking Apply or activating a locked card enforces the Pro gate explicitly.
+      setTempStyle(candidate.id);
+      styleCardRefs.current[candidate.id]?.focus();
+    },
+    [filteredStyles, tempStyle],
+  );
 
   const effectiveAnimation = getEffectiveAnimation(tempStyle, tempAnimation);
   const { videoUrl, posterUrl } = getPreviewUrls(tempStyle, tempAnimation);
@@ -462,8 +428,6 @@ export function CaptionStylePicker({
     }
   };
 
-  if (!isOpen) return null;
-
   const activeAnimDef =
     CAPTION_ANIMATION_OPTIONS.find((a) => a.id === effectiveAnimation) ||
     CAPTION_ANIMATION_OPTIONS[0];
@@ -476,19 +440,14 @@ export function CaptionStylePicker({
   ];
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="caption-style-picker-title"
-      aria-describedby="caption-style-picker-desc"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-0 sm:p-4 lg:p-6 animate-in fade-in duration-150"
+    <ModalDialog
+      open={isOpen}
+      onClose={onClose}
+      ariaLabelledBy="caption-style-picker-title"
+      className="h-full sm:h-[min(90vh,860px)] sm:w-[min(1100px,96vw)]"
     >
       <div
-        ref={modalRef}
-        className="relative flex flex-col w-full h-full sm:h-[min(90vh,860px)] sm:max-h-[min(90vh,860px)] sm:w-[min(1100px,96vw)] sm:rounded-2xl border-0 sm:border border-zinc-800 bg-[#0e0e11] shadow-2xl overflow-hidden"
+        className="relative flex flex-col w-full h-full sm:max-h-[min(90vh,860px)] sm:rounded-2xl border-0 sm:border border-zinc-800 bg-[#0e0e11] shadow-2xl overflow-hidden"
       >
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-4 sm:px-6 py-3 sm:py-3.5 bg-[#121215] shrink-0">
@@ -669,6 +628,7 @@ export function CaptionStylePicker({
                 <div
                   role="radiogroup"
                   aria-label="Available caption styles"
+                  onKeyDown={handleStyleRadioKeyDown}
                   className="grid grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-3"
                 >
                   {filteredStyles.map((styleOpt) => (
@@ -677,6 +637,9 @@ export function CaptionStylePicker({
                       styleOption={styleOpt}
                       isSelected={tempStyle === styleOpt.id}
                       isLocked={!isCaptionStyleAllowed(styleOpt.id)}
+                      buttonRef={(el) => {
+                        styleCardRefs.current[styleOpt.id] = el;
+                      }}
                       onSelect={() => {
                         if (!isCaptionStyleAllowed(styleOpt.id)) {
                           openUpgradeModal(`The "${styleOpt.name}" Subtitle Style`);
@@ -881,11 +844,13 @@ export function CaptionStylePicker({
               onClick={handleApply}
               className="px-4 sm:px-5 py-1.5 sm:py-2 rounded-xl bg-[#10b981] text-xs font-bold text-zinc-950 hover:bg-[#059669] transition-all shadow-md focus-ring cursor-pointer"
             >
-              Apply style &amp; motion
+              {isCaptionStyleAllowed(tempStyle)
+                ? "Apply style & motion"
+                : `Unlock Pro for ${activeStyleDef.name}`}
             </button>
           </div>
         </div>
       </div>
-    </div>
+    </ModalDialog>
   );
 }

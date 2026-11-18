@@ -1,9 +1,14 @@
 import json
 import os
 import re
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+_PROJECT_SEQ_LOCK = threading.Lock()
 
 
 def get_projects_dir() -> Path:
@@ -19,28 +24,79 @@ PROJECTS_DIR = get_projects_dir()
 PROJECT_ID_PATTERN = re.compile(r"^project_\d+$")
 
 
+def _atomic_write_text(target: Path, content: str) -> None:
+    tmp = target.with_name(f".{target.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def get_project_uid(project_directory: Path) -> str | None:
+    meta_file = project_directory / "metadata.json"
+    if not meta_file.is_file():
+        return None
+    try:
+        loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            uid = loaded.get("project_uid")
+            return str(uid) if isinstance(uid, str) and uid.strip() else None
+    except Exception:
+        return None
+    return None
+
+
+def verify_project_ownership(project_directory: Path, expected_uid: str | None) -> bool:
+    """Return True if the project directory still belongs to expected_uid."""
+    if not expected_uid:
+        return project_directory.is_dir()
+    if not project_directory.is_dir():
+        return False
+    current_uid = get_project_uid(project_directory)
+    return current_uid == expected_uid
+
+
 def create_project() -> tuple[str, Path]:
     projects_dir = get_projects_dir()
     projects_dir.mkdir(parents=True, exist_ok=True)
-    max_num = 0
-    try:
-        with os.scandir(projects_dir) as entries:
-            for entry in entries:
-                if entry.is_dir() and entry.name.startswith("project_"):
-                    suffix = entry.name[len("project_"):]
-                    if suffix.isdigit():
-                        max_num = max(max_num, int(suffix))
-    except OSError:
-        pass
-    number = max_num + 1
-    while True:
-        project_id = f"project_{number:03d}"
-        directory = projects_dir / project_id
+    with _PROJECT_SEQ_LOCK:
+        max_num = 0
         try:
-            directory.mkdir()
-            return project_id, directory
-        except FileExistsError:
-            number += 1
+            with os.scandir(projects_dir) as entries:
+                for entry in entries:
+                    if entry.is_dir() and entry.name.startswith("project_"):
+                        suffix = entry.name[len("project_"):]
+                        if suffix.isdigit():
+                            max_num = max(max_num, int(suffix))
+        except OSError:
+            pass
+
+        seq_file = projects_dir / ".next_project_seq"
+        stored_next = 1
+        if seq_file.is_file():
+            try:
+                raw_seq = seq_file.read_text(encoding="utf-8").strip()
+                if raw_seq.isdigit():
+                    stored_next = max(1, int(raw_seq))
+            except OSError:
+                stored_next = 1
+
+        number = max(max_num + 1, stored_next)
+        while True:
+            project_id = f"project_{number:03d}"
+            directory = projects_dir / project_id
+            try:
+                directory.mkdir()
+                _atomic_write_text(seq_file, str(number + 1))
+                _atomic_write_text(
+                    directory / "metadata.json",
+                    json.dumps({"project_uid": uuid.uuid4().hex}, indent=2),
+                )
+                return project_id, directory
+            except FileExistsError:
+                number += 1
 
 
 def get_project_directory(project_id: str) -> Path:
