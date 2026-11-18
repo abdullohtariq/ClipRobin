@@ -98,7 +98,7 @@ flowchart TD
 ### Section-by-Section Wireframe & Copywriting Plan
 
 #### Section 1: Sticky Navigation Bar
-- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.31 Beta` badge.
+- **Left:** Clip Robin Logo (`logo-mark.svg`) + "Clip Robin" wordmark + `v0.1.32 Beta` badge.
 - **Center:** Navigation Links (`Features`, `Compare`, `Captions`, `Architecture`, `Docs`).
 - **Right:**
   - **GitHub Star Button:** Link to repository with live star count.
@@ -114,7 +114,7 @@ flowchart TD
 - **CTA Cluster:**
   - **Primary CTA:** Huge Emerald Button:  
     `⬇ Download for Windows (x64)`  
-    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.31
+    *Sub-label:* Free & Open Source • Windows 10/11 • v0.1.32
   - **Secondary CTA:** Ghost Button with GitHub Octocat:  
     `★ Star on GitHub`
 - **Zero-Friction Bullets below CTA:**

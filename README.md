@@ -2,7 +2,7 @@
 
 > Open-source, local-first video clipping for creators who want automation without surrendering their media workflow to the cloud.
 
-Clip Robin (**v0.1.31**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). Video processing runs locally. Cloud AI for hook suggestions is optional.
+Clip Robin (**v0.1.32**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). Video processing runs locally. Cloud AI for hook suggestions is optional.
 
 Local clipping and exports have no monthly video quota. Pro includes a separate allowance for hosted Gemini Hook Finder.
 
@@ -66,7 +66,7 @@ flowchart TD
 | Semantic hook & virality scoring | Hosted Gemini or your configured API | Optional (transcript text only) |
 | Direct YouTube Shorts publishing | YouTube Data API v3 | Optional (explicit user action) |
 
-## Key Features (v0.1.31)
+## Key Features (v0.1.32)
 
 - **Dual Intake & Multi-Video Batch Queue:** Import local files (`.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`) or download YouTube links (`yt-dlp`), queue multiple videos sequentially, and cancel or retry items cleanly at any stage.
 - **Three 9:16 Vertical Framing Modes:**
@@ -157,16 +157,16 @@ npm.cmd run build
 `frontend/package.json`, `frontend/src-tauri/Cargo.toml`, and `frontend/src-tauri/tauri.conf.json` share a synchronized version. Run the version script with the next release number from `frontend/`:
 
 ```powershell
-npm.cmd run version:set -- 0.1.31
+npm.cmd run version:set -- 0.1.32
 npm.cmd run version:check
 ```
 
 Pushing a matching `v*` tag triggers `.github/workflows/release-tauri.yml` to build the PyInstaller sidecar, bundle the signed NSIS Windows installer, and publish Tauri updater metadata to GitHub Releases:
 
 ```powershell
-git tag v0.1.31
+git tag v0.1.32
 git push origin main
-git push origin v0.1.31
+git push origin v0.1.32
 ```
 
 Production desktop builds (`com.cliprobin.desktop`) store projects, Whisper models, logs (`backend.log`), and local credentials inside `%APPDATA%\com.cliprobin.desktop` and check for signed updates automatically on startup and every 6 hours.

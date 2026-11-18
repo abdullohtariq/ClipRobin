@@ -59,7 +59,7 @@ jobs:
           $repo = $PWD.Path
           python -m pip install --disable-pip-version-check pyinstaller -r requirements/backend.txt
           $packArgs = @(
-            '--clean', '--noconfirm', '--onefile', '--windowed', '--icon', "$repo\backend\icon.ico"
+            '--clean', '--noconfirm', '--onefile', '--console', '--icon', "$repo\backend\icon.ico"
             '--name', 'cliprobin-api', '--distpath', 'backend/dist'
             '--workpath', "$env:RUNNER_TEMP\pyinstaller-work", '--specpath', "$env:RUNNER_TEMP\pyinstaller-spec"
             '--collect-all', 'faster_whisper', '--collect-all', 'ctranslate2', '--collect-all', 'av'
@@ -99,19 +99,28 @@ jobs:
           $env:CLIPROBIN_PROJECTS_DIR = "$env:RUNNER_TEMP\cliprobin-smoke-projects"
           $env:CLIPROBIN_FFMPEG_DIR = (Resolve-Path backend/bin).Path
           $headers = @{ 'X-ClipRobin-Token' = $env:CLIPROBIN_API_TOKEN }
-          $endpoint = "http://127.0.0.1:$env:CLIPROBIN_API_PORT/api/health"
-          $backend = Start-Process -FilePath (Resolve-Path backend/dist/cliprobin-api.exe).Path -WindowStyle Hidden -PassThru
+          $baseUrl = "http://127.0.0.1:$env:CLIPROBIN_API_PORT"
+          $stdout = "$env:RUNNER_TEMP\cliprobin-smoke.stdout.log"
+          $stderr = "$env:RUNNER_TEMP\cliprobin-smoke.stderr.log"
+          $backend = Start-Process -FilePath (Resolve-Path backend/dist/cliprobin-api.exe).Path -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
             $deadline = [DateTime]::UtcNow.AddSeconds(30)
             do {
               if ($backend.HasExited) { throw "Packaged backend exited with code $($backend.ExitCode)." }
-              try { $health = Invoke-RestMethod -Uri $endpoint -Headers $headers -TimeoutSec 2 }
+              try { $health = Invoke-RestMethod -Uri "$baseUrl/api/health" -NoProxy -TimeoutSec 2 }
               catch { Start-Sleep -Milliseconds 500 }
             } while ($health.status -ne 'healthy' -and [DateTime]::UtcNow -lt $deadline)
             if ($health.status -ne 'healthy') { throw 'Packaged backend did not become healthy.' }
+            $active = Invoke-RestMethod -Uri "$baseUrl/api/jobs/active" -Headers $headers -NoProxy -TimeoutSec 5
+            if ('jobs' -notin $active.PSObject.Properties.Name) { throw 'Packaged backend returned an unexpected jobs response.' }
+            Write-Host 'Verified packaged backend health and the authenticated jobs endpoint.'
+          } catch {
+            Get-Content -LiteralPath $stdout, $stderr -Tail 25 -ErrorAction SilentlyContinue
+            throw
           } finally {
             if (!$backend.HasExited) { taskkill.exe /PID $backend.Id /T /F | Out-Null }
           }
+          exit 0
 
       - name: Install frontend dependencies
         working-directory: frontend

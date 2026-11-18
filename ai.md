@@ -1,6 +1,6 @@
 # Clip Robin — AI Context, Codebase Audit & Engineering Handbook
 
-> **Clip Robin v0.1.31 engineering handbook.** Section 5 records current audit findings and their acceptance checks.
+> **Clip Robin v0.1.32 engineering handbook.** Section 5 records current audit findings and their acceptance checks.
 >
 > **Do NOT delete or overwrite this file.** Maintain and update this context as the project evolves.
 
@@ -188,7 +188,7 @@ ClipRobin/
 │   │   ├── __tests__/
 │   │   │   ├── project-name-utils.test.mjs # Project name validation & duplicate-check unit tests (4 tests)
 │   │   │   └── version-scripts.test.mjs    # Manifest version synchronization unit tests (2 tests)
-│   │   ├── check-version.mjs          # Verifies package.json, Cargo.toml & tauri.conf.json match (0.1.31)
+│   │   ├── check-version.mjs          # Verifies package.json, Cargo.toml & tauri.conf.json match (0.1.32)
 │   │   ├── set-version.mjs            # Updates version across all 3 manifests simultaneously
 │   │   └── take_screenshots.mjs       # Playwright visual snapshot utility
 │   ├── src/
@@ -220,9 +220,9 @@ ClipRobin/
 │   │   ├── src/
 │   │   │   ├── lib.rs                 # Ephemeral port binding, cliprobin-api sidecar spawn & cleanup
 │   │   │   └── main.rs                # Desktop entry point
-│   │   ├── Cargo.toml                 # Rust crate manifest (v0.1.31)
-│   │   └── tauri.conf.json            # Tauri bundle & updater configuration (v0.1.31)
-│   ├── package.json                   # Frontend manifest (v0.1.31)
+│   │   ├── Cargo.toml                 # Rust crate manifest (v0.1.32)
+│   │   └── tauri.conf.json            # Tauri bundle & updater configuration (v0.1.32)
+│   ├── package.json                   # Frontend manifest (v0.1.32)
 │   ├── tsconfig.json
 │   └── next.config.ts                 # Static export configuration (`output: "export"`)
 ├── requirements/
@@ -473,11 +473,11 @@ The November 10, 2026 audit covered the `v0.1.29` checkout. Fixes and regression
 
 **Hosted steps pending.** Supabase CLI access needs owner sign-in. The Windows browser connection stopped because it could not verify the dashboard address. Publish the package to the free HTTPS host and configure Supabase email delivery and redirects. Apply `20261117000000_hook_credits.sql` and `20261118000000_billing_reliability.sql` in order, then deploy `cliprobin-billing`. Configure the account URL in the desktop build and in Polar's checkout return settings. Add the Polar Sandbox credentials and connect the capped Gemini project before running the full hosted checkout cycle. The existing `v0.1.30` release predates these changes. Local Windows packaging requires the MSVC linker. [Deployment and verification steps](supabase/README.md)
 
-#### v0.1.31 face tracking and Windows packaging
+#### v0.1.32 face tracking and Windows packaging
 
 - **Smart Framing.** Speaker Cuts and Follow Speaker use the bundled YuNet detector with new face geometry checks, camera-cut detection, and suppression of brief cuts to a listener. Divider detection requires a visible edge near the center across most of the frame. Locked Crop uses the chosen anchor without scanning faces. The change invalidates old tracking caches.
 - **Model distribution.** The Windows installer packages OpenCV's MIT-licensed YuNet model and its copyright notice. The SCRFD and 106-point landmark integration is available for source experiments with an explicitly configured `CLIPROBIN_FACE_MODEL_DIR`, a local `onnxruntime` install, and model files the experimenter has rights to use. [YuNet license](backend/app/models/YUNET-LICENSE.txt) · [InsightFace model terms](https://github.com/deepinsight/insightface/tree/master/python-package#license)
-- **Release check.** GitHub Actions starts the packaged Windows backend and verifies the authenticated health endpoint before building the signed NSIS installer and updater metadata. Public account email and Polar checkout still require the hosted configuration above.
+- **Release check.** The v0.1.31 build stopped when the packaged backend failed to start. Uvicorn's log formatter needs a standard output stream during startup. The v0.1.32 package preserves those streams so Tauri can log to disk, and Tauri starts the engine without displaying a console window. GitHub Actions verifies health and an authenticated jobs request before building the signed NSIS installer and updater metadata. Public account email and Polar checkout require the hosted configuration above.
 
 #### P1 Queue recovery, silent sources, and project ownership — Resolved on `fixes`
 
