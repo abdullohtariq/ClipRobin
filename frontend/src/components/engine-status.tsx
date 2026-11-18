@@ -91,7 +91,7 @@ export function EngineStatus({
 
   const dotClass =
     state === "ready"
-      ? "bg-[#10b981] animate-pulse"
+      ? "bg-[#10b981]"
       : state === "checking"
       ? "bg-zinc-400 animate-pulse"
       : "bg-red-500";

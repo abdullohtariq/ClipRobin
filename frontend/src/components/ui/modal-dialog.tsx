@@ -92,7 +92,7 @@ export function ModalDialog({
         }
         pointerDownOnBackdropRef.current = false;
       }}
-      className={`cliprobin-dialog w-full ${className}`}
+      className={`cliprobin-dialog w-[calc(100vw-2rem)] ${className}`}
     >
       {open ? children : null}
     </dialog>

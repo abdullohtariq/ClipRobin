@@ -6,9 +6,9 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { accountClient, billingRequest, verifyEmailCallback } from "@/src/lib/account";
 import { PLAN_FEATURES, useSubscription } from "@/src/lib/subscription-context";
 
-const inputClass = "mt-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm";
-const primaryClass = "inline-block rounded-lg bg-emerald-400 px-4 py-2 text-sm font-semibold text-zinc-950 disabled:opacity-50";
-const secondaryClass = "inline-block rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium disabled:opacity-50";
+const inputClass = "mt-1 w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3.5 py-2.5 text-sm text-[#f4f4f5] focus-ring";
+const primaryClass = "inline-flex min-h-[40px] items-center justify-center rounded-xl bg-[#10b981] hover:bg-[#059669] px-4 py-2 text-xs font-bold text-zinc-950 transition-colors focus-ring cursor-pointer disabled:opacity-50";
+const secondaryClass = "inline-flex min-h-[40px] items-center justify-center rounded-xl border border-zinc-700 bg-[#18181c] hover:bg-[#202026] px-4 py-2 text-xs font-medium text-zinc-200 transition-colors focus-ring cursor-pointer disabled:opacity-50";
 const accountPageUrl = process.env.NEXT_PUBLIC_CLIPROBIN_ACCOUNT_URL;
 const oauthProviders = [
   { id: "github", label: "GitHub", enabled: process.env.NEXT_PUBLIC_CLIPROBIN_GITHUB_AUTH === "1" },
@@ -193,8 +193,8 @@ function AccountPanel() {
       : plan.checkoutState === undefined));
   return (
     <div className="space-y-4">
-      {callbackError && <p role="alert" className="text-sm text-rose-300">{callbackError}</p>}
-      {error && <p role="alert" className="text-sm text-rose-300">{error}</p>}
+      {callbackError && <p role="alert" className="text-sm text-red-300">{callbackError}</p>}
+      {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
       {message && <p role="status" className="text-sm text-emerald-300">{message}</p>}
       {emailCallback ? (
         <div className="space-y-3">
@@ -213,6 +213,56 @@ function AccountPanel() {
         <>
           <form className="max-w-md space-y-4" onSubmit={submit}>
             <h2 className="font-semibold">{recovering ? "Choose a new password" : mode === "sign-up" ? "Create a free account" : mode === "reset" ? "Reset your password" : "Sign in with email"}</h2>
+            {!recovering && (mode === "sign-in" || mode === "sign-up") && (
+              <>
+                {!desktop && oauthProviders.some((provider) => provider.enabled) && (
+                  <div className="space-y-3">
+                    <div className="flex flex-col gap-2">
+                      {oauthProviders.filter((provider) => provider.enabled).map((provider) => (
+                        <button
+                          key={provider.id}
+                          type="button"
+                          disabled={busy}
+                          onClick={() => socialSignIn(provider.id)}
+                          className="min-h-[42px] w-full inline-flex items-center justify-center gap-2.5 rounded-xl border border-zinc-700 bg-[#18181c] hover:bg-[#202026] px-4 py-2 text-xs font-semibold text-[#f4f4f5] transition-colors focus-ring cursor-pointer disabled:opacity-50"
+                        >
+                          {provider.id === "google" ? (
+                            <svg className="size-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                              <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.39 3.62v3h3.87c2.26-2.08 3.56-5.15 3.56-8.65z" />
+                              <path fill="#34A853" d="M12 24c3.24 0 5.95-1.07 7.94-2.91l-3.87-3c-1.07.72-2.44 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.27v3.1A12 12 0 0 0 12 24z" />
+                              <path fill="#FBBC05" d="M5.27 14.28A7.2 7.2 0 0 1 4.9 12c0-.79.14-1.56.37-2.28V6.62H1.27A12 12 0 0 0 0 12c0 1.94.46 3.77 1.27 5.38l4-3.1z" />
+                              <path fill="#EA4335" d="M12 4.76c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.27 6.62l4 3.1C6.22 6.87 8.87 4.76 12 4.76z" />
+                            </svg>
+                          ) : null}
+                          <span>Continue with {provider.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-zinc-500">
+                      <span className="h-px flex-1 bg-zinc-800" />
+                      <span>or with email</span>
+                      <span className="h-px flex-1 bg-zinc-800" />
+                    </div>
+                  </div>
+                )}
+                {desktop && accountPageUrl && oauthProviders.some((provider) => provider.enabled) && (
+                  <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3 space-y-2">
+                    <p className="text-xs text-zinc-400">
+                      Create or manage your account with Google in your browser, then sign in here with your email and password.
+                    </p>
+                    <a
+                      href={accountPageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={secondaryClass}
+                      onClick={openInBrowser}
+                    >
+                      Continue with Google in browser
+                    </a>
+                  </div>
+                )}
+              </>
+            )}
             {!recovering && <label className="block text-sm">Email<input className={inputClass} required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
             {(recovering || mode !== "reset") && (
               <label className="block text-sm">Password<input className={inputClass} required minLength={recovering || mode === "sign-up" ? 8 : undefined} type="password" autoComplete={recovering || mode === "sign-up" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
@@ -234,12 +284,7 @@ function AccountPanel() {
                 <button type="button" disabled={busy} className={secondaryClass} onClick={resendConfirmation}>Resend confirmation email</button>
               )}
               {desktop ? accountPageUrl && <a href={accountPageUrl} target="_blank" rel="noopener noreferrer" className={secondaryClass} onClick={openInBrowser}>Reset password in browser</a> : (
-                <>
-                  <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode("reset")}>Forgot password?</button>
-                  {oauthProviders.filter((provider) => provider.enabled).map((provider) => (
-                    <button key={provider.id} type="button" disabled={busy} className={secondaryClass} onClick={() => socialSignIn(provider.id)}>Continue with {provider.label}</button>
-                  ))}
-                </>
+                <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode("reset")}>Forgot password?</button>
               )}
             </div>
           )}
@@ -254,7 +299,7 @@ function AccountPanel() {
             {planError ? "Could not verify your plan. Free features are available." : !plan ? "Checking your plan…" : plan.tier === "pro" ? (plan.testMode ? "Test Pro is active" : "Pro is active") : "Free plan"}
             {plan?.status === "cancelled" && plan.activeUntil && ` until ${new Date(plan.activeUntil).toLocaleDateString()}`}
           </p>
-          {planError && <p role="alert" className="text-sm text-rose-300">{planError}</p>}
+          {planError && <p role="alert" className="text-sm text-red-300">{planError}</p>}
           {credits && (
             <div className="space-y-1 text-sm text-zinc-300">
               <p>{credits.remaining} of {credits.monthly} Gemini Hook Finder credits left.
@@ -325,24 +370,54 @@ function AccountPanel() {
 
 export default function SubscriptionPage() {
   return (
-    <main className="mx-auto max-w-4xl space-y-6 p-4 sm:p-8">
-      <header className="space-y-2">
-        <h1 className="text-2xl font-bold">Account &amp; Plans</h1>
-        <p className="text-sm text-zinc-400">Create and export local clips for free. Sign in to manage your account and subscription.</p>
+    <main className="mx-auto max-w-5xl space-y-6 p-4 md:p-8 xl:p-10">
+      <header className="space-y-1 pb-6 border-b border-zinc-800/80">
+        <h1 className="text-2xl font-bold tracking-tight text-[#f4f4f5]">Account &amp; Plans</h1>
+        <p className="text-sm text-zinc-400">Create and export local clips for free. Sign in to manage your account and Pro subscription.</p>
       </header>
-      <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 sm:p-6" aria-label="Account">
-        <AccountPanel />
-      </section>
-      <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 sm:p-6">
-        <h2 className="mb-3 font-semibold">Compare plans</h2>
-        <table className="w-full text-left text-sm">
-          <thead className="text-zinc-400"><tr><th scope="col" className="py-2">Feature</th><th scope="col">Free</th><th scope="col">Pro</th></tr></thead>
-          <tbody>{PLAN_FEATURES.map(([feature, free, pro]) => (
-            <tr key={feature} className="border-t border-zinc-800"><th scope="row" className="py-3 pr-3 font-medium">{feature}</th><td className="pr-3 text-zinc-300">{free}</td><td className="text-emerald-300">{pro}</td></tr>
-          ))}</tbody>
-        </table>
-        <p className="mt-3 text-sm text-zinc-400">Hook Finder uses 1 credit per started 30 minutes of source video. Local clipping and exports have no monthly video quota.</p>
-      </section>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,380px)_1fr] gap-6 items-start">
+        <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm" aria-label="Account">
+          <AccountPanel />
+        </section>
+
+        <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-[#f4f4f5]">Free vs Pro</h2>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-0.5 font-semibold text-emerald-300">
+                Free · $0
+              </span>
+              <span className="rounded-full border border-amber-400/25 bg-amber-400/10 px-2.5 py-0.5 font-semibold text-amber-300">
+                Pro · $12/month
+              </span>
+            </div>
+          </div>
+
+          <table className="w-full text-left text-xs sm:text-sm">
+            <thead className="text-zinc-400">
+              <tr>
+                <th scope="col" className="py-2 pr-3 font-medium">Feature</th>
+                <th scope="col" className="py-2 pr-3 font-medium">Free</th>
+                <th scope="col" className="py-2 font-medium text-amber-300">Pro</th>
+              </tr>
+            </thead>
+            <tbody>
+              {PLAN_FEATURES.map(([feature, free, pro]) => (
+                <tr key={feature} className="border-t border-zinc-800">
+                  <th scope="row" className="py-3 pr-3 font-medium text-[#f4f4f5]">{feature}</th>
+                  <td className="py-3 pr-3 text-zinc-400">{free}</td>
+                  <td className="py-3 text-emerald-300 font-medium">{pro}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <p className="text-xs text-zinc-400">
+            Hook Finder uses 1 credit per started 30 minutes of source video. Local clipping and exports have no monthly video quota.
+          </p>
+        </section>
+      </div>
     </main>
   );
 }

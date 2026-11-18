@@ -463,7 +463,7 @@ The November 10, 2026 audit covered the `v0.1.29` checkout. Fixes and regression
 | --- | --- | --- |
 | Public signup and reset email | The Account & Plans export can be uploaded to Cloudflare Pages at its free HTTPS address. The Clip Robin confirmation and reset templates send customers to that page. Customers confirm the action on the page before the app sends the one-time token to Supabase. The template works across browsers and keeps the token in the URL fragment until the page reads it. | Publish the account page, configure an SMTP sender and the exact HTTPS redirect, and install both templates. Verify signup, resend, and reset with a non-team inbox. |
 | Expired links and password recovery | Account & Plans displays errors for expired, used, or wrong-browser links. It explicitly exchanges legacy PKCE codes after registering the password-recovery listener. After verification it keeps a short account-scoped recovery marker so a page reload can reopen the password form. The Windows build uses Tauri's browser opener for the configured account URL and for Polar links. | Verify the two email link formats and a reset from an installed Windows build. Legacy PKCE requires the browser that requested the link. Configure each optional social provider in Supabase before enabling its sign-in button. |
-| Missing or delayed checkout notification | The billing function records the Polar checkout ID. It checks the provider state on plan refresh, validates the purchase with the signed Clip Robin account claim, and syncs the matching subscription. Confirmed checkouts stay pending until Polar records the payment. Repeated clicks reuse an open link and cannot create a new checkout while Polar reports the previous one unresolved. The app hides the old link when the attempt or plan changes. A failed attempt to create a link releases its slot immediately. | Deploy the new SQL and function. Verify a declined test card and a successful sandbox payment with webhook delivery paused. Re-enable delivery and replay the event. |
+| Missing or delayed checkout notification | The billing function records the Polar checkout ID. It checks the provider state on plan refresh, validates the purchase with the signed Clip Robin account claim, and syncs the matching subscription. Confirmed checkouts stay pending until Polar records the payment. Repeated clicks reuse an open link and cannot create a new checkout while Polar reports the previous one unresolved. The app hides the old link when the attempt or plan changes. A failed attempt to create a link releases its slot immediately. | SQL and function deployment completed November 18. Finish the Polar connection, then verify a declined test card and a successful sandbox payment with webhook delivery paused. Re-enable delivery and replay the event. |
 | Refunds and billing portal | The function verifies the order and subscription directly with Polar for an `order.refunded` event. A full refund for the current subscription period ends Pro and its included credits immediately, while the billing portal stays available. The database persists the affected period so a replayed active subscription event cannot restore it. Partial and older refunds preserve the current plan. A later paid period gets a new allowance. | Enable `order.refunded` delivery and `orders:read`. Test a full first-order refund, full renewal refund, a partial refund, an old-order refund, and access to the portal. Manage cancellation in Polar when appropriate. |
 | Shared Gemini budget | The UI shows the balance and the amount available now. The server checks both before reserving a generation and deducts a shared spending reservation for every attempt. Production checkout holds room for current subscriptions and unresolved checkouts before it offers another paid plan. At $5/month, 12 full 20-credit allowances fit before counting additional attempts or usage at differing points in each customer's billing cycle. | Set a dedicated Gemini key and a matching provider-side budget. Check the ledger against actual Gemini usage during the pilot. |
 
@@ -471,7 +471,25 @@ The November 10, 2026 audit covered the `v0.1.29` checkout. Fixes and regression
 
 **Dependencies.** Next.js and its ESLint configuration were updated to 16.4.6, and the locked source-map dependency was updated to 1.2.2. The production dependency audit reported zero vulnerabilities after those updates. [Next.js advisory](https://github.com/advisories/GHSA-vcvr-r3jv-pc5j) · [Source map advisory](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)
 
-**Hosted steps pending.** Supabase CLI access needs owner sign-in. The Windows browser connection stopped because it could not verify the dashboard address. Publish the package to the free HTTPS host and configure Supabase email delivery and redirects. Apply `20261117000000_hook_credits.sql` and `20261118000000_billing_reliability.sql` in order, then deploy `cliprobin-billing`. Configure the account URL in the desktop build and in Polar's checkout return settings. Add the Polar Sandbox credentials and connect the capped Gemini project before running the full hosted checkout cycle. The existing `v0.1.30` release predates these changes. Local Windows packaging requires the MSVC linker. [Deployment and verification steps](supabase/README.md)
+**Hosted steps pending.** Supabase CLI owner authorization is complete. All three billing migrations are recorded as applied, and the current `cliprobin-billing` function is deployed. The Polar Sandbox organization, $12 monthly product, restricted token, and signed webhook are configured. The owner account now has an enabled **Test Pro checkout** button and opens the correct Polar test checkout. Complete the mock payment and verify subscription activation and the billing portal. Configure the capped Gemini service before enabling included generation or production checkout. Publish the account page to a suitable HTTPS host, configure public email delivery, and set the working account URL in the desktop build and Polar checkout return settings. The published `v0.1.32` release includes the client fixes and passed the packaged Windows backend check in GitHub Actions. [Deployment and verification steps](supabase/README.md)
+
+#### Google sign-in setup (November 18, 2026)
+
+- **Cloud configuration.** Created a dedicated **Clip Robin sign-in (Supabase)** web OAuth client in the existing `youtube-api-512616` Google Cloud project. Its callback is `https://kzdbmkmelbbojudjouet.supabase.co/auth/v1/callback`. Authorized origins are `http://127.0.0.1:3000`, `http://localhost:3000`, and `https://abdullohtariq.github.io`. The owner completed Google's required 2-Step Verification. The Google application remains in testing mode with the owner account already listed as a test user. The private client JSON was saved in the owner's Downloads folder.
+- **Supabase configuration.** Enabled the Google provider using the dedicated client ID and secret. Email sign-in stays enabled. The redirect allowlist contains both local `/subscription` addresses and both trailing-slash variants of `https://abdullohtariq.github.io/cliprobin-web/subscription/`. The Site URL is currently `http://localhost:3000`.
+- **Verification.** The hosted Auth settings report `external.google=true`. An authorization request returns HTTP 302 to `accounts.google.com` with the new client ID, the exact Supabase callback, and the `email profile` scopes. After the owner completed the Google account picker and consent in Chrome, Clip Robin returned to `http://127.0.0.1:3000/subscription` and displayed **Signed in as abdollahtariq@gmail.com** with **Free plan**. The session persisted after a full page reload. **Refresh plan** completed successfully using the Google session.
+- **Public account page.** The proposed HTTPS subscription address returned HTTP 404. Deploy the account page to a suitable HTTPS host, verify its callback, and set Supabase's Site URL and the build's account URL to the working address before relying on public account recovery. Public sign-in also needs the Google application's intended audience configured for launch. [Supabase Google setup](https://supabase.com/docs/guides/auth/social-sign-in/auth-google)
+
+#### Disabled Pro checkout check (November 18, 2026)
+
+- **Original customer-visible result and fix.** The signed-in account showed **Free plan**, a disabled **Upgrade to Pro** button, and **Upgrades open once payment setup is complete**. Missing hosted payment settings caused the billing service to report checkout unavailable. After completing the configuration below, the owner's signed-in account now shows an enabled **Test Pro checkout** button. Clicking it creates a Polar test checkout, changes the action to **Resume checkout**, and displays **Open secure checkout**. The hosted page correctly shows **Clip Robin Pro, $12/month**. No frontend change was needed to enable it.
+- **Initial hosted check.** The original subscription schema existed, while the credit usage table and balance RPCs were missing. Privileged inspection after the owner's Supabase CLI authorization confirmed that only the original migration had been applied manually. The original deployment was billing function version 1, and the project had no custom payment secrets.
+- **Deployment completed.** Registered the existing original migration, applied `20261117000000_hook_credits.sql` and `20261118000000_billing_reliability.sql`, and deployed the reviewed function and its two supporting modules. Supabase reports the function as active, version 3 after configuration propagation. The database records all three migrations. Live checks confirmed row-level security on all three billing tables, public and account writes denied, and the server role permitted to perform billing and credit operations. There are zero subscription and credit-request rows.
+- **Sandbox settings.** Set `POLAR_ENVIRONMENT=sandbox`, designated the owner's existing Supabase account for testing, generated a private checkout signing secret, and set the previously planned project reservation limit to 500 cents per UTC month. The Gemini key is pending. The temporary local settings file was removed after upload.
+- **Polar organization and product created.** After the owner explicitly authorized acceptance of Polar's Terms, Privacy Policy, and AUP, created the **Clip Robin** sandbox organization with slug `clip-robin`, USD currency, and organization ID `23176ef5-701b-4015-89ba-5edfbf041f2c`. Created **Clip Robin Pro**, product ID `d6d9e744-295d-40e3-96ad-45519489e71e`, as a recurring subscription at **$12 USD every one month**, without a trial. The catalogue confirms `$12 / mo`. This is Polar's separate test environment; no real payment was made.
+- **Private connection completed.** With the owner's explicit approval, created the `cliprobin-supabase-sandbox` organization access key with the four runtime permissions `checkouts:write`, `subscriptions:read`, `orders:read`, and `customer_sessions:write`. The dashboard shows expiry **December 18, 2026**; replace it before that date if testing continues. Created the enabled **Clip Robin billing sandbox** raw webhook at `https://kzdbmkmelbbojudjouet.supabase.co/functions/v1/cliprobin-billing/webhook`, API version `2026-10`, with all eleven available `subscription.*` events and `order.refunded`. Uploaded the token, organization ID, product ID, and generated Standard Webhooks secret as Supabase function secrets. Secret values were not printed or placed in tracked files. The ignored temporary settings file was removed after successful upload.
+- **Live verification so far.** The local account page returns HTTP 200 and retains the Google session for the owner. A real checkout created through the app is recorded as one open test checkout in the hosted database, with no subscription or credit-request rows yet. The payment page offers Pakistan, displays a total of $12 per month with $0 included tax for that test selection, and uses Stripe test mode. An unsigned POST to the deployed webhook returns HTTP 401 with `Invalid webhook signature`. Polar rejects `cliprobin-sandbox@example.com` because the example domain does not accept email. Use an authorized account email for the remaining test. Automatic approval review rejected entering the published 4242 test card because explicit approval for payment credential entry and the account-email substitution was still required. Do not claim payment or activation succeeded before the owner authorizes and the test finishes.
+- **Remaining end-to-end checks.** Complete the successful mock payment, verify signed webhook delivery and plan refresh, and open the billing portal. Then verify a declined card, an abandoned/resumed checkout, activation with delayed webhook delivery, replay safety, cancellation, and the refund scenarios above. The existing automated suite covers these conditions with simulated provider responses; those results are distinct from hosted provider verification. Included Gemini generation is still unavailable until a dedicated server key and matching provider-side cap are configured. Production checkout stays disabled by its separate configuration and Gemini requirements.
 
 #### v0.1.32 face tracking and Windows packaging
 
@@ -713,3 +731,120 @@ When modifying or extending the Clip Robin codebase, all AI models and contribut
 3. **Cross-Platform & Frozen-Build Path Hygiene**: Always resolve runtime mutable files via `get_projects_dir()` / `CLIPROBIN_PROJECTS_DIR` (never write mutable state under `Path(__file__)`, which points to ephemeral `_MEIPASS` in PyInstaller builds). Use atomic temp-file + `os.replace()` for JSON persistence.
 4. **Non-Blocking & Cancellable Execution**: Offload heavy media/network operations (`yt-dlp`, `faster-whisper`, `ffmpeg`, `cv2`) from request threads and honor `threading.Event` cancellation promptly.
 5. **Version Manifest Synchronization**: Whenever bumping the application version, run `npm run version:set -- <x.y.z>` and `npm run version:check` inside `frontend/` so `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` stay strictly aligned.
+
+---
+
+# branch taste
+
+> Frontend design audit & simplification blueprint using **`Leonxlnx/taste-skill`** (`design-taste-frontend` v2.5.1, installed in `.agents/skills/design-taste-frontend/`) adapted for Clip Robin's local-first desktop app (`frontend/`).
+>
+> **Goal**: Keep the **exact existing dark-neutral + emerald colour scheme**, while making every screen **simpler, calmer, easier to use, and visually cohesive**.
+
+---
+
+## 1. Colour Scheme: Same Palette, Strict Discipline
+
+Clip Robin already has a strong palette defined in `frontend/app/globals.css` (`@theme`), and we should **keep it intact** rather than inventing a new theme:
+
+| Role | Token / Value | Intended Usage |
+| --- | --- | --- |
+| App Canvas | `--color-bg` (`#09090b`) | Main viewport and sidebar background (replace `#0a0a0a` drift in `app-frame.tsx` / `layout.tsx`). |
+| Primary Surface | `--color-surface` (`#121215`) | Top-level cards, modals, and toolbars (replace `#111113` in `projects/page.tsx`, `sidebar-nav.tsx`, `job-progress.tsx`). |
+| Inset / Control Well | `#0c0c0e` / `--color-surface-raised` (`#18181c`) | Inputs, segmented tracks, and recessed dropzones — max 2 levels deep. |
+| Hairlines & Borders | `--color-border` (`#27272a`) / `--color-border-subtle` (`#1f1f23`) | Single consistent hairline family (replace `#232326` and mismatched `zinc-700/800`). |
+| Typography | `--color-text` (`#f4f4f5`), `--color-text-muted` (`#a1a1aa`), `--color-text-dim` (`#71717a`) | Crisp contrast hierarchy; avoid dim labels under `12px`. |
+| Primary Accent | `--color-accent` (`#10b981`) / hover `--color-accent-hover` (`#059669`) | **One primary CTA per view**, active nav/tab states, `.focus-ring`, and ready indicators (align `subscription/page.tsx` and `upgrade-modal.tsx` away from `bg-emerald-400`). |
+| Semantic Status | `--color-highlight` (`#f59e0b`), `--color-danger` (`#ef4444`) | Warnings/Pro notices (amber) and destructive/error states (red, unifying `rose-300` / `red-300`). |
+
+### What `taste-skill` Flags in Our Current Colour Usage
+1. **90–95% Neutral, One Accent**: `design-taste-frontend` emphasizes keeping interfaces 90–95% neutral so real video frames, captions, and the single primary action stand out. Currently, `subscription-badge.tsx` puts an amber-to-emerald gradient CTA (`from-amber-500 to-emerald-500`) inside the sidebar, and `clips/page.tsx` (`ClipModalViewer`) places four clashing button styles side-by-side (`#10b981` Export, `#FF0000` YouTube, `#000` cyan-bordered TikTok, multi-stop Instagram gradient).
+2. **Retire Decorative Purple/Violet Chrome**: `taste-skill` (`SKILL.md`, `references/system.md`) explicitly warns against violet/lavender UI chrome (`--color-ai: #a855f7` / `purple-*` / `violet-*` currently used across `Full 9:16 Crop`, `9:16 Crop Framing Mode`, `AI Hook Finder` badges, and `AI Developer Mode` in `settings/page.tsx`). Moving active states to **neutral zinc + emerald `#10b981`** (with amber `#f59e0b` reserved strictly for Pro/warning indicators) immediately makes the app look intentional and unified without changing the core dark-emerald brand.
+
+---
+
+## 2. Applying `taste-skill` Principles to Clip Robin's Desktop App
+
+Because Clip Robin is a **desktop video workstation** (not a marketing brochure), we apply `taste-skill` where it brings real clarity and craft:
+
+1. **One System (`references/system.md`)**
+   - Unify container widths, padding, radius scale, button heights, focus rings, and card borders across all 5 routes (`/`, `/projects`, `/clips`, `/settings`, `/subscription`).
+   - Current drift to eliminate:
+     - Radii: `rounded-[12px]` / `rounded-[10px]` / `rounded-[8px]` in `projects/page.tsx` and `job-progress.tsx` vs `rounded-2xl` / `rounded-xl` / `rounded-lg` elsewhere. Standardize on one scale (`rounded-2xl` cards, `rounded-xl` inner wells/buttons, `rounded-lg` compact chips/segmented items).
+     - Focus rings: `sidebar-nav.tsx`, `projects/page.tsx`, and `settings/page.tsx` use inline `focus:ring-2` instead of the shared `.focus-ring` utility in `globals.css`.
+     - Shared primitives: `projects/page.tsx` and `settings/page.tsx` hand-roll toggles, duration pills, ratio buttons, and `<select>` dropdowns instead of reusing `ToggleRow`, `SegmentedControl`, `OptionCard`, and `CaptionStylePicker`.
+2. **Two Boxes Deep at Most (`references/cards.md`)**
+   - Right now, Step 3 on `app/page.tsx` stacks up to **4–5 nested bordered containers**: `section` (`#121215`) → `ClipSettings` collapsible card (`#121215`) → `Live Animated Preview Stage` (`#0d0d11` + dot-grid background) → `Style Card` (`#0d0d10`) → `Mini visual sample` (`#141418`).
+   - Flatten controls using subtle surface contrast (`#121215` card + `#0c0c0e` well, or crisp `1px` horizontal dividers `border-zinc-800/80`) instead of boxes inside boxes inside boxes. Also remove the dot-grid background (`bg-[radial-gradient(#27272a_1px,...)]`) behind preview stages so video/caption previews sit cleanly on quiet dark ground.
+3. **One Primary Action per View & Clean Copy (`references/copy.md`)**
+   - Remove duplicate primary CTAs: on `app/page.tsx`, the right sticky preview panel renders a full-width emerald CTA (`Browse Video File` / `Generate X Clips`) *at the same time* as the dropzone and Step 3's `Start Generating X Clips` button.
+   - Replace micro-labels (`text-[7px]`, `text-[8px]`, `text-[9px]`, `text-[10px]`, `text-[11px]`) with readable `12px` metadata and `13px–14px` control labels.
+   - Tighten copy: cut marketing filler inside the workspace (e.g., `"Local-First Engine / 100% Offline Capable"` card on `/` and multi-line feature explanations), drop exclamation marks (`"Saved!"`, `"was added to the queue!"`, `"⚡ Unlock AI Hooks"`), and use plain verb + object button labels (`Add video`, `Generate clips`, `Export MP4`, `Rename project`).
+4. **Restrained, Purposeful Motion (`references/motion.md`)**
+   - Keep `cubic-bezier(0.16, 1, 0.3, 1)` at `150ms`.
+   - Use subtle `2px` lift (`-translate-y-0.5`) only on clickable cards (projects, clips), crisp press feedback (`active:scale-[0.985]`), and remove decorative `animate-pulse` dots on static badges (`EngineStatus` ready dot, `SubscriptionBadge` Pro dot, `Local-First Engine` offline dot). Reserve pulse/progress animation strictly for active downloads, transcription, and rendering.
+
+---
+
+## 3. Page-by-Page Redesign Plan (Simple, Easy to Use, Beautiful)
+
+### A. App Shell (`app-frame.tsx`, `sidebar-nav.tsx`, `job-progress.tsx`, `subscription-badge.tsx`)
+- **Single-source Engine Status**: Remove the duplicate `EngineStatus variant="badge"` from the Dashboard header (`app/page.tsx`) and keep it solely in the sidebar footer (surfacing a clear top alert banner *only* when `unavailable`).
+- **Calm Sidebar Footer**: Replace the promotional gradient `SubscriptionBadge` box in the sidebar with a quiet, compact account/plan row (`Free` or `Pro` pill + subtle `Account` link) right above `EngineStatus`. Keep the sidebar focused on the 4 workspaces: **Create** (`/`), **Projects** (`/projects`), **Clips** (`/clips`), and **Settings** (`/settings`).
+- **Predictable Job Drawer**: Change `JobProgress` (`bottom-5 right-5`) from hover-only (`hidden group-hover:block`) to an explicit click-to-toggle compact pill/drawer, unified visually with `bg-[#121215]` and `border-zinc-800`.
+
+### B. Create Clips Dashboard (`frontend/app/page.tsx` & `clip-settings.tsx`)
+- **Make the first screen effortless**:
+  - Before a source video is selected, show a clean, centered **Source Dropzone + YouTube URL input** without an empty phone shell asking for `"Step 1"` or duplicating a `"Browse Video File"` button underneath.
+  - Once a video is loaded (file or YouTube URL), transition smoothly into the **2-column Studio Setup**:
+    - **Left column (Simplified Controls)**:
+      1. **Source bar** (compact summary with `Change` / `Remove`).
+      2. **Framing & Tracking** (`16:9 Letterbox`, `1:1 Rounded`, `Full 9:16 Crop` + `Locked / Speaker Cuts / Follow Speaker` only when `9:16` is active).
+      3. **Clip Setup** (Project name, Duration `12s–90s`, Clip count, Moments `Fast Interval` vs `AI Hook Finder`).
+      4. **Captions & Branding** (Clean toggle + current style row opening `CaptionStylePicker`, instead of an always-expanded 300px nested studio inside Step 3; keep watermark toggle simple).
+    - **Right column (Sticky 9:16 Live Preview + Single Primary CTA)**:
+      - Clean 9:16 frame showing the actual framing crop, caption preview, and watermark placement, plus **one** summary line and **one** primary emerald button (`Generate 3 Clips` or `Add to Queue (N/max)` using dynamic `maxQueueSize`, fixing the hardcoded `"10/10"` label).
+- **Replace bottom marketing card**: Give `"Recent projects"` full width (`3–4` clean linked cards with `2px` hover lift) and remove the static `"Local-First Engine"` pitch box below the fold.
+
+### C. Projects Library (`frontend/app/projects/page.tsx`)
+- **Fix the biggest UX bottleneck**: Currently `/projects` embeds the entire clip-generation control matrix (aspect ratio, tracking, caption toggle, caption picker, AI/Interval mode, 5 durations, watermark toggle) inside **every single project card**, duplicating `ClipSettings` and creating dozens of repeated controls on screen.
+- **Simpler design**:
+  - Display projects in a clean, scannable list or 2-column grid of compact cards: **Project title** (with inline rename), **source type + date**, **clip count + status pill**, and **two clean actions**: `Open Studio` (primary/emerald link to `/clips?project=...`) and `Regenerate` / `Delete` (secondary).
+  - If regeneration is triggered from `/projects`, open a single shared `<ModalDialog>` containing `<ClipSettings />` rather than repeating settings forms on every card.
+  - Replace native `window.confirm()` on delete and cancel with accessible `<ModalDialog>` confirmations respecting `confirmDelete`.
+
+### D. Clips Studio (`frontend/app/clips/page.tsx`)
+- **Clean Grid Cards (`ProClipCard`)**:
+  - Keep each `220px+` grid card focused on watching and exporting:
+    1. Top row: Clip `#01` + duration + status (`StatusPill`).
+    2. 9:16 Video player frame (clean `rounded-xl`, quiet hover overlay with play/pause and scrubber).
+    3. Concise footer: 2-line clip title, timecode + method/AI score pill, and **two clean actions**: `Export` (primary download) and `Edit & Share` (opens the spacious `ClipModalViewer`, plus quick icon triggers if needed).
+  - **Move `Reframe` and `Top Line` editing out of the narrow 220px card**: Editing crop anchors and 15-word headline hooks inside an inline drawer above a `220px` thumbnail feels cramped. Move both into `ClipModalViewer` (side-by-side with the large 9:16 video player) so editing and previewing happen in one comfortable space.
+- **Cohesive Toolbar & Export Modal**:
+  - Simplify the sticky Studio toolbar into: `[Regenerate Clips]` `[Download ZIP]` on the left, `[Settings ▾]` (clean toggle for `<ClipSettings />`) + `[Mute / Volume]` on the right, with a single crisp amber dot when `isDirty` is true.
+  - In `ClipModalViewer`, unify `Upload to YouTube`, `Prepare for TikTok`, and `Prepare for Instagram` into consistent neutral dark buttons (`bg-[#18181c] border-zinc-700 hover:border-zinc-500`) carrying each platform's real logo icon, leaving **Export MP4** as the sole emerald `#10b981` primary button.
+
+### E. Settings & Account / Plans (`settings/page.tsx`, `subscription/page.tsx`, `upgrade-modal.tsx`)
+- **Settings**:
+  - Group into 3 clean sections with shared components:
+    1. **Defaults** (Confirm delete via `ToggleRow`, Default caption style using the visual `CaptionStylePicker` button instead of a native `<select>`, Output spec read-only row).
+    2. **Brand Watermark** (`CustomWatermarkSettings` using `ModalDialog` instead of `confirm()`).
+    3. **Integrations & Account** (Gemini AI Developer Mode—replace `"Locked"` status label with `"Off"` / `"Active"` and remove violet styling in favor of neutral/emerald—plus YouTube OAuth using `ModalDialog` instead of `confirm()`, and a clean Account & Plan link).
+- **Subscription & Upgrade Modal**:
+  - Match `globals.css` tokens (`#121215` cards, `#10b981` primary buttons, `rounded-xl`, `.focus-ring`, `text-red-300` errors) so `/subscription` and `<UpgradeModal>` feel native to the rest of the desktop app.
+
+---
+
+## 4. Recommended Implementation Sequence (For Upcoming Commits on `taste`)
+
+1. **Phase 1 — Token & Primitive Alignment**: Consolidate hardcoded `#0a0a0a` / `#111113` / `#232326` / `bg-emerald-400` / `purple-*` chrome onto `globals.css` tokens, `.focus-ring`, and unified `ui/` primitives (`Button` variant utility, `ModalDialog` confirmation helper, `ToggleRow`).
+2. **Phase 2 — App Shell & Dashboard Simplification**: Streamline `app-frame.tsx`, `sidebar-nav.tsx`, `subscription-badge.tsx`, `job-progress.tsx`, `clip-settings.tsx`, and `app/page.tsx` (single CTA, flatter 2-layer cards, clean pre-upload state).
+3. **Phase 3 — Projects Library & Clips Studio De-cluttering**: Convert `projects/page.tsx` to clean project cards + shared settings modal; slim `ProClipCard` and move `Reframe` / `Top Line` editing + unified social export buttons into `ClipModalViewer` (`clips/page.tsx`).
+4. **Phase 4 — Settings & Account Polish + Verification**: Align `settings/page.tsx`, `subscription/page.tsx`, and `upgrade-modal.tsx`, then run `npx tsc --noEmit`, `npm run lint`, `node --test` (`frontend/scripts/__tests__`), `npm run build -- --webpack`, and Playwright visual checks at desktop & compact widths.
+
+### Implemented & Verified on `taste`
+- **Unified Design System & Modal Sizing**: Standardized `#09090b` / `#121215` / `#27272a` / `#10b981` tokens, retired violet UI chrome, added `ConfirmDialog` (`ui/confirm-dialog.tsx`), and wrapped `dialog.cliprobin-dialog` inside `@layer base` in `globals.css` (`w-[calc(100vw-2rem)]` in `ModalDialog` & `UpgradeModal`) so popups stay compact instead of stretching full viewport width.
+- **Clear Free vs Pro Boundaries**: Added `What’s included` plan card on `/`, `Free` vs `Pro` / `🔒 Pro` indicators in `ClipSettings` and `CaptionStylePicker`, side-by-side `Free` vs `Pro` summaries in `UpgradeModal` and `Settings`, and a 2-column `Account` + `Free vs Pro` layout on `/subscription`.
+- **Simplified Pages**: Removed duplicate Dashboard header `EngineStatus` and pre-upload empty phone mockup, replaced per-card settings matrices on `/projects` with a shared `<ClipSettings />` modal, and moved `Reframe` / `Headline Hook` editing into `ClipModalViewer` on `/clips`.
+- **Google Auth + GitHub Pages Subpath Export**: Enabled `Continue with Google` for both `sign-in` and `sign-up` in `subscription/page.tsx` (plus desktop browser handoff), added `NEXT_PUBLIC_CLIPROBIN_ACCOUNT_BASE_PATH` support in `next.config.ts` / `app-frame.tsx`, and added `.nojekyll` + `--no-index` in `scripts/package-account-site.mjs` for `https://abdullohtariq.github.io/cliprobin-web/subscription/`.
+
+

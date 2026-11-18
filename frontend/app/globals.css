@@ -17,8 +17,8 @@
   --color-accent-subtle: rgba(16, 185, 129, 0.12);
   --color-highlight: #f59e0b;
   --color-highlight-subtle: rgba(245, 158, 11, 0.12);
-  --color-ai: #a855f7;
-  --color-ai-subtle: rgba(168, 85, 247, 0.15);
+  --color-ai: #10b981;
+  --color-ai-subtle: rgba(16, 185, 129, 0.12);
   --color-danger: #ef4444;
   --color-danger-subtle: rgba(239, 68, 68, 0.15);
 }
@@ -141,22 +141,24 @@ button, a, input, select, textarea {
 }
 
 /* Native <dialog> modal styling & overscroll containment */
-dialog.cliprobin-dialog {
-  margin: auto;
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-  max-width: calc(100vw - 2rem);
-  max-height: calc(100vh - 2rem);
-}
+@layer base {
+  dialog.cliprobin-dialog {
+    margin: auto;
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    max-width: calc(100vw - 2rem);
+    max-height: calc(100vh - 2rem);
+  }
 
-dialog.cliprobin-dialog:modal {
-  overscroll-behavior: contain;
-}
+  dialog.cliprobin-dialog:modal {
+    overscroll-behavior: contain;
+  }
 
-dialog.cliprobin-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.78);
-  backdrop-filter: blur(4px);
-  overscroll-behavior: contain;
+  dialog.cliprobin-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(4px);
+    overscroll-behavior: contain;
+  }
 }

@@ -20,7 +20,6 @@ import {
   TrackingMode,
 } from "@/src/lib/api";
 import { DashboardProjectSkeleton } from "@/src/components/skeletons";
-import { EngineStatus } from "@/src/components/engine-status";
 import { CAPTION_STYLE_OPTIONS } from "@/src/components/caption-style-picker";
 import { ClipSettings, ClipDuration } from "@/src/components/clip-settings";
 import { LiveMovingCaptions } from "@/src/components/live-moving-captions";
@@ -524,7 +523,7 @@ export default function Home() {
     });
 
     if (result.success) {
-      setQueueSuccessBanner(`"${finalName}" was added to the queue! Processing is running in the background.`);
+      setQueueSuccessBanner(`"${finalName}" added to the queue. Processing in the background.`);
       if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
       bannerTimerRef.current = setTimeout(() => setQueueSuccessBanner(null), 6000);
       handleResetFlow();
@@ -545,19 +544,16 @@ export default function Home() {
         <header className="flex flex-col gap-3 pb-6 border-b border-zinc-800/80">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight text-white">Create Clips</h1>
-              <p className="text-xs text-zinc-400 mt-1">
-                Turn long video content into vertical short-form clips powered by local AI
+              <h1 className="text-2xl font-bold tracking-tight text-[#f4f4f5]">Create Clips</h1>
+              <p className="text-sm text-zinc-400 mt-1">
+                Turn long videos into vertical short clips locally.
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <EngineStatus variant="badge" />
-              {queueCount > 0 && (
-                <Badge variant={isAtLimit ? "amber" : "emerald"} size="md">
-                  Queue: {queueCount}/{maxQueueSize}
-                </Badge>
-              )}
-            </div>
+            {queueCount > 0 && (
+              <Badge variant={isAtLimit ? "amber" : "emerald"} size="md">
+                Queue: {queueCount}/{maxQueueSize}
+              </Badge>
+            )}
           </div>
         </header>
 
@@ -583,9 +579,9 @@ export default function Home() {
           <VideoQueueView onAddAnotherVideo={handleAddAnotherVideoClick} />
         )}
 
-        {/* 2-Column Responsive Layout: Left Steps + Right Sticky Preview */}
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] 2xl:grid-cols-[1fr_420px] gap-6 xl:gap-8 items-start">
-          {/* Left Column: Progressive Step-by-Step Wizard */}
+        {/* 2-Column Responsive Layout with equal edges */}
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] 2xl:grid-cols-[1fr_400px] gap-6 xl:gap-8 items-start">
+          {/* Left Column: Progressive Step-by-Step Setup */}
           <div className="space-y-6 min-w-0">
             {/* STEP 1: Source (Always visible on load) */}
             <section
@@ -765,10 +761,8 @@ export default function Home() {
                       MP4, MOV, MKV, or WebM up to 16 GB
                     </p>
 
-                    <div className="mt-3 flex items-center gap-2 text-[11px] text-zinc-500 font-mono">
-                      <span className="px-2 py-0.5 rounded bg-zinc-800/80 border border-zinc-700/50">Local privacy</span>
-                      <span>•</span>
-                      <span>Processed 100% on device</span>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
+                      <span>Processed locally on your device</span>
                     </div>
                   </button>
 
@@ -891,13 +885,13 @@ export default function Home() {
                   <OptionCard
                     title="Full 9:16 Crop"
                     subtitle="Fill 9:16 frame"
-                    badge={<Badge variant="purple" size="sm">9:16</Badge>}
+                    badge={<Badge variant="neutral" size="sm">9:16</Badge>}
                     selected={hasSelectedRatio && framingMode === "true_9_16"}
                     onClick={() => handleSelectFramingMode("true_9_16")}
                     previewGraphic={
                       <div className="relative aspect-[9/16] w-12 rounded-[5px] border border-zinc-700/60 bg-[#0a0a0d] flex items-center justify-center overflow-hidden p-1 shadow-inner">
-                        <div className="size-full rounded-[3px] bg-zinc-700/80 border border-purple-500/40 flex items-center justify-center">
-                          <svg className="size-4 text-purple-300/90" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <div className="size-full rounded-[3px] bg-zinc-700/80 border border-emerald-500/40 flex items-center justify-center">
+                          <svg className="size-4 text-emerald-300/90" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                             <circle cx="12" cy="8" r="4" strokeWidth="2" />
                             <path d="M6 20v-2a6 6 0 0 1 12 0v2" strokeWidth="2" />
                           </svg>
@@ -909,7 +903,7 @@ export default function Home() {
 
                 {/* 9:16 Crop Framing Mode - Exclusively active in 9:16 */}
                 {framingMode === "true_9_16" ? (
-                  <div className="rounded-xl border border-purple-500/30 bg-purple-950/15 p-3.5 space-y-3 animate-fade-in">
+                  <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 space-y-3 animate-fade-in">
                     <div className="flex items-center justify-between gap-2">
                       <div>
                         <span className="text-[13px] font-semibold text-zinc-100">9:16 Crop Framing Mode</span>
@@ -921,7 +915,7 @@ export default function Home() {
                             : "Smoothly glides the 9:16 frame toward active speakers."}
                         </p>
                       </div>
-                      <Badge variant="purple" size="sm">9:16 Crop</Badge>
+                      <Badge variant="emerald" size="sm">9:16 Crop</Badge>
                     </div>
 
                     <div
@@ -933,7 +927,7 @@ export default function Home() {
                         {
                           value: "locked" as const,
                           title: "Locked Crop",
-                          desc: "Fixed slice • Zero scan",
+                          desc: "Fixed slice · Zero scan",
                         },
                         {
                           value: "cuts" as const,
@@ -956,24 +950,24 @@ export default function Home() {
                             onClick={() => handleTrackingModeChange(opt.value)}
                             className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-all focus-ring cursor-pointer ${
                               selected
-                                ? "border-purple-400 bg-purple-500/15 text-white ring-1 ring-purple-400/50"
-                                : "border-zinc-800 bg-[#0d0d10] text-zinc-300 hover:border-zinc-700 hover:text-white"
+                                ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]/60"
+                                : "border-zinc-800 bg-[#121215] text-zinc-300 hover:border-zinc-700 hover:text-white"
                             }`}
                           >
                             <span className="text-xs font-semibold">{opt.title}</span>
-                            <span className="text-[10px] text-zinc-400 mt-0.5">{opt.desc}</span>
+                            <span className="text-xs text-zinc-400 mt-0.5">{opt.desc}</span>
                           </button>
                         );
                       })}
                     </div>
 
                     {trackingMode === "locked" && (
-                      <div className="pt-2 border-t border-purple-500/20 space-y-2">
+                      <div className="pt-2.5 border-t border-zinc-800 space-y-2">
                         <div className="flex items-center justify-between text-xs">
                           <label htmlFor="wizard-crop-anchor-slider" className="font-medium text-zinc-200">
                             Horizontal crop anchor
                           </label>
-                          <span className="font-mono text-purple-300">
+                          <span className="font-mono text-emerald-400">
                             {Math.round(cropAnchorX * 100)}%
                           </span>
                         </div>
@@ -986,7 +980,7 @@ export default function Home() {
                             step={5}
                             value={Math.round(cropAnchorX * 100)}
                             onChange={(e) => handleCropAnchorXChange(Number(e.target.value) / 100)}
-                            className="w-full accent-purple-400 cursor-pointer"
+                            className="w-full accent-[#10b981] cursor-pointer"
                           />
                           <div className="flex items-center gap-1 shrink-0">
                             {[
@@ -999,9 +993,9 @@ export default function Home() {
                                 type="button"
                                 title={preset.title}
                                 onClick={() => handleCropAnchorXChange(preset.val)}
-                                className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                                className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors cursor-pointer ${
                                   Math.abs(cropAnchorX - preset.val) < 0.03
-                                    ? "border-purple-400 bg-purple-500/20 text-white"
+                                    ? "border-[#10b981] bg-[#10b981]/15 text-emerald-300"
                                     : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
                                 }`}
                               >
@@ -1014,11 +1008,8 @@ export default function Home() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-2.5 px-3 flex items-center justify-between text-xs text-zinc-500">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-block size-1.5 rounded-full bg-zinc-600" />
-                      <span>Locked Crop &amp; Speaker Tracking options apply to <strong>Full 9:16 Crop</strong>.</span>
-                    </div>
+                  <div className="rounded-xl border border-zinc-800/80 bg-[#0c0c0e] p-2.5 px-3 flex items-center justify-between text-xs text-zinc-400">
+                    <span>Locked Crop &amp; Speaker Tracking apply to Full 9:16 Crop.</span>
                     <Badge variant="neutral" size="sm">9:16 Only</Badge>
                   </div>
                 )}
@@ -1061,12 +1052,12 @@ export default function Home() {
                 </div>
 
                 {/* Project Name Field */}
-                <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 space-y-2">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <label htmlFor="project-name-input" className="block text-xs font-semibold text-zinc-200">
-                      Project Name
+                    <label htmlFor="project-name-input" className="block text-[13px] font-semibold text-zinc-200">
+                      Project name
                     </label>
-                    <span className="text-[11px] font-mono text-zinc-500">
+                    <span className="text-xs font-mono text-zinc-500">
                       {projectName.length}/60
                     </span>
                   </div>
@@ -1079,14 +1070,14 @@ export default function Home() {
                       onBlur={handleProjectNameBlur}
                       maxLength={60}
                       placeholder="Enter project name..."
-                      className="w-full rounded-xl border border-zinc-700 bg-zinc-950 px-3.5 py-2.5 text-xs text-white placeholder-zinc-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3.5 py-2.5 text-sm text-white placeholder-zinc-500 focus:border-[#10b981] focus-ring"
                     />
                   </div>
                   {projectNameError ? (
                     <p className="text-xs text-red-400">{projectNameError}</p>
                   ) : (
-                    <p className="text-[11px] text-zinc-400">
-                      Auto-derived from source file. Letters, numbers, spaces, and hyphens permitted.
+                    <p className="text-xs text-zinc-400">
+                      Letters, numbers, spaces, and hyphens permitted.
                     </p>
                   )}
                 </div>
@@ -1162,17 +1153,174 @@ export default function Home() {
                     try { localStorage.setItem("cliprobin_show_watermark", String(wm)); } catch {}
                   }}
                 />
+              </section>
+            )}
+          </div>
 
-                {/* Submit to Queue Button in Step 3 */}
-                <div className="pt-2 border-t border-zinc-800">
+          {/* Right Column: Sticky Aside — Plan Clarity before source selection, Live 9:16 Preview after */}
+          {activeVideo ? (
+            <aside className="sticky top-6 space-y-6 animate-fade-in">
+              <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[13px] font-semibold text-white">Live 9:16 Output Preview</span>
+                  <Badge variant="emerald" size="sm">9:16 Vertical</Badge>
+                </div>
+
+                {/* 9:16 Phone Mockup Container */}
+                <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] rounded-3xl border-2 border-zinc-700/80 bg-[#0a0a0c] overflow-hidden shadow-2xl flex flex-col items-center justify-center p-2 ring-1 ring-white/5">
+                  {/* Phone Speaker Notch */}
+                  <div className="absolute top-2.5 left-1/2 -translate-x-1/2 h-1 w-12 rounded-full bg-zinc-700/80 z-20" />
+
+                  {/* Video / Graphic Area */}
+                  <div className="relative size-full rounded-2xl overflow-hidden bg-black flex items-center justify-center">
+                    {framingMode === "true_9_16" ? (
+                      // Full bleed True 9:16
+                      videoPreviewUrl ? (
+                        <video
+                          src={videoPreviewUrl}
+                          data-decorative-loop="true"
+                          muted
+                          autoPlay
+                          loop
+                          playsInline
+                          style={{ objectPosition: `${Math.round(cropAnchorX * 100)}% 50%` }}
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <div className="size-full bg-gradient-to-b from-zinc-900 via-zinc-950 to-black flex items-center justify-center relative p-4 text-center">
+                          <div className="relative flex flex-col items-center">
+                            <div className="size-14 rounded-full border border-dashed border-emerald-400/70 bg-emerald-500/10 flex items-center justify-center">
+                              <svg className="size-7 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="12" cy="8" r="4" strokeWidth="2" />
+                                <path d="M6 20v-2a6 6 0 0 1 12 0v2" strokeWidth="2" />
+                              </svg>
+                            </div>
+                            <span className="mt-2.5 text-xs font-semibold text-emerald-300">
+                              {trackingMode === "locked"
+                                ? `Locked Crop (${Math.round(cropAnchorX * 100)}%)`
+                                : trackingMode === "cuts"
+                                ? "Speaker Cuts"
+                                : "Follow Speaker"}
+                            </span>
+                            <span className="text-xs text-zinc-400 mt-0.5">
+                              {trackingMode === "locked"
+                                ? "Fixed stationary horizontal window"
+                                : trackingMode === "cuts"
+                                ? "Stationary shot per active speaker"
+                                : "Camera smoothly follows speaker"}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    ) : framingMode === "square_rounded" ? (
+                      // 1:1 Rounded Square Card
+                      <div className="size-full bg-black flex items-center justify-center p-3">
+                        <div className="w-full aspect-square rounded-2xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
+                          {videoPreviewUrl ? (
+                            <video
+                              src={videoPreviewUrl}
+                              data-decorative-loop="true"
+                              muted
+                              autoPlay
+                              loop
+                              playsInline
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center text-center p-2">
+                              <span className="text-xs font-semibold text-emerald-300">1:1 Rounded</span>
+                              <span className="text-xs text-zinc-400 mt-0.5">Centered square card</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      // 16:9 Letterbox Card
+                      <div className="size-full bg-black flex items-center justify-center p-3">
+                        <div className="w-full aspect-video rounded-xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
+                          {videoPreviewUrl ? (
+                            <video
+                              src={videoPreviewUrl}
+                              data-decorative-loop="true"
+                              muted
+                              autoPlay
+                              loop
+                              playsInline
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center text-center p-2">
+                              <span className="text-xs font-semibold text-zinc-200">16:9 Letterbox</span>
+                              <span className="text-xs text-zinc-400 mt-0.5">Widescreen frame</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Watermark Overlay Preview */}
+                    {effectiveShowWatermark && (
+                      <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 shadow-sm">
+                        <span className="size-1.5 rounded-full bg-[#10b981]" />
+                        <span className="text-[10px] font-semibold text-white tracking-tight">Clip Robin</span>
+                      </div>
+                    )}
+
+                    {/* Live Moving Captions Overlay */}
+                    {showCaptions && (
+                      <div
+                        className={`absolute inset-x-2 z-20 text-center pointer-events-none transition-all duration-200 ${
+                          framingMode === "square_rounded" ? "bottom-[18%]" : "bottom-[26.5%]"
+                        }`}
+                      >
+                        <LiveMovingCaptions
+                          captionStyle={captionStyle}
+                          captionAnimation={captionAnimation}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Summary Chips */}
+                <div className="pt-2 border-t border-zinc-800 space-y-2">
+                  <span className="text-xs font-medium text-zinc-400 block">
+                    Configured options
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Badge variant="neutral">
+                      {framingMode === "true_9_16"
+                        ? trackingMode === "locked"
+                          ? `9:16 Locked (${Math.round(cropAnchorX * 100)}%)`
+                          : trackingMode === "cuts"
+                          ? "9:16 Cuts"
+                          : "9:16 Follow"
+                        : framingMode === "square_rounded"
+                        ? "1:1 Rounded"
+                        : "16:9 Letterbox"}
+                    </Badge>
+                    <Badge variant="neutral">
+                      {clipCount} {clipCount === 1 ? "clip" : "clips"} · {clipDurationSeconds}s
+                    </Badge>
+                    <Badge variant={showCaptions ? "emerald" : "neutral"}>
+                      {showCaptions ? `${activeStyleName} subtitles` : "No subtitles"}
+                    </Badge>
+                    <Badge variant="neutral">
+                      {effectiveShowWatermark ? "Watermark on" : "No watermark"}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Single Primary Action Button */}
+                <div className="pt-2">
                   <button
                     type="button"
                     onClick={handleSubmitToQueue}
                     disabled={isAtLimit}
                     className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 ${
                       isAtLimit
-                        ? "bg-zinc-800 text-zinc-500 border border-zinc-700/50 cursor-not-allowed opacity-60"
-                        : "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40 cursor-pointer"
+                        ? "border border-zinc-800 bg-zinc-900/60 text-zinc-500 cursor-not-allowed opacity-60"
+                        : "bg-[#10b981] text-zinc-950 hover:bg-[#059669] active:scale-[0.985] cursor-pointer"
                     }`}
                   >
                     <svg className="size-4 fill-current" viewBox="0 0 24 24">
@@ -1180,312 +1328,136 @@ export default function Home() {
                     </svg>
                     <span>
                       {isAtLimit
-                        ? "Queue Limit Reached (10/10)"
+                        ? `Queue Limit Reached (${maxQueueSize}/${maxQueueSize})`
                         : queueCount > 0
-                        ? `Add to Queue (${queueCount}/10)`
-                        : `Start Generating ${clipCount} ${clipCount === 1 ? "Clip" : "Clips"}`}
+                        ? `Add to Queue (${queueCount + 1}/${maxQueueSize})`
+                        : `Generate ${clipCount} ${clipCount === 1 ? "Clip" : "Clips"}`}
                     </span>
                   </button>
                   {isAtLimit && (
                     <p className="mt-2 text-center text-xs text-amber-400/90">
-                      Maximum 10 videos in queue. Please wait for current items to finish.
+                      Maximum {maxQueueSize} videos in queue. Wait for active items to finish.
                     </p>
                   )}
                 </div>
               </section>
-            )}
+            </aside>
+          ) : (
+            <aside className="space-y-4">
+              <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-[#f4f4f5]">What’s included</span>
+                  <Badge variant={isPro ? "emerald" : "neutral"} size="sm">
+                    {isPro ? "Pro active" : "Free plan"}
+                  </Badge>
+                </div>
+
+                <div className="space-y-2.5 text-xs">
+                  <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3.5 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-emerald-400">Free</span>
+                      <span className="text-zinc-500">Included</span>
+                    </div>
+                    <ul className="space-y-1 text-zinc-400">
+                      <li>· Local Whisper transcription</li>
+                      <li>· Fast Interval clip slicing</li>
+                      <li>· 16:9, 1:1 &amp; Full 9:16 framing</li>
+                      <li>· Classic &amp; Clean captions</li>
+                      <li>· 720×1280 MP4 &amp; ZIP export</li>
+                    </ul>
+                  </div>
+
+                  <div className="rounded-xl border border-amber-400/25 bg-[#0c0c0e] p-3.5 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-amber-300">Pro</span>
+                      <span className="text-zinc-400">$12/month</span>
+                    </div>
+                    <ul className="space-y-1 text-zinc-300">
+                      <li>· Gemini AI Hook Finder (20 credits/mo)</li>
+                      <li>· All 6 caption styles (Robin, Punch, Pill, Karaoke)</li>
+                      <li>· Watermark removal &amp; custom brand logo</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-xs text-zinc-500">
+                    {isPro ? "All Pro tools unlocked" : "No card needed for Free"}
+                  </span>
+                  <Link
+                    href="/subscription"
+                    className="rounded-xl border border-zinc-700 bg-[#18181c] hover:bg-[#202026] px-3.5 py-1.5 text-xs font-semibold text-zinc-200 transition-colors focus-ring"
+                  >
+                    {isPro ? "Manage plan" : "View plans"}
+                  </Link>
+                </div>
+              </section>
+            </aside>
+          )}
+        </div>
+
+        {/* Lower Section: Recent Projects */}
+        <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-base font-semibold text-[#f4f4f5]">Recent projects</h2>
+              <p className="text-xs text-zinc-400">Open a recent project in Clips Studio</p>
+            </div>
+            <Link
+              href="/projects"
+              className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
+            >
+              View all projects &rarr;
+            </Link>
           </div>
 
-          {/* Right Column: Sticky Aside with Live 9:16 Preview, Summary Chips & Action */}
-          <aside className="sticky top-6 space-y-6">
-            <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-[13px] font-semibold text-white">Live 9:16 Output Preview</span>
-                <Badge variant="emerald" size="sm">9:16 Vertical</Badge>
-              </div>
-
-              {/* 9:16 Phone Mockup Container */}
-              <div className="relative mx-auto aspect-[9/16] w-full max-w-[260px] rounded-3xl border-2 border-zinc-700/80 bg-[#0a0a0c] overflow-hidden shadow-2xl flex flex-col items-center justify-center p-2 ring-1 ring-white/5">
-                {/* Phone Speaker Notch */}
-                <div className="absolute top-2.5 left-1/2 -translate-x-1/2 h-1 w-12 rounded-full bg-zinc-700/80 z-20" />
-
-                {/* Video / Graphic Area */}
-                <div className="relative size-full rounded-2xl overflow-hidden bg-black flex items-center justify-center">
-                  {!activeVideo ? (
-                    // Empty preview state before Step 1 is chosen
-                    <div className="size-full bg-gradient-to-b from-zinc-900/60 to-black flex flex-col items-center justify-center p-4 text-center">
-                      <div className="size-12 rounded-full border border-dashed border-zinc-700 bg-zinc-900/80 flex items-center justify-center text-zinc-500">
-                        <svg className="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                          <polygon points="5 3 19 12 5 21 5 3" />
-                        </svg>
-                      </div>
-                      <p className="mt-3 text-xs font-semibold text-zinc-300">Step 1</p>
-                      <p className="text-[10px] text-zinc-500 mt-0.5">
-                        Add a source video to unlock live preview
-                      </p>
-                    </div>
-                  ) : framingMode === "true_9_16" ? (
-                    // Full bleed True 9:16
-                    videoPreviewUrl ? (
-                      <video
-                        src={videoPreviewUrl}
-                        data-decorative-loop="true"
-                        muted
-                        autoPlay
-                        loop
-                        playsInline
-                        style={{ objectPosition: `${Math.round(cropAnchorX * 100)}% 50%` }}
-                        className="size-full object-cover"
-                      />
-                    ) : (
-                      <div className="size-full bg-gradient-to-b from-purple-950/40 via-zinc-950 to-black flex items-center justify-center relative p-4 text-center">
-                        <div className="relative flex flex-col items-center">
-                          <div className="size-14 rounded-full border border-dashed border-purple-400/80 bg-purple-500/10 flex items-center justify-center">
-                            <svg className="size-7 text-purple-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <circle cx="12" cy="8" r="4" strokeWidth="2" />
-                              <path d="M6 20v-2a6 6 0 0 1 12 0v2" strokeWidth="2" />
-                            </svg>
-                          </div>
-                          <span className="mt-2 text-[10px] font-semibold text-purple-300">
-                            {trackingMode === "locked"
-                              ? `Locked Crop (${Math.round(cropAnchorX * 100)}%)`
-                              : trackingMode === "cuts"
-                              ? "Speaker Cuts"
-                              : "Follow Speaker"}
-                          </span>
-                          <span className="text-[8px] text-zinc-400 mt-0.5">
-                            {trackingMode === "locked"
-                              ? "Fixed stationary horizontal window"
-                              : trackingMode === "cuts"
-                              ? "Stationary shot per active speaker"
-                              : "Camera smoothly follows speaker"}
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  ) : framingMode === "square_rounded" ? (
-                    // 1:1 Rounded Square Card
-                    <div className="size-full bg-black flex items-center justify-center p-3">
-                      <div className="w-full aspect-square rounded-2xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
-                        {videoPreviewUrl ? (
-                          <video
-                            src={videoPreviewUrl}
-                            data-decorative-loop="true"
-                            muted
-                            autoPlay
-                            loop
-                            playsInline
-                            className="size-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center text-center p-2">
-                            <span className="text-xs font-semibold text-emerald-300">1:1 Rounded</span>
-                            <span className="text-[9px] text-zinc-400 mt-0.5">Centered Square Card</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    // 16:9 Letterbox Card
-                    <div className="size-full bg-black flex items-center justify-center p-3">
-                      <div className="w-full aspect-video rounded-xl overflow-hidden border border-zinc-700 bg-zinc-900 shadow-md relative flex items-center justify-center">
-                        {videoPreviewUrl ? (
-                          <video
-                            src={videoPreviewUrl}
-                            data-decorative-loop="true"
-                            muted
-                            autoPlay
-                            loop
-                            playsInline
-                            className="size-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center text-center p-2">
-                            <span className="text-xs font-semibold text-zinc-200">16:9 Letterbox</span>
-                            <span className="text-[9px] text-zinc-400 mt-0.5">Floating Widescreen Card</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Watermark Overlay Preview */}
-                  {activeVideo && effectiveShowWatermark && (
-                    <div className="absolute top-3.5 right-3.5 z-20 flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/75 border border-white/10 backdrop-blur-xs shadow-sm">
-                      <span className="size-1.5 rounded-full bg-[#10b981]" />
-                      <span className="text-[8px] font-semibold text-white tracking-tight">Clip Robin</span>
-                    </div>
-                  )}
-
-                  {/* Live Moving Captions Overlay */}
-                  {activeVideo && showCaptions && (
-                    <div
-                      className={`absolute inset-x-2 z-20 text-center pointer-events-none transition-all duration-200 ${
-                        framingMode === "square_rounded" ? "bottom-[18%]" : "bottom-[26.5%]"
-                      }`}
-                    >
-                      <LiveMovingCaptions
-                        captionStyle={captionStyle}
-                        captionAnimation={captionAnimation}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Summary Chips */}
-              <div className="pt-2 border-t border-zinc-800 space-y-2">
-                <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider block">
-                  Configured options
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  <Badge variant="neutral">
-                    {framingMode === "true_9_16"
-                      ? trackingMode === "locked"
-                        ? `9:16 Locked (${Math.round(cropAnchorX * 100)}%)`
-                        : trackingMode === "cuts"
-                        ? "9:16 Cuts"
-                        : "9:16 Follow"
-                      : framingMode === "square_rounded"
-                      ? "1:1 Rounded"
-                      : "16:9 Letterbox"}
-                  </Badge>
-                  <Badge variant="neutral">
-                    {clipCount} {clipCount === 1 ? "clip" : "clips"} · {clipDurationSeconds}s
-                  </Badge>
-                  <Badge variant={showCaptions ? "emerald" : "neutral"}>
-                    {showCaptions ? `${activeStyleName} subtitles` : "No subtitles"}
-                  </Badge>
-                  <Badge variant="neutral">
-                    {effectiveShowWatermark ? "Watermark on" : "No watermark"}
-                  </Badge>
-                </div>
-              </div>
-
-              {/* Action Button */}
-              <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={handleSubmitToQueue}
-                  disabled={isAtLimit}
-                  className={`w-full min-h-[46px] rounded-xl px-5 py-3 text-[13px] font-bold transition-all duration-150 focus-ring flex items-center justify-center gap-2 cursor-pointer ${
-                    isAtLimit
-                      ? "border border-zinc-800 bg-zinc-900/60 text-zinc-500 cursor-not-allowed opacity-60"
-                      : "bg-[#10b981] text-zinc-950 hover:bg-[#059669] hover:shadow-lg hover:shadow-emerald-950/40"
-                  }`}
-                >
-                  <svg className="size-4 fill-current" viewBox="0 0 24 24">
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                  <span>
-                    {!activeVideo
-                      ? (importTab === "file" ? "Browse Video File" : "Paste YouTube Link")
-                      : isAtLimit
-                      ? "Queue Full (10/10)"
-                      : queueCount > 0
-                      ? `Add to Queue (${queueCount + 1}/10)`
-                      : `Generate ${clipCount} ${clipCount === 1 ? "Clip" : "Clips"}`}
-                  </span>
-                </button>
-              </div>
-            </section>
-          </aside>
-        </div>
-
-        {/* Lower Section: Recent Projects & Local Engine Guarantee */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 pt-4 border-t border-zinc-800/80">
-          {/* Recent Projects List (Span 2 cols) */}
-          <section className="lg:col-span-2 rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-semibold text-white">Recent projects</h2>
-                <p className="text-xs text-zinc-400">Your recent video clip generation runs</p>
-              </div>
-              <Link
-                href="/projects"
-                className="text-xs font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4"
-              >
-                View all projects &rarr;
-              </Link>
+          {isLoadingProjects ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <DashboardProjectSkeleton />
+              <DashboardProjectSkeleton />
+              <DashboardProjectSkeleton />
+              <DashboardProjectSkeleton />
             </div>
-
-            {isLoadingProjects ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <DashboardProjectSkeleton />
-                <DashboardProjectSkeleton />
-                <DashboardProjectSkeleton />
-                <DashboardProjectSkeleton />
-              </div>
-            ) : recentProjects.length === 0 ? (
-              <div className="py-10 text-center text-xs text-zinc-400 space-y-1.5">
-                <p className="font-medium text-zinc-300 text-sm">No projects created yet</p>
-                <p className="text-xs text-zinc-500">
-                  Import a video above to generate your first vertical clips.
-                </p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {recentProjects.slice(0, 4).map((project) => (
-                  <div
-                    key={project.project_id}
-                    className="flex flex-col justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 transition-all duration-150 hover:border-zinc-700 hover:bg-[#101014]"
-                  >
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-semibold text-white font-mono text-xs truncate" title={project.title || project.project_id}>
-                          {project.title || project.project_id}
-                        </span>
-                        <StatusPill status={project.status} />
-                      </div>
-                      <p className="mt-1 text-xs text-zinc-400">
-                        {project.source_type} • {project.clips} {project.clips === 1 ? "clip" : "clips"}
-                      </p>
-                    </div>
-
-                    <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between">
-                      <span className="text-xs text-zinc-500">
-                        {new Date(project.created_at).toLocaleDateString()}
-                      </span>
-                      <Link
-                        href={`/clips?project=${encodeURIComponent(project.project_id)}`}
-                        className="text-xs font-medium text-emerald-400 hover:text-emerald-300 hover:underline"
-                      >
-                        {project.clips > 0 ? "Open in Studio →" : "Generate →"}
-                      </Link>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Local Processing Engine Card */}
-          <section className="rounded-2xl border border-zinc-800 bg-[#121215] p-6 shadow-sm flex flex-col justify-between space-y-4">
-            <div>
-              <div className="flex items-center gap-2.5 mb-2 text-zinc-200">
-                <div className="flex size-7 items-center justify-center rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-[#10b981]">
-                  <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
-                  </svg>
-                </div>
-                <h3 className="text-sm font-semibold text-white">
-                  Local-First Engine
-                </h3>
-              </div>
-              <p className="text-xs text-zinc-400 leading-relaxed mt-2">
-                Clip Robin executes speech transcription, framing, and subtitle burn-in locally on your machine via faster-whisper and FFmpeg. Your media stays completely private and never leaves your computer.
+          ) : recentProjects.length === 0 ? (
+            <div className="py-10 text-center text-xs text-zinc-400 space-y-1.5">
+              <p className="font-medium text-zinc-300 text-sm">No projects created yet</p>
+              <p className="text-xs text-zinc-500">
+                Import a video above to generate your first vertical clips.
               </p>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {recentProjects.slice(0, 4).map((project) => (
+                <Link
+                  key={project.project_id}
+                  href={`/clips?project=${encodeURIComponent(project.project_id)}`}
+                  className="group flex flex-col justify-between rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 transition-all duration-150 hover:-translate-y-0.5 hover:border-zinc-700 hover:bg-[#141418] focus-ring"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-[#f4f4f5] font-mono text-xs truncate" title={project.title || project.project_id}>
+                        {project.title || project.project_id}
+                      </span>
+                      <StatusPill status={project.status} />
+                    </div>
+                    <p className="mt-1.5 text-xs text-zinc-400">
+                      {project.source_type} · {project.clips} {project.clips === 1 ? "clip" : "clips"}
+                    </p>
+                  </div>
 
-            <div className="pt-4 border-t border-zinc-800 flex items-center justify-between">
-              <span className="text-xs text-zinc-500">Processing Mode</span>
-              <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-400">
-                <span className="size-2 rounded-full bg-[#10b981] animate-pulse" />
-                <span>100% Offline Capable</span>
-              </div>
+                  <div className="mt-4 pt-3 border-t border-zinc-800/80 flex items-center justify-between">
+                    <span className="text-xs text-zinc-500">
+                      {new Date(project.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="text-xs font-medium text-emerald-400 group-hover:text-emerald-300">
+                      {project.clips > 0 ? "Open Studio →" : "Generate →"}
+                    </span>
+                  </div>
+                </Link>
+              ))}
             </div>
-          </section>
-        </div>
+          )}
+        </section>
       </div>
     </main>
   );

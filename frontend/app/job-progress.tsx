@@ -97,105 +97,117 @@ export default function JobProgress() {
   const downloadJob = jobs.find((job) => job.kind === "download");
 
   return (
-    <div className="group fixed bottom-5 right-5 z-50">
-      <section
-        aria-label="Active job progress"
-        className={`absolute bottom-[52px] right-0 w-84 max-w-[calc(100vw-2.5rem)] rounded-[12px] border border-[#232326] bg-[#111113] p-4 shadow-2xl transition-all duration-150 ${
-          isOpen ? "block" : "hidden group-hover:block group-focus-within:block"
-        }`}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-            {jobs.length > 0 ? "Active Jobs" : "Status unavailable"}
-          </h2>
-          {hasDownloadJob && (
-            <span className="inline-flex items-center gap-1 rounded bg-[#10b981]/15 px-1.5 py-0.5 text-xs font-semibold text-[#10b981]">
-              <span className="size-1.5 rounded-full bg-[#10b981] animate-ping" />
-              Downloading
-            </span>
-          )}
-        </div>
-
-        {error && (
-          <p role="status" className="mb-3 text-xs text-amber-300">
-            {error}
-          </p>
-        )}
-
-        <ul className="space-y-3.5">
-          {jobs.map((job) => (
-            <li key={`${job.kind}-${job.id}`} className="rounded-[10px] border border-[#232326] bg-[#0a0a0a] p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-white">
-                    {job.kind === "download"
-                      ? "Downloading video"
-                      : job.kind === "transcription"
-                      ? "Transcribing audio"
-                      : "Generating clips"}
-                  </p>
-                  <p className="mt-0.5 truncate text-xs text-zinc-400" title={job.title || job.step}>
-                    <span className="font-mono text-zinc-300">
-                      {job.title ? `${job.title.slice(0, 24)}...` : job.project_id}
-                    </span>{" "}
-                    · {job.step}
-                  </p>
-                </div>
-                <span className="shrink-0 text-xs font-mono font-medium text-emerald-400">
-                  {Math.round(job.progress)}%
+    <div className="fixed bottom-5 right-5 z-50">
+      {isOpen && (
+        <section
+          aria-label="Active job progress"
+          className="absolute bottom-[56px] right-0 w-84 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-zinc-800 bg-[#121215] p-4 shadow-2xl animate-fade-in"
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="text-xs font-semibold text-zinc-300">
+              {jobs.length > 0 ? "Active jobs" : "Status unavailable"}
+            </h2>
+            <div className="flex items-center gap-2">
+              {hasDownloadJob && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#10b981]/15 px-2 py-0.5 text-xs font-semibold text-[#10b981]">
+                  <span className="size-1.5 rounded-full bg-[#10b981] animate-pulse" />
+                  Downloading
                 </span>
-              </div>
-
-              <div
-                role="progressbar"
-                aria-label={`${
-                  job.kind === "download"
-                    ? "Download"
-                    : job.kind === "transcription"
-                    ? "Transcription"
-                    : "Clip generation"
-                } progress for ${job.project_id}`}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(job.progress)}
-                className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-zinc-800"
+              )}
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                aria-label="Close active jobs"
+                className="rounded-md p-1 text-zinc-400 hover:text-white focus-ring cursor-pointer"
               >
+                ✕
+              </button>
+            </div>
+          </div>
+
+          {error && (
+            <p role="status" className="mb-3 text-xs text-amber-300">
+              {error}
+            </p>
+          )}
+
+          <ul className="space-y-3">
+            {jobs.map((job) => (
+              <li key={`${job.kind}-${job.id}`} className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-white">
+                      {job.kind === "download"
+                        ? "Downloading video"
+                        : job.kind === "transcription"
+                        ? "Transcribing audio"
+                        : "Generating clips"}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-zinc-400" title={job.title || job.step}>
+                      <span className="font-mono text-zinc-300">
+                        {job.title ? `${job.title.slice(0, 24)}...` : job.project_id}
+                      </span>{" "}
+                      · {job.step}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-xs font-mono font-medium text-emerald-400">
+                    {Math.round(job.progress)}%
+                  </span>
+                </div>
+
                 <div
-                  className="h-full rounded-full bg-[#10b981] transition-[width] duration-200"
-                  style={{ width: `${Math.max(4, Math.round(job.progress))}%` }}
-                />
-              </div>
-
-              {job.kind === "generation" && (job.total_clips ?? 0) > 0 && (
-                <p className="mt-1.5 text-right text-xs text-zinc-500">
-                  {job.completed_clips ?? 0} of {job.total_clips} clips rendered
-                </p>
-              )}
-
-              {job.kind === "generation" && (
-                <Link
-                  href={`/clips?project=${encodeURIComponent(job.project_id)}`}
-                  className="mt-1.5 inline-block text-xs text-emerald-400 underline hover:text-emerald-300"
+                  role="progressbar"
+                  aria-label={`${
+                    job.kind === "download"
+                      ? "Download"
+                      : job.kind === "transcription"
+                      ? "Transcription"
+                      : "Clip generation"
+                  } progress for ${job.project_id}`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(job.progress)}
+                  className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-zinc-800"
                 >
-                  View Clips &rarr;
-                </Link>
-              )}
-            </li>
-          ))}
-        </ul>
-      </section>
+                  <div
+                    className="h-full rounded-full bg-[#10b981] transition-[width] duration-200"
+                    style={{ width: `${Math.max(4, Math.round(job.progress))}%` }}
+                  />
+                </div>
+
+                {job.kind === "generation" && (job.total_clips ?? 0) > 0 && (
+                  <p className="mt-1.5 text-right text-xs text-zinc-400">
+                    {job.completed_clips ?? 0} of {job.total_clips} clips rendered
+                  </p>
+                )}
+
+                {job.kind === "generation" && (
+                  <Link
+                    href={`/clips?project=${encodeURIComponent(job.project_id)}`}
+                    onClick={() => setIsOpen(false)}
+                    className="mt-1.5 inline-block text-xs text-emerald-400 underline hover:text-emerald-300"
+                  >
+                    View clips &rarr;
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* Circle button on bottom right */}
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
+        aria-expanded={isOpen}
         aria-label={`${jobs.length} active ${jobs.length === 1 ? "job" : "jobs"}. ${
           hasDownloadJob ? `Video downloading (${Math.round(downloadJob?.progress || 0)}%).` : ""
-        } Click or hover to view progress.`}
-        className={`relative flex h-11 w-11 items-center justify-center rounded-full border bg-[#111113] text-emerald-400 shadow-xl transition-all duration-150 hover:border-zinc-700 hover:bg-[#18181b] focus:outline-none focus:ring-2 focus:ring-[#10b981] ${
+        } Click to view progress.`}
+        className={`relative flex h-11 w-11 items-center justify-center rounded-full border bg-[#121215] text-emerald-400 shadow-xl transition-all duration-150 hover:border-zinc-700 hover:bg-[#18181c] focus-ring cursor-pointer ${
           hasDownloadJob
-            ? "border-[#10b981] ring-2 ring-[#10b981]/50 ring-offset-2 ring-offset-[#0a0a0a]"
-            : "border-[#232326]"
+            ? "border-[#10b981] ring-2 ring-[#10b981]/40 ring-offset-2 ring-offset-[#09090b]"
+            : "border-zinc-800"
         }`}
       >
         {hasDownloadJob ? (
@@ -245,7 +257,7 @@ export default function JobProgress() {
         )}
 
         {jobs.length > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#10b981] px-1 text-xs font-bold text-zinc-950 ring-2 ring-[#0a0a0a]">
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[#10b981] px-1 text-xs font-bold text-zinc-950 ring-2 ring-[#09090b]">
             {jobs.length}
           </span>
         )}

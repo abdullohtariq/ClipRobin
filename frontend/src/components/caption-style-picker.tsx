@@ -211,6 +211,7 @@ function CaptionCard({
   onSelect,
   buttonRef,
 }: CaptionCardProps) {
+  const isProStyle = !["classic", "clean"].includes(styleOption.id);
   return (
     <button
       ref={buttonRef}
@@ -226,16 +227,9 @@ function CaptionCard({
       }`}
     >
       {/* Visual Sample Box */}
-      <div className="relative w-full h-16 sm:h-20 lg:h-22 rounded-lg overflow-hidden flex items-center justify-center border border-zinc-800/80 bg-[#141418] bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:12px_12px]">
-        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-black/20 pointer-events-none" />
+      <div className="relative w-full h-16 sm:h-20 lg:h-22 rounded-lg overflow-hidden flex items-center justify-center border border-zinc-800/80 bg-[#09090b]">
         <CaptionVisualSample styleId={styleOption.id} />
 
-        {isLocked && (
-          <div className="absolute top-1.5 left-1.5 sm:top-2 sm:left-2 z-10 flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-[9px] sm:text-[10px] font-bold text-amber-300 backdrop-blur-xs">
-            <span>🔒</span>
-            <span>PRO</span>
-          </div>
-        )}
         {isSelected && (
           <div className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 z-10 flex size-5 items-center justify-center rounded-full bg-[#10b981] text-zinc-950 font-bold text-xs shadow">
             <svg className="size-3 stroke-[3]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -251,13 +245,19 @@ function CaptionCard({
           <span className="text-xs sm:text-sm font-semibold text-white tracking-tight truncate">
             {styleOption.name}
           </span>
-          <Badge variant="neutral" className="text-[10px] sm:text-xs px-1.5 py-0 font-medium shrink-0">
-            {styleOption.animationName}
-          </Badge>
+          {isProStyle ? (
+            <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/35 text-[11px] font-semibold leading-none text-amber-300 shrink-0">
+              {isLocked ? "🔒 Pro" : "Pro"}
+            </span>
+          ) : (
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-semibold leading-none text-emerald-300 shrink-0">
+              Free
+            </span>
+          )}
         </div>
-        {isSelected && (
-          <span className="text-[11px] sm:text-xs font-semibold text-[#10b981] shrink-0">Selected</span>
-        )}
+        <span className="text-xs text-zinc-400 font-medium shrink-0">
+          {styleOption.animationName}
+        </span>
       </div>
       <p className="mt-1 text-[11px] sm:text-xs text-zinc-400 line-clamp-1 leading-snug">
         {styleOption.description}
@@ -458,8 +458,8 @@ export function CaptionStylePicker({
             >
               Caption style &amp; motion studio
             </h2>
-            <p id="caption-style-picker-desc" className="text-[11px] sm:text-xs text-zinc-400 truncate">
-              Preview every typography style, word animation, and platform safe zone in 9:16
+            <p id="caption-style-picker-desc" className="text-xs text-zinc-400 truncate">
+              2 Free styles · 4 Pro styles · Preview typography, motion, and 9:16 safe zones
             </p>
           </div>
 
