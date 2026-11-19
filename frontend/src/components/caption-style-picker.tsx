@@ -7,18 +7,16 @@ import { Checkbox } from "@/src/components/ui/checkbox";
 import { IconButton } from "@/src/components/ui/icon-button";
 import { ModalDialog } from "@/src/components/ui/modal-dialog";
 import { useSubscription } from "@/src/lib/subscription-context";
+import {
+  CAPTION_STYLE_OPTIONS,
+  CAPTION_STYLE_VISUALS,
+  normalizeCaptionStyle,
+  type StyleOption,
+} from "@/src/lib/caption-styles";
 import { getDefaultAnimationForStyle, getEffectiveAnimation } from "./live-moving-captions";
 
-export interface StyleOption {
-  id: CaptionStyle;
-  name: string;
-  description: string;
-  category: "bold" | "minimal" | "boxed";
-  categories: Array<"all" | "bold" | "minimal" | "boxed">;
-  animationName: string;
-  defaultAnimation: CaptionAnimation;
-  fontFamily: string;
-}
+export { CAPTION_STYLE_OPTIONS };
+export type { StyleOption };
 
 export interface AnimationOption {
   id: CaptionAnimation;
@@ -54,146 +52,42 @@ export const CAPTION_ANIMATION_OPTIONS: AnimationOption[] = [
   },
 ];
 
-export const CAPTION_STYLE_OPTIONS: StyleOption[] = [
-  {
-    id: "classic",
-    name: "Classic",
-    description: "The original Clip Robin word-by-word look with dark box.",
-    category: "boxed",
-    categories: ["all", "boxed", "bold"],
-    animationName: "Pop",
-    defaultAnimation: "pop",
-    fontFamily: "Montserrat Bold",
-  },
-  {
-    id: "robin",
-    name: "Robin",
-    description: "Signature viral all-caps style with emerald highlight.",
-    category: "bold",
-    categories: ["all", "bold"],
-    animationName: "Grow",
-    defaultAnimation: "grow",
-    fontFamily: "Montserrat Black",
-  },
-  {
-    id: "clean",
-    name: "Clean",
-    description: "Clean minimal typography with soft shadow.",
-    category: "minimal",
-    categories: ["all", "minimal"],
-    animationName: "Fade",
-    defaultAnimation: "fade",
-    fontFamily: "Montserrat Bold",
-  },
-  {
-    id: "punch",
-    name: "Punch",
-    description: "High-impact bold all-caps with golden accent pop.",
-    category: "bold",
-    categories: ["all", "bold"],
-    animationName: "Pop",
-    defaultAnimation: "pop",
-    fontFamily: "Anton Heavy",
-  },
-  {
-    id: "pill",
-    name: "Pill",
-    description: "Translucent dark box with active emerald word highlight.",
-    category: "boxed",
-    categories: ["all", "boxed"],
-    animationName: "Pop",
-    defaultAnimation: "pop",
-    fontFamily: "Poppins Bold",
-  },
-  {
-    id: "karaoke",
-    name: "Karaoke",
-    description: "Smooth karaoke sweep highlight across words.",
-    category: "minimal",
-    categories: ["all", "minimal"],
-    animationName: "Sweep",
-    defaultAnimation: "sweep",
-    fontFamily: "Montserrat Bold",
-  },
-];
-
 export function getPreviewUrls(
   styleId: CaptionStyle,
   animationId?: CaptionAnimation | null
 ) {
-  if (styleId === "classic" || !animationId) {
+  const canonicalId = normalizeCaptionStyle(styleId);
+  if (canonicalId === "classic" || !animationId) {
     return {
-      videoUrl: `/caption-previews/${styleId}.mp4`,
-      posterUrl: `/caption-previews/${styleId}.jpg`,
+      videoUrl: `/caption-previews/${canonicalId}.mp4`,
+      posterUrl: `/caption-previews/${canonicalId}.jpg`,
     };
   }
-  const effectiveAnim = getEffectiveAnimation(styleId, animationId);
+  const effectiveAnim = getEffectiveAnimation(canonicalId, animationId);
   return {
-    videoUrl: `/caption-previews/${styleId}__${effectiveAnim}.mp4`,
-    posterUrl: `/caption-previews/${styleId}__${effectiveAnim}.jpg`,
+    videoUrl: `/caption-previews/${canonicalId}__${effectiveAnim}.mp4`,
+    posterUrl: `/caption-previews/${canonicalId}__${effectiveAnim}.jpg`,
   };
 }
 
-// Responsive typography sample centered on subtle checkered dark canvas
+// Responsive typography sample centered on dark canvas
 export function CaptionVisualSample({ styleId }: { styleId: CaptionStyle }) {
-  switch (styleId) {
-    case "classic":
-      return (
-        <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
-          <span className="inline-block bg-black/85 px-2 sm:px-3.5 py-0.5 sm:py-1 rounded border border-white/10 text-[12px] sm:text-[15px] lg:text-[16px] font-bold text-white tracking-normal whitespace-nowrap drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] select-none">
-            These are <span className="text-[#FFFF00]">captions</span>
+  const canonicalId = normalizeCaptionStyle(styleId);
+  const tokens = CAPTION_STYLE_VISUALS[canonicalId] ?? CAPTION_STYLE_VISUALS.classic;
+  return (
+    <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
+      <span className={`${tokens.containerClass} ${tokens.sampleTextClass} select-none`}>
+        <span className={tokens.inactiveClass}>{tokens.samplePrefix}</span>
+        {canonicalId === "clean" ? (
+          <span className={tokens.inactiveClass}>{tokens.sampleHighlight}</span>
+        ) : (
+          <span className={canonicalId === "karaoke" ? tokens.activeSweepClass : tokens.activeClass}>
+            {tokens.sampleHighlight}
           </span>
-        </div>
-      );
-    case "robin":
-      return (
-        <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
-          <span className="text-[13px] sm:text-[15px] lg:text-[17px] font-black uppercase text-white tracking-wide whitespace-nowrap drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] [text-shadow:_0_2px_4px_rgba(0,0,0,0.9),_0_0_2px_#000] select-none">
-            THESE ARE <span className="text-[#34D399]">CAPTIONS</span>
-          </span>
-        </div>
-      );
-    case "punch":
-      return (
-        <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
-          <span className="text-[13px] sm:text-[16px] lg:text-[18px] font-extrabold uppercase text-white tracking-tight whitespace-nowrap drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] [text-shadow:_0_2px_4px_rgba(0,0,0,0.9),_0_0_2px_#000] select-none">
-            THESE ARE <span className="text-[#F7C204]">CAPTIONS</span>
-          </span>
-        </div>
-      );
-    case "clean":
-      return (
-        <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
-          <span className="text-[12px] sm:text-[14px] lg:text-[16px] font-bold text-white tracking-tight whitespace-nowrap drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] select-none">
-            These are captions
-          </span>
-        </div>
-      );
-    case "pill":
-      return (
-        <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
-          <span className="inline-flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-0.5 sm:py-1 rounded-full bg-black/85 border border-white/15 text-[11px] sm:text-[14px] lg:text-[15px] font-semibold text-white whitespace-nowrap drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] select-none">
-            These are <span className="text-[#34D399] font-bold">captions</span>
-          </span>
-        </div>
-      );
-    case "karaoke":
-      return (
-        <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
-          <span className="text-[12px] sm:text-[14px] lg:text-[16px] font-bold text-white tracking-tight whitespace-nowrap drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)] select-none">
-            These are <span className="text-[#34D399] underline decoration-[#34D399]/60 underline-offset-4">captions</span>
-          </span>
-        </div>
-      );
-    default:
-      return (
-        <div className="flex items-center justify-center p-1.5 sm:p-2 max-w-full">
-          <span className="text-[12px] sm:text-[14px] lg:text-[16px] font-bold text-white whitespace-nowrap select-none">
-            These are captions
-          </span>
-        </div>
-      );
-  }
+        )}
+      </span>
+    </div>
+  );
 }
 
 interface CaptionCardProps {
@@ -459,7 +353,7 @@ export function CaptionStylePicker({
               Caption style &amp; motion studio
             </h2>
             <p id="caption-style-picker-desc" className="text-xs text-zinc-400 truncate">
-              2 Free styles · 4 Pro styles · Preview typography, motion, and 9:16 safe zones
+              2 Free styles · {CAPTION_STYLE_OPTIONS.length - 2} Pro styles · Preview typography, motion, and 9:16 safe zones
             </p>
           </div>
 
@@ -580,7 +474,7 @@ export function CaptionStylePicker({
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search styles (e.g. Robin, Bold, Anton)..."
+                  placeholder="Search styles (e.g. Hormozi, Sticker, Neon, Cinema)..."
                   aria-label="Search caption styles"
                   className="w-full pl-8 sm:pl-9 pr-8 sm:pr-9 py-1.5 sm:py-2 rounded-xl border border-zinc-800 bg-[#141418] text-xs text-zinc-200 placeholder-zinc-500 focus-ring"
                 />

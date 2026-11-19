@@ -464,12 +464,24 @@ export async function getLocalTranscriptionJob(
 
 export type FramingMode = "standard" | "square_rounded" | "true_9_16";
 export type CaptionStyle =
+  | "classic"
   | "clean"
   | "punch"
   | "robin"
   | "pill"
   | "karaoke"
-  | "classic"
+  | "hormozi"
+  | "hype"
+  | "sticker"
+  | "marker"
+  | "neon"
+  | "flame"
+  | "cinema"
+  | "podcast"
+  | "electric"
+  | "aesthetic"
+  | "sunset"
+  | "dark_tag"
   | "bold_emerald"
   | "clean_gold";
 export type CaptionAnimation = "pop" | "grow" | "sweep" | "fade" | "glide";

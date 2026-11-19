@@ -12,7 +12,7 @@
       "height": 640,
       "size_bytes": 14675,
       "poster_size_bytes": 5574,
-      "definition_hash": "8cf02bdb8a082a7a9f35bbf4dda3300fa2e246e5c178b24ffcad4299ec31ce7d"
+      "definition_hash": "b035eefba731f432043d1401e12b94bb922a9f381d8e135de24a192ff0ce29ec"
     },
     "clean__pop": {
       "style": "clean",
@@ -22,9 +22,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11402,
-      "poster_size_bytes": 3087,
-      "definition_hash": "e95e568788811a75ff68c4c8d1fdaf29609fc5dad2a232c828a42d4a2074bfc2"
+      "size_bytes": 13003,
+      "poster_size_bytes": 3138,
+      "definition_hash": "04eb76ee74c9e2c853af219c12698c02e599f0fa19b7832c51785fc61d43a2d7"
     },
     "clean__grow": {
       "style": "clean",
@@ -34,9 +34,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11402,
-      "poster_size_bytes": 3087,
-      "definition_hash": "f4c2dfb21c5dce6c90bbf9c87739c8648ba64f46ff2afff958e16bd7c105a054"
+      "size_bytes": 13469,
+      "poster_size_bytes": 3116,
+      "definition_hash": "c4a40a40165ae6a109633caa8322d267f5b125821086624994dd07d576342594"
     },
     "clean__sweep": {
       "style": "clean",
@@ -48,7 +48,7 @@
       "height": 640,
       "size_bytes": 11417,
       "poster_size_bytes": 3023,
-      "definition_hash": "fb8376ebdc60398fc5b77f245139198ef9bfac011c4f6fb5416eea458eec354b"
+      "definition_hash": "bea10f61a3518513a93eda77f0de7a8de3e81ba7fcb4f201de0577bc6eef0ba6"
     },
     "clean__fade": {
       "style": "clean",
@@ -58,9 +58,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11402,
-      "poster_size_bytes": 3087,
-      "definition_hash": "a73b868d705b92203dd52458e6fa7d8b3bd26a10c141a6f96a3381b66724792d"
+      "size_bytes": 12826,
+      "poster_size_bytes": 3107,
+      "definition_hash": "cf040a517e88417f6fb33aa512e1f93d527b5dbdd66caf04b9a61f4f450e37d4"
     },
     "clean__glide": {
       "style": "clean",
@@ -70,9 +70,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11402,
-      "poster_size_bytes": 3087,
-      "definition_hash": "84f0d0629d45346c7924205b5098c6a40ab1832c19a8fe283a62988f09fdcafa"
+      "size_bytes": 13273,
+      "poster_size_bytes": 3176,
+      "definition_hash": "025d0ebd402a2be3cf949249d7e29effc54e2e78cf568aa21afbbda126e263b4"
     },
     "punch__pop": {
       "style": "punch",
@@ -82,9 +82,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11932,
-      "poster_size_bytes": 3282,
-      "definition_hash": "7f805d90896c6b3db6c940e0b052d9837516ddd3b049fe43af7495587c0595ff"
+      "size_bytes": 13285,
+      "poster_size_bytes": 3196,
+      "definition_hash": "cd8abb55924e0564abb9659e47485b5edea4cb53813744b3787ace0b3f058d7c"
     },
     "punch__grow": {
       "style": "punch",
@@ -94,9 +94,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11932,
-      "poster_size_bytes": 3282,
-      "definition_hash": "d0ba9eb404a23607eef4b2b5087b67346ae716946beef3e4dbbdb183deb46ea3"
+      "size_bytes": 13820,
+      "poster_size_bytes": 3189,
+      "definition_hash": "886fcb737830a58bc7adcb66ea4e6cb9df21b99c7925150e51c7c9910a5de054"
     },
     "punch__sweep": {
       "style": "punch",
@@ -106,9 +106,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10654,
-      "poster_size_bytes": 3122,
-      "definition_hash": "1a97225748a71b524281a0305af7f4dfd524dc4a09e55b7518fa4f6ad3955910"
+      "size_bytes": 12240,
+      "poster_size_bytes": 3202,
+      "definition_hash": "2d4e4c5b3ff4888af8e2c06a38ca01b7514c17874c618320afb6706f080dbdc9"
     },
     "punch__fade": {
       "style": "punch",
@@ -118,9 +118,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11932,
-      "poster_size_bytes": 3282,
-      "definition_hash": "3f908a3981a243f9d9239288afc117d8f77374717783063476952b7f1157c9ba"
+      "size_bytes": 13130,
+      "poster_size_bytes": 3196,
+      "definition_hash": "b88c0e810e5670575dd77acab9334ac907fe8ff7a39a0f71f7d134718f61a97a"
     },
     "punch__glide": {
       "style": "punch",
@@ -130,9 +130,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11932,
-      "poster_size_bytes": 3282,
-      "definition_hash": "45a648992cb7f41f51d3ef83824296012d38a0a5e1b71a28d85d2c4e7cca6046"
+      "size_bytes": 13040,
+      "poster_size_bytes": 3188,
+      "definition_hash": "9f2e9fd10ed2676e64cac7ce8508c3c081a54d907453ce7758287a4d7c50139e"
     },
     "robin__pop": {
       "style": "robin",
@@ -142,9 +142,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13342,
-      "poster_size_bytes": 3386,
-      "definition_hash": "c1f53709f2e337929f6ecf3bce3389da2599de2e09bdcd0780ac30c6aad318f0"
+      "size_bytes": 14118,
+      "poster_size_bytes": 3370,
+      "definition_hash": "c39bc05341ce46f64ad486a2be21002f0fef1fdb40f534f7f41ba401c14c8548"
     },
     "robin__grow": {
       "style": "robin",
@@ -154,9 +154,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13342,
-      "poster_size_bytes": 3386,
-      "definition_hash": "6323be4c8f89f2218b5655ba2f855580440b9992ebf4869f228eaadc65154d91"
+      "size_bytes": 14963,
+      "poster_size_bytes": 3331,
+      "definition_hash": "eb45dc3c10f8f06ba0ced7aa294912c83fcc1252be357fc18899007fb7e95339"
     },
     "robin__sweep": {
       "style": "robin",
@@ -166,9 +166,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11453,
-      "poster_size_bytes": 3384,
-      "definition_hash": "6be089086e36b2d96f206c1df558296d1468ae16de16efa88ed3e1aa7f6cde0f"
+      "size_bytes": 12775,
+      "poster_size_bytes": 3396,
+      "definition_hash": "3b33aeb73d869eb3ba21d4e84ca30fc140883314db550567628ef4843c01fc96"
     },
     "robin__fade": {
       "style": "robin",
@@ -178,9 +178,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13342,
-      "poster_size_bytes": 3386,
-      "definition_hash": "885170140ae8eb7a3bb44808ae0a2efb4e44054fb7ca0864c46a37f9ad7b7939"
+      "size_bytes": 14096,
+      "poster_size_bytes": 3356,
+      "definition_hash": "4d215d7dd0b0baed70bc3157e8ff429778edb0fd944b1cb6973e87fa7441f791"
     },
     "robin__glide": {
       "style": "robin",
@@ -190,9 +190,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 13342,
-      "poster_size_bytes": 3386,
-      "definition_hash": "0979f330c1d324e6ab9b86330f99b90d30d78c046ff35fa3276d897f82dcb56f"
+      "size_bytes": 14500,
+      "poster_size_bytes": 3429,
+      "definition_hash": "b9df9779faa7781171913a4b75d712ee278858cf6b160973a1b144a4999eed08"
     },
     "pill__pop": {
       "style": "pill",
@@ -202,9 +202,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11468,
-      "poster_size_bytes": 3199,
-      "definition_hash": "1b2e3b46b17ce5fdd12cb96d50d5ba64f63a29afb21000b27ad82e3c69dee360"
+      "size_bytes": 13053,
+      "poster_size_bytes": 3124,
+      "definition_hash": "362c2da9e8c3cce86745ad61e3ad4d0cb8fe4171d25f39c1380ee361d55eede8"
     },
     "pill__grow": {
       "style": "pill",
@@ -214,9 +214,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11468,
-      "poster_size_bytes": 3199,
-      "definition_hash": "18db85dd57a535bd5fc8d16ec88f10dfd3fcbdc556801f0fa8766d5f3e65abbb"
+      "size_bytes": 13522,
+      "poster_size_bytes": 3073,
+      "definition_hash": "c71c44b4529050f7a52a734f3c3983abf2d68ac33c09f56e44f0476d88b31b87"
     },
     "pill__sweep": {
       "style": "pill",
@@ -226,9 +226,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10552,
-      "poster_size_bytes": 3222,
-      "definition_hash": "59edf63fd676a96f7e670261f93200b38a861586f42425e96ec05286ce2f5960"
+      "size_bytes": 12031,
+      "poster_size_bytes": 3189,
+      "definition_hash": "69b811c4ade48268c4b32aa5376a3dc3d70515d130a21e0dd1bf25504fc67556"
     },
     "pill__fade": {
       "style": "pill",
@@ -238,9 +238,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11468,
-      "poster_size_bytes": 3199,
-      "definition_hash": "eeaafb25393d437ad7659211402d4e877ab94d2f6483c3b362ca7a09bfe50dbc"
+      "size_bytes": 12886,
+      "poster_size_bytes": 3152,
+      "definition_hash": "818b878bff9d595ff092281caf62b57f8bd2706b7b8f5e2f3462e6b4ef9e8c71"
     },
     "pill__glide": {
       "style": "pill",
@@ -250,9 +250,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 11468,
-      "poster_size_bytes": 3199,
-      "definition_hash": "efb4c2d7de839db08522148386785e4656a44e0a1a4030c2b3980cced702d894"
+      "size_bytes": 13247,
+      "poster_size_bytes": 3187,
+      "definition_hash": "4882a2435b7870956adfc81e8e4b3d66d4279985e389f82ea754ed0fa1892183"
     },
     "karaoke__pop": {
       "style": "karaoke",
@@ -262,9 +262,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10764,
-      "poster_size_bytes": 3116,
-      "definition_hash": "6c3c450e9c594159a2ed929ceb44066cc24e71bae601b49139958f02cffc1680"
+      "size_bytes": 13316,
+      "poster_size_bytes": 3155,
+      "definition_hash": "436d44ddd0d7992fcbf28665d63d2251f2f7cf60405e2ce975811e7222adc32d"
     },
     "karaoke__grow": {
       "style": "karaoke",
@@ -274,9 +274,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10764,
-      "poster_size_bytes": 3116,
-      "definition_hash": "36bd9176637dff20074802b32d9264b06c2a674e2071be9d0d0384a2211810f1"
+      "size_bytes": 13661,
+      "poster_size_bytes": 3127,
+      "definition_hash": "13e31b0ca0e473a123dd475b870b87025a10bdc2c1918c5cc60a47c2176cca44"
     },
     "karaoke__sweep": {
       "style": "karaoke",
@@ -286,9 +286,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10764,
-      "poster_size_bytes": 3116,
-      "definition_hash": "a64b689a958b5025ab2c240e0b80f5fcb24159bfc8946a3cebceb46dd67e3688"
+      "size_bytes": 12299,
+      "poster_size_bytes": 3145,
+      "definition_hash": "71abd13afb9bcc7dc51fd510da73954a857c51f5fe91cd20a2cc23727821dafc"
     },
     "karaoke__fade": {
       "style": "karaoke",
@@ -298,9 +298,9 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10764,
-      "poster_size_bytes": 3116,
-      "definition_hash": "d83845bed1833f6d908a081e663a64f7d5bddccab2aa8e676209818cc0649e3e"
+      "size_bytes": 13257,
+      "poster_size_bytes": 3133,
+      "definition_hash": "abc464f14d84eee7bfc93df831998fea8a9f67e4c64d7c37a307f04b097f3983"
     },
     "karaoke__glide": {
       "style": "karaoke",
@@ -310,9 +310,729 @@
       "duration": 4.0,
       "width": 360,
       "height": 640,
-      "size_bytes": 10764,
-      "poster_size_bytes": 3116,
-      "definition_hash": "6cfcc37acf20f6bebd61285ca4e94e9611e06c4ad9d25853b6a7ae8a28f4c1cb"
+      "size_bytes": 13395,
+      "poster_size_bytes": 3161,
+      "definition_hash": "b25294629a438974801cba1aed92b2f87580e40feb98fb46c5a2ade36df41dc0"
+    },
+    "hormozi__pop": {
+      "style": "hormozi",
+      "animation": "pop",
+      "video": "hormozi__pop.mp4",
+      "poster": "hormozi__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15930,
+      "poster_size_bytes": 3746,
+      "definition_hash": "3a6e968b1b05f9eda972aff4807bf704fea2853f837118eb49c80809d690a7d1"
+    },
+    "hormozi__grow": {
+      "style": "hormozi",
+      "animation": "grow",
+      "video": "hormozi__grow.mp4",
+      "poster": "hormozi__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15487,
+      "poster_size_bytes": 3712,
+      "definition_hash": "18a415fa4dbada0ce4a96946458842fca8ff32d3eb081eb0b4fc96d709eeb229"
+    },
+    "hormozi__sweep": {
+      "style": "hormozi",
+      "animation": "sweep",
+      "video": "hormozi__sweep.mp4",
+      "poster": "hormozi__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13859,
+      "poster_size_bytes": 3836,
+      "definition_hash": "1bc1b8882a3ed8c5d54eb1d6a5a8db1e9022fd353072e3fbea686316b09d7d89"
+    },
+    "hormozi__fade": {
+      "style": "hormozi",
+      "animation": "fade",
+      "video": "hormozi__fade.mp4",
+      "poster": "hormozi__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15015,
+      "poster_size_bytes": 3719,
+      "definition_hash": "8fc619cd019a743353a23719cc4a83a606de930a03f3bd602c89dbb1364fc56e"
+    },
+    "hormozi__glide": {
+      "style": "hormozi",
+      "animation": "glide",
+      "video": "hormozi__glide.mp4",
+      "poster": "hormozi__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15244,
+      "poster_size_bytes": 3817,
+      "definition_hash": "a3f6f9c16dacce8bf796215f2e805b3511a45af1db71fc696842079723f2117a"
+    },
+    "hype__pop": {
+      "style": "hype",
+      "animation": "pop",
+      "video": "hype__pop.mp4",
+      "poster": "hype__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13812,
+      "poster_size_bytes": 3297,
+      "definition_hash": "9ccd5b4073e76936f0033cb459ac2595f21235de7853a662eb86d431dc8a75c9"
+    },
+    "hype__grow": {
+      "style": "hype",
+      "animation": "grow",
+      "video": "hype__grow.mp4",
+      "poster": "hype__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15042,
+      "poster_size_bytes": 3249,
+      "definition_hash": "d65d35fea95e42d3f53d11b5e0aa157ae6cd7a813d6fbb383ff6fc7290083e28"
+    },
+    "hype__sweep": {
+      "style": "hype",
+      "animation": "sweep",
+      "video": "hype__sweep.mp4",
+      "poster": "hype__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13334,
+      "poster_size_bytes": 3389,
+      "definition_hash": "05e02d1315623acf1827e410adeae095679f4d381d65a0aa1f53bd9ec69a3ca6"
+    },
+    "hype__fade": {
+      "style": "hype",
+      "animation": "fade",
+      "video": "hype__fade.mp4",
+      "poster": "hype__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13633,
+      "poster_size_bytes": 3255,
+      "definition_hash": "e3cea5b032a463322d1645f70f33bc61729f4e47f8ef6261ae091d746eb8e0bd"
+    },
+    "hype__glide": {
+      "style": "hype",
+      "animation": "glide",
+      "video": "hype__glide.mp4",
+      "poster": "hype__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14235,
+      "poster_size_bytes": 3208,
+      "definition_hash": "7cc09ae15047a2044ab38d8b0cb8878ff3d2b9c99cc2ce0457d674c341ae6b2e"
+    },
+    "sticker__pop": {
+      "style": "sticker",
+      "animation": "pop",
+      "video": "sticker__pop.mp4",
+      "poster": "sticker__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13899,
+      "poster_size_bytes": 3549,
+      "definition_hash": "499e64954355691fd406df37d9aa5d3a56606572727dd2d3c39c38822e7f0802"
+    },
+    "sticker__grow": {
+      "style": "sticker",
+      "animation": "grow",
+      "video": "sticker__grow.mp4",
+      "poster": "sticker__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15165,
+      "poster_size_bytes": 3517,
+      "definition_hash": "d64f46049fba0dc683f2fe3cfb06a15d4e83d1c855766c53b16ac0519a3daaa6"
+    },
+    "sticker__sweep": {
+      "style": "sticker",
+      "animation": "sweep",
+      "video": "sticker__sweep.mp4",
+      "poster": "sticker__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12013,
+      "poster_size_bytes": 3455,
+      "definition_hash": "3a956b9a3061ad245524945e506ba1d185e576e5733771c1d2ce07015035770a"
+    },
+    "sticker__fade": {
+      "style": "sticker",
+      "animation": "fade",
+      "video": "sticker__fade.mp4",
+      "poster": "sticker__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14288,
+      "poster_size_bytes": 3581,
+      "definition_hash": "64989370ba4a377e2d2038de297d0b452b91218a68457af60e961c16cc214ee9"
+    },
+    "sticker__glide": {
+      "style": "sticker",
+      "animation": "glide",
+      "video": "sticker__glide.mp4",
+      "poster": "sticker__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13988,
+      "poster_size_bytes": 3536,
+      "definition_hash": "54dd1c153ff4542e97b41d66b7540d82ee5ee158ea4b4e78f9d79ced308ca6fd"
+    },
+    "marker__pop": {
+      "style": "marker",
+      "animation": "pop",
+      "video": "marker__pop.mp4",
+      "poster": "marker__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 16189,
+      "poster_size_bytes": 4255,
+      "definition_hash": "b1e6b0c0c797bde9bc431f69b5886ea93bec32a890f57df47d43e61798673101"
+    },
+    "marker__grow": {
+      "style": "marker",
+      "animation": "grow",
+      "video": "marker__grow.mp4",
+      "poster": "marker__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 16915,
+      "poster_size_bytes": 4273,
+      "definition_hash": "2639f1ad5b69585b4dd5b891da9d782cc0f552c007d9a20c37f5627b182dd061"
+    },
+    "marker__sweep": {
+      "style": "marker",
+      "animation": "sweep",
+      "video": "marker__sweep.mp4",
+      "poster": "marker__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13161,
+      "poster_size_bytes": 4262,
+      "definition_hash": "a60e873b367dfc75f0e700be641b4557b169b86eb69054ee3b7117ca6be1f5a5"
+    },
+    "marker__fade": {
+      "style": "marker",
+      "animation": "fade",
+      "video": "marker__fade.mp4",
+      "poster": "marker__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15922,
+      "poster_size_bytes": 4319,
+      "definition_hash": "f049dc421490c8a0518b056a0b213bb7431dce1152306156dbae1af2150d95af"
+    },
+    "marker__glide": {
+      "style": "marker",
+      "animation": "glide",
+      "video": "marker__glide.mp4",
+      "poster": "marker__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15851,
+      "poster_size_bytes": 4291,
+      "definition_hash": "0e96dbb865f85f52b04595d8865aa7b4cc5395aa244695fc17efb66da70104c3"
+    },
+    "neon__pop": {
+      "style": "neon",
+      "animation": "pop",
+      "video": "neon__pop.mp4",
+      "poster": "neon__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13156,
+      "poster_size_bytes": 3014,
+      "definition_hash": "25de94aaf8de4634f2ee6b3744f6f8bd095084aacf38f7ba07def4505e7df7a4"
+    },
+    "neon__grow": {
+      "style": "neon",
+      "animation": "grow",
+      "video": "neon__grow.mp4",
+      "poster": "neon__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13762,
+      "poster_size_bytes": 2968,
+      "definition_hash": "7188f75ac25ad0ea4bc624af2d2b98b3320e9ae895ecf6f329903cb35569addd"
+    },
+    "neon__sweep": {
+      "style": "neon",
+      "animation": "sweep",
+      "video": "neon__sweep.mp4",
+      "poster": "neon__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12741,
+      "poster_size_bytes": 3125,
+      "definition_hash": "a5f3c52c6b9ed5147cc98fb3cfb6654068eeca903a35a0e92838b98b2f011944"
+    },
+    "neon__fade": {
+      "style": "neon",
+      "animation": "fade",
+      "video": "neon__fade.mp4",
+      "poster": "neon__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13096,
+      "poster_size_bytes": 2999,
+      "definition_hash": "60ca24311d23e6626decd6257fe74f128192189a6e6cad7b358fd1e3dc921735"
+    },
+    "neon__glide": {
+      "style": "neon",
+      "animation": "glide",
+      "video": "neon__glide.mp4",
+      "poster": "neon__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13086,
+      "poster_size_bytes": 3078,
+      "definition_hash": "1e78f31d71c41443fe09905519e3b9d5d2d73b53ceec68b8f3bf0628647fe35d"
+    },
+    "flame__pop": {
+      "style": "flame",
+      "animation": "pop",
+      "video": "flame__pop.mp4",
+      "poster": "flame__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14349,
+      "poster_size_bytes": 3529,
+      "definition_hash": "369562fe2f66c9b768f722b82d4de8a84fd65e6eedb0cbf71aaf2288517ecb9b"
+    },
+    "flame__grow": {
+      "style": "flame",
+      "animation": "grow",
+      "video": "flame__grow.mp4",
+      "poster": "flame__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14959,
+      "poster_size_bytes": 3435,
+      "definition_hash": "557f1e7ae5cc4b469c12044fd9c166b2aea4fab5d0f8a4586ecb94b00bac5437"
+    },
+    "flame__sweep": {
+      "style": "flame",
+      "animation": "sweep",
+      "video": "flame__sweep.mp4",
+      "poster": "flame__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14102,
+      "poster_size_bytes": 3525,
+      "definition_hash": "3cfe5ea3f8f95552cc72031993d396ad9ff21efc8cb6d9ac0e9d0ccdcd7c7a5d"
+    },
+    "flame__fade": {
+      "style": "flame",
+      "animation": "fade",
+      "video": "flame__fade.mp4",
+      "poster": "flame__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14320,
+      "poster_size_bytes": 3505,
+      "definition_hash": "77feb10ef8c7230ca1e99604b646ae05cab7c1e3d83639ed666da6f96b3b8017"
+    },
+    "flame__glide": {
+      "style": "flame",
+      "animation": "glide",
+      "video": "flame__glide.mp4",
+      "poster": "flame__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 15169,
+      "poster_size_bytes": 3517,
+      "definition_hash": "bae7d2cb4002fdf8f81ab6e5ec7814273eece619e1ef8c71bd4e0d7bf1786b01"
+    },
+    "cinema__pop": {
+      "style": "cinema",
+      "animation": "pop",
+      "video": "cinema__pop.mp4",
+      "poster": "cinema__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13263,
+      "poster_size_bytes": 3145,
+      "definition_hash": "cd31df87582857ab4d8ff38e42b9d6530f74e2c648c81af42bbbff934fd3e9f6"
+    },
+    "cinema__grow": {
+      "style": "cinema",
+      "animation": "grow",
+      "video": "cinema__grow.mp4",
+      "poster": "cinema__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13851,
+      "poster_size_bytes": 3166,
+      "definition_hash": "6cdbfc607092d043974657aa026d24df26174ffc1f3cdcc7a1b50a36ff056fcb"
+    },
+    "cinema__sweep": {
+      "style": "cinema",
+      "animation": "sweep",
+      "video": "cinema__sweep.mp4",
+      "poster": "cinema__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 11537,
+      "poster_size_bytes": 3137,
+      "definition_hash": "a161fd97f4fcc1511a3af9b560046dc56100c79f62a73d90d839e9d9d74a2c24"
+    },
+    "cinema__fade": {
+      "style": "cinema",
+      "animation": "fade",
+      "video": "cinema__fade.mp4",
+      "poster": "cinema__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12710,
+      "poster_size_bytes": 3257,
+      "definition_hash": "1a04fb11a3c58069a4198ad36a11e685fa631646e823e2514fd83d85797ed6ab"
+    },
+    "cinema__glide": {
+      "style": "cinema",
+      "animation": "glide",
+      "video": "cinema__glide.mp4",
+      "poster": "cinema__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12965,
+      "poster_size_bytes": 3251,
+      "definition_hash": "1fe540c31b8474f5d0e218d9aaa9bfb9ea448e685ac450fa0f8ded96f2cea49b"
+    },
+    "podcast__pop": {
+      "style": "podcast",
+      "animation": "pop",
+      "video": "podcast__pop.mp4",
+      "poster": "podcast__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12823,
+      "poster_size_bytes": 3089,
+      "definition_hash": "9b4f798946890ca7affdb3d4b8d3a2ec294713f8f681a98d5a63e264f077dae7"
+    },
+    "podcast__grow": {
+      "style": "podcast",
+      "animation": "grow",
+      "video": "podcast__grow.mp4",
+      "poster": "podcast__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13503,
+      "poster_size_bytes": 3103,
+      "definition_hash": "69a5a7c6aff7f7b1f010525298140ef31d0c28daedfa5b714772238164dc3aa4"
+    },
+    "podcast__sweep": {
+      "style": "podcast",
+      "animation": "sweep",
+      "video": "podcast__sweep.mp4",
+      "poster": "podcast__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12066,
+      "poster_size_bytes": 3093,
+      "definition_hash": "7e1ddb17a07fdb37eb3d7ebbf464d5271cc72d0bef870efca143352619732389"
+    },
+    "podcast__fade": {
+      "style": "podcast",
+      "animation": "fade",
+      "video": "podcast__fade.mp4",
+      "poster": "podcast__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12690,
+      "poster_size_bytes": 3134,
+      "definition_hash": "a41388a541766fdf2d09538654da675cdf6c637c0929bf4c3dc340dedcd17bcc"
+    },
+    "podcast__glide": {
+      "style": "podcast",
+      "animation": "glide",
+      "video": "podcast__glide.mp4",
+      "poster": "podcast__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12919,
+      "poster_size_bytes": 3115,
+      "definition_hash": "742de2c21fa7af1e4b13e43d9d7a4fe3015d9c2c81ec12b781375559e55162b2"
+    },
+    "electric__pop": {
+      "style": "electric",
+      "animation": "pop",
+      "video": "electric__pop.mp4",
+      "poster": "electric__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14710,
+      "poster_size_bytes": 3565,
+      "definition_hash": "012390fbd281141a2ae1a79d82b95fe117bc5f17f26212701b24fb4dcafd358a"
+    },
+    "electric__grow": {
+      "style": "electric",
+      "animation": "grow",
+      "video": "electric__grow.mp4",
+      "poster": "electric__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14993,
+      "poster_size_bytes": 3499,
+      "definition_hash": "b40008db95527101e8b6275b37aafd4ff63332ec920c7899d932988a684a63c4"
+    },
+    "electric__sweep": {
+      "style": "electric",
+      "animation": "sweep",
+      "video": "electric__sweep.mp4",
+      "poster": "electric__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13560,
+      "poster_size_bytes": 3492,
+      "definition_hash": "3228a5aa6b45e1db38ddac28d56a91613563cf9875a16b94ec97381723000108"
+    },
+    "electric__fade": {
+      "style": "electric",
+      "animation": "fade",
+      "video": "electric__fade.mp4",
+      "poster": "electric__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14666,
+      "poster_size_bytes": 3566,
+      "definition_hash": "2cdf020493cad8309d144f6175ecc0d89114c874236e5f20284db9ceea63d320"
+    },
+    "electric__glide": {
+      "style": "electric",
+      "animation": "glide",
+      "video": "electric__glide.mp4",
+      "poster": "electric__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14693,
+      "poster_size_bytes": 3547,
+      "definition_hash": "d879a210ca1af2fcbdb27be24c286284cbf2f0ca4e96e8aba9c3774bde2de795"
+    },
+    "aesthetic__pop": {
+      "style": "aesthetic",
+      "animation": "pop",
+      "video": "aesthetic__pop.mp4",
+      "poster": "aesthetic__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 11985,
+      "poster_size_bytes": 2922,
+      "definition_hash": "019ef9d703180aaeac5469e37c25e4e647d2a0487e85b64015445b13d9e61c17"
+    },
+    "aesthetic__grow": {
+      "style": "aesthetic",
+      "animation": "grow",
+      "video": "aesthetic__grow.mp4",
+      "poster": "aesthetic__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12686,
+      "poster_size_bytes": 2932,
+      "definition_hash": "738c156b4e9ba633b8194d281eb867174e5346f35b3339c996e3c4d6b06d5980"
+    },
+    "aesthetic__sweep": {
+      "style": "aesthetic",
+      "animation": "sweep",
+      "video": "aesthetic__sweep.mp4",
+      "poster": "aesthetic__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 11614,
+      "poster_size_bytes": 2971,
+      "definition_hash": "bf6ace664373ad772225e2abf414e5e5c221c15baa8698bcfaa603a924bbefec"
+    },
+    "aesthetic__fade": {
+      "style": "aesthetic",
+      "animation": "fade",
+      "video": "aesthetic__fade.mp4",
+      "poster": "aesthetic__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12087,
+      "poster_size_bytes": 2946,
+      "definition_hash": "d8ed0efc2c760cce2aeec2daafa98127886406e50f192cbdcab2ec7ceefbeb04"
+    },
+    "aesthetic__glide": {
+      "style": "aesthetic",
+      "animation": "glide",
+      "video": "aesthetic__glide.mp4",
+      "poster": "aesthetic__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12132,
+      "poster_size_bytes": 2946,
+      "definition_hash": "c540344c2e9094595c39a39f93743e327e20c0575fb189ffb767586a5ec9fc31"
+    },
+    "sunset__pop": {
+      "style": "sunset",
+      "animation": "pop",
+      "video": "sunset__pop.mp4",
+      "poster": "sunset__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13367,
+      "poster_size_bytes": 3183,
+      "definition_hash": "bebcc77f31c56bef4ca4314bf32644d5c19de0d81f7fb6acec0c0063cd643a8c"
+    },
+    "sunset__grow": {
+      "style": "sunset",
+      "animation": "grow",
+      "video": "sunset__grow.mp4",
+      "poster": "sunset__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13826,
+      "poster_size_bytes": 3152,
+      "definition_hash": "d430f6b3e9de10cb03626aae72e4052bdd226678b414d5283f92f675a5e8d79b"
+    },
+    "sunset__sweep": {
+      "style": "sunset",
+      "animation": "sweep",
+      "video": "sunset__sweep.mp4",
+      "poster": "sunset__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12440,
+      "poster_size_bytes": 3141,
+      "definition_hash": "5cb840eb42315eafe0cddba4166a67602563dba0369a788fa816520aa55212ae"
+    },
+    "sunset__fade": {
+      "style": "sunset",
+      "animation": "fade",
+      "video": "sunset__fade.mp4",
+      "poster": "sunset__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12854,
+      "poster_size_bytes": 3142,
+      "definition_hash": "b7e24b3b1ba00b67ebf3d984fe58aec54dfe04bc625d30fef3dd6494ab3011cc"
+    },
+    "sunset__glide": {
+      "style": "sunset",
+      "animation": "glide",
+      "video": "sunset__glide.mp4",
+      "poster": "sunset__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13233,
+      "poster_size_bytes": 3153,
+      "definition_hash": "b02c720a28fcec61e6a94218f86ddc353e67e16a83670101c2d74d5344a0d0eb"
+    },
+    "dark_tag__pop": {
+      "style": "dark_tag",
+      "animation": "pop",
+      "video": "dark_tag__pop.mp4",
+      "poster": "dark_tag__pop.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13442,
+      "poster_size_bytes": 3215,
+      "definition_hash": "593ab726276b64c12967e3ba745a27c2588b612233272293e8c3e4cf1d9727d7"
+    },
+    "dark_tag__grow": {
+      "style": "dark_tag",
+      "animation": "grow",
+      "video": "dark_tag__grow.mp4",
+      "poster": "dark_tag__grow.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 14019,
+      "poster_size_bytes": 3181,
+      "definition_hash": "69c3c99a11c12f53c842f18f0c399a2c627525bddad0fb5ad81a106c336fe369"
+    },
+    "dark_tag__sweep": {
+      "style": "dark_tag",
+      "animation": "sweep",
+      "video": "dark_tag__sweep.mp4",
+      "poster": "dark_tag__sweep.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 11898,
+      "poster_size_bytes": 3182,
+      "definition_hash": "0489078772a0aa7d4dd3a5d3460b1fe5630ac31784d2c48f6921ea9322655d9b"
+    },
+    "dark_tag__fade": {
+      "style": "dark_tag",
+      "animation": "fade",
+      "video": "dark_tag__fade.mp4",
+      "poster": "dark_tag__fade.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 12975,
+      "poster_size_bytes": 3207,
+      "definition_hash": "15b75fbb5c70a805ee38248b8da945bb3722f1ca0b63673bf6c58d3fa2a295b8"
+    },
+    "dark_tag__glide": {
+      "style": "dark_tag",
+      "animation": "glide",
+      "video": "dark_tag__glide.mp4",
+      "poster": "dark_tag__glide.jpg",
+      "duration": 4.0,
+      "width": 360,
+      "height": 640,
+      "size_bytes": 13358,
+      "poster_size_bytes": 3223,
+      "definition_hash": "343204291358c7edd4a32d0f82ecda07fd59252354c9057ae797b9ef0a5559d4"
     }
   }
 }

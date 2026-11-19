@@ -662,6 +662,113 @@ def _layout_subtitle_words(
     return lines
 
 
+_LEGACY_DRAWTEXT_PROFILES: dict[str, tuple[bool, int, int, str, str, int]] = {
+    "bold_emerald": (
+        True,
+        36,
+        8,
+        "fontsize=36:fontcolor=white:borderw=4:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=3:shadowy=3",
+        "0x10b981",
+        4,
+    ),
+    "robin": (
+        True,
+        36,
+        8,
+        "fontsize=36:fontcolor=white:borderw=4:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=3:shadowy=3",
+        "0x34d399",
+        4,
+    ),
+    "punch": (
+        True,
+        38,
+        8,
+        "fontsize=38:fontcolor=white:borderw=4:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=3:shadowy=3",
+        "0xf7c204",
+        4,
+    ),
+    "clean_gold": (
+        False,
+        33,
+        5,
+        "fontsize=33:fontcolor=white:borderw=2:bordercolor=black@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2",
+        "0xfbbf24",
+        2,
+    ),
+    "clean": (
+        False,
+        33,
+        4,
+        "fontsize=33:fontcolor=0xcccccc:borderw=2:bordercolor=black@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2",
+        "white",
+        2,
+    ),
+    "pill": (
+        False,
+        34,
+        6,
+        "fontsize=34:fontcolor=white:borderw=3:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=2:shadowy=2:box=1:boxcolor=black@0.65:boxborderw=10",
+        "0x34d399",
+        3,
+    ),
+    "karaoke": (
+        False,
+        35,
+        6,
+        "fontsize=35:fontcolor=0x999999:borderw=3:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=2:shadowy=2",
+        "0x34d399",
+        3,
+    ),
+    "classic": (
+        False,
+        34,
+        7,
+        "fontsize=34:fontcolor=white:borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:box=1:boxcolor=black@0.55:boxborderw=10",
+        "yellow",
+        3,
+    ),
+}
+
+
+def _to_ffmpeg_color(hex_color: str) -> str:
+    return f"0x{hex_color.lstrip('#').lower()}"
+
+
+def _drawtext_style_profile(style: str) -> tuple[bool, int, int, str, str, int]:
+    """Return drawtext (uppercase, font_size, pop_delta, base_fragment, highlight_color, highlight_borderw)."""
+    normalized = (style or "classic").lower().strip()
+    if normalized in _LEGACY_DRAWTEXT_PROFILES:
+        return _LEGACY_DRAWTEXT_PROFILES[normalized]
+
+    try:
+        style_def = get_caption_style(normalized)
+    except ValueError:
+        return _LEGACY_DRAWTEXT_PROFILES["classic"]
+
+    uppercase = style_def.text_case == "upper"
+    font_size = max(30, min(40, round(style_def.font_size * 0.66)))
+    pop_font_delta = 7 if uppercase else 5
+    primary = _to_ffmpeg_color(style_def.primary_color)
+    accent = _to_ffmpeg_color(style_def.accent_color or style_def.primary_color)
+    border_w = 0 if style_def.border_style == 3 else max(2, min(5, style_def.outline_width))
+    border_color = _to_ffmpeg_color(style_def.outline_color)
+    shadow_color = _to_ffmpeg_color(style_def.shadow_color)
+    shadow_d = max(0, style_def.shadow_depth)
+    base_parts = [
+        f"fontsize={font_size}",
+        f"fontcolor={primary}",
+        f"borderw={border_w}",
+        f"bordercolor={border_color}@0.95",
+        f"shadowcolor={shadow_color}@0.85",
+        f"shadowx={shadow_d}",
+        f"shadowy={shadow_d}",
+    ]
+    if style_def.border_style == 3 and style_def.box_opacity > 0:
+        box_hex = _to_ffmpeg_color(style_def.box_color)
+        base_parts.append(f"box=1:boxcolor={box_hex}@{style_def.box_opacity:.2f}:boxborderw=10")
+    return uppercase, font_size, pop_font_delta, ":".join(base_parts), accent, border_w
+
+
 def _build_subtitle_filters(
     start_time: float,
     end_time: float,
@@ -678,82 +785,9 @@ def _build_subtitle_filters(
     font_fragment = f"fontfile='{font_file}':" if font_file else ""
     subtitle_filters = []
 
-    style = (caption_style or "classic").lower().strip()
-    uppercase = style in {"robin", "punch"}
-    if style == "bold_emerald":
-        font_size = 36
-        pop_font_delta = 8
-        base_style_fragment = (
-            "fontsize=36:fontcolor=white:"
-            "borderw=4:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=3:shadowy=3"
-        )
-        highlight_color = "0x10b981"
-        highlight_borderw = 4
-    elif style == "robin":
-        font_size = 36
-        pop_font_delta = 8
-        base_style_fragment = (
-            "fontsize=36:fontcolor=white:"
-            "borderw=4:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=3:shadowy=3"
-        )
-        highlight_color = "0x34d399"
-        highlight_borderw = 4
-    elif style == "punch":
-        font_size = 38
-        pop_font_delta = 8
-        base_style_fragment = (
-            "fontsize=38:fontcolor=white:"
-            "borderw=4:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=3:shadowy=3"
-        )
-        highlight_color = "0xf7c204"
-        highlight_borderw = 4
-    elif style == "clean_gold":
-        font_size = 33
-        pop_font_delta = 5
-        base_style_fragment = (
-            "fontsize=33:fontcolor=white:"
-            "borderw=2:bordercolor=black@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2"
-        )
-        highlight_color = "0xfbbf24"
-        highlight_borderw = 2
-    elif style == "clean":
-        font_size = 33
-        pop_font_delta = 4
-        base_style_fragment = (
-            "fontsize=33:fontcolor=0xcccccc:"
-            "borderw=2:bordercolor=black@0.85:shadowcolor=black@0.7:shadowx=2:shadowy=2"
-        )
-        highlight_color = "white"
-        highlight_borderw = 2
-    elif style == "pill":
-        font_size = 34
-        pop_font_delta = 6
-        base_style_fragment = (
-            "fontsize=34:fontcolor=white:"
-            "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=2:shadowy=2:"
-            "box=1:boxcolor=black@0.65:boxborderw=10"
-        )
-        highlight_color = "0x34d399"
-        highlight_borderw = 3
-    elif style == "karaoke":
-        font_size = 35
-        pop_font_delta = 6
-        base_style_fragment = (
-            "fontsize=35:fontcolor=0x999999:"
-            "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.85:shadowx=2:shadowy=2"
-        )
-        highlight_color = "0x34d399"
-        highlight_borderw = 3
-    else:  # "classic"
-        font_size = 34
-        pop_font_delta = 7
-        base_style_fragment = (
-            "fontsize=34:fontcolor=white:"
-            "borderw=3:bordercolor=black@0.95:shadowcolor=black@0.9:shadowx=2:shadowy=2:"
-            "box=1:boxcolor=black@0.55:boxborderw=10"
-        )
-        highlight_color = "yellow"
-        highlight_borderw = 3
+    uppercase, font_size, pop_font_delta, base_style_fragment, highlight_color, highlight_borderw = (
+        _drawtext_style_profile(caption_style)
+    )
 
     font_path = subtitle_directory / font_file if font_file else None
     try:

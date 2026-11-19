@@ -1,5 +1,17 @@
 # Clip Robin accounts and billing
 
+## Hosted status on November 18, 2026
+
+The [public Account & Plans page](https://cliprobin-accounts.thinarch8.chatgpt.site/subscription/) is deployed and tested. Anonymous HTML, JavaScript, and CSS requests return HTTP 200. Google sign-in returns to this page and loads the owner's existing Test Pro plan. Supabase Auth, new checkout returns, the local configuration, and the GitHub release variable use this address. The published v0.1.32 installer predates this configuration and needs a future build to embed the new account link.
+
+Google's app is **In production** after completing Branding. Its separate `youtube.upload` permission still needs Google's verification; the Verification Center requires branding verification before enabling the data-access submission.
+
+The dedicated `clip-robin` Gemini project remains on the **Free tier**. Its server-only key is installed in Supabase. A real hosted synthetic Hook Finder request returned a clip and reduced the test balance from 20 to 19 credits, which persisted after reloading the public page. No paid billing was enabled and no real checkout payment was made. Retain the application budget and check free-tier availability and data-use terms before a public paid pilot.
+
+**Still pending:** a verified public email sender and live Polar merchant/product/webhook configuration. The service remains in Polar Sandbox. The owner approved both providers' agreements and Google signup succeeded. Brevo is waiting for the genuine organization mailing address that it says appears in emails; live Polar is waiting for the owner's date of birth. Both forms are left for the owner to complete directly. No live product/payout account or SMTP credential is configured yet. Keep real paid checkout in testing until the remaining setup and acceptance checks in `ai.md` pass.
+
+---
+
 Clip Robin uses your Supabase project for Auth, Postgres, and a hosted billing function. A signed-out user can still create and export local clips on Free. A new account starts on Free. The app refreshes its plan after returning to the window, while the page is visible, and on demand from **Account & Plans**. It uses Free when it cannot verify a plan. Local media, transcripts, and project data stay in the existing local workflow.
 
 ## 1. Set up the free account database

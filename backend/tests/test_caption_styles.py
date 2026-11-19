@@ -15,9 +15,30 @@ from app.services.caption_styles import (
 )
 
 
+ALL_EXPECTED_STYLE_IDS = {
+    "classic",
+    "clean",
+    "punch",
+    "robin",
+    "pill",
+    "karaoke",
+    "hormozi",
+    "hype",
+    "sticker",
+    "marker",
+    "neon",
+    "flame",
+    "cinema",
+    "podcast",
+    "electric",
+    "aesthetic",
+    "sunset",
+    "dark_tag",
+}
+
+
 def test_styles_and_animations_definitions():
-    expected_styles = {"classic", "clean", "punch", "robin", "pill", "karaoke"}
-    assert set(CAPTION_STYLES.keys()) == expected_styles
+    assert set(CAPTION_STYLES.keys()) == ALL_EXPECTED_STYLE_IDS
 
     expected_animations = {"pop", "grow", "sweep", "fade", "glide"}
     assert set(ANIMATIONS.keys()) == expected_animations
@@ -36,7 +57,7 @@ def test_get_caption_style_defaults_and_aliases():
     assert get_caption_style("clean_gold").id == "clean"
 
     # Exact styles
-    for style_id in ["classic", "clean", "punch", "robin", "pill", "karaoke"]:
+    for style_id in ALL_EXPECTED_STYLE_IDS:
         assert get_caption_style(style_id).id == style_id
 
     # Unknown style raises ValueError
@@ -113,9 +134,9 @@ def test_resolve_font_file_fallbacks():
 
 def test_list_caption_styles():
     styles = list_caption_styles()
-    assert len(styles) == 6
+    assert len(styles) == 18
     style_ids = {s["id"] for s in styles}
-    assert style_ids == {"classic", "clean", "punch", "robin", "pill", "karaoke"}
+    assert style_ids == ALL_EXPECTED_STYLE_IDS
 
     for s in styles:
         assert "name" in s

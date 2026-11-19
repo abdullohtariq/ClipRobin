@@ -74,3 +74,4 @@ backend/dist/
 backend/bin/*.exe
 million-deep-motion/
 .agents/
+hosting/

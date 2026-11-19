@@ -25,6 +25,7 @@ export function takeAuthCallback(): AuthCallback | null {
   const tokenHash = get("token_hash");
   const code = get("code");
   const error = get("error_code") ?? get("error");
+  const errorDescription = get("error_description");
   if (!keys.some((key) => key !== "type" && get(key) !== null)) return null;
   for (const key of keys) {
     url.searchParams.delete(key);
@@ -32,7 +33,11 @@ export function takeAuthCallback(): AuthCallback | null {
   }
   if (url.hash.includes("=")) url.hash = fragment.toString();
   window.history.replaceState(window.history.state, "", url);
-  if (error) return { error: error === "otp_expired" ? mailLinkError : "This sign-in link could not be opened. Start again from Account & Plans." };
+  if (error) {
+    if (error === "otp_expired") return { error: mailLinkError };
+    const detail = errorDescription?.trim();
+    return { error: detail ? `Sign-in failed (${error}): ${detail}` : "This sign-in link could not be opened. Start again from Account & Plans." };
+  }
   if (tokenHash && (type === "email" || type === "recovery")) return { email: { tokenHash, type } };
   if (code) return { code };
   return { error: mailLinkError };

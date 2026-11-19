@@ -594,7 +594,7 @@ export function ClipSettings({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-semibold text-zinc-200">
-                      Subtitle style <span className="font-normal text-zinc-400">· 2 Free, 4 Pro</span>
+                      Subtitle style <span className="font-normal text-zinc-400">· 2 Free, {CAPTION_STYLE_OPTIONS.length - 2} Pro</span>
                     </label>
                     <span className="text-xs text-zinc-400 font-mono">
                       {activeStyleOption.fontFamily}
@@ -604,7 +604,7 @@ export function ClipSettings({
                   <div
                     role="radiogroup"
                     aria-label="Subtitle typography style"
-                    className="grid grid-cols-2 @md:grid-cols-3 gap-2"
+                    className="grid grid-cols-2 @md:grid-cols-3 gap-2 max-h-[250px] overflow-y-auto pr-1"
                   >
                     {CAPTION_STYLE_OPTIONS.map((styleOpt) => {
                       const isSelected = captionStyle === styleOpt.id;
