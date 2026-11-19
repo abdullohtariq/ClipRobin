@@ -32,15 +32,7 @@ import { useSubscription } from "@/src/lib/subscription-context";
 import { useVideoQueue, QueueSource } from "@/src/lib/queue-context";
 import { VideoQueueView } from "@/src/components/video-queue-view";
 import { sanitizeProjectName, validateProjectName } from "@/src/lib/project-name-utils";
-
-const normalizeCaptionStyle = (raw: string | null | undefined): CaptionStyle => {
-  if (raw === "bold_emerald") return "robin";
-  if (raw === "clean_gold") return "clean";
-  if (raw && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(raw)) {
-    return raw as CaptionStyle;
-  }
-  return "classic";
-};
+import { normalizeCaptionStyle } from "@/src/lib/caption-styles";
 
 type ActiveVideo =
   | { kind: "file"; file: File; name: string; size: number }

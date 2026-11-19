@@ -16,6 +16,7 @@ import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 import { useSubscription } from "@/src/lib/subscription-context";
 import { CustomWatermarkSettings } from "@/src/components/custom-watermark-settings";
 import { CaptionStylePicker } from "@/src/components/caption-style-picker";
+import { CAPTION_STYLE_OPTIONS, normalizeCaptionStyle } from "@/src/lib/caption-styles";
 import { ToggleRow } from "@/src/components/ui/toggle-row";
 import { ConfirmDialog } from "@/src/components/ui/confirm-dialog";
 
@@ -179,21 +180,12 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    const normalizeStyle = (raw?: string | null): CaptionStyle => {
-      if (raw === "bold_emerald") return "robin";
-      if (raw === "clean_gold") return "clean";
-      if (raw && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(raw)) {
-        return raw as CaptionStyle;
-      }
-      return "classic";
-    };
-
     const syncFromStorage = () => {
       try {
         const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
         const parsed = stored ? JSON.parse(stored) : {};
         const activeStyle = localStorage.getItem("cliprobin_caption_style");
-        const candidate = normalizeStyle(parsed.defaultCaptionStyle || activeStyle);
+        const candidate = normalizeCaptionStyle(parsed.defaultCaptionStyle || activeStyle);
         const safeStyle = isCaptionStyleAllowed(candidate) ? candidate : "classic";
         const nextSettings: AppSettings = {
           confirmDelete: parsed.confirmDelete !== false,
@@ -326,12 +318,14 @@ export default function SettingsPage() {
                 }}
                 className="w-full rounded-xl border border-zinc-800 bg-[#0c0c0e] px-3.5 py-2.5 text-xs text-white focus:border-[#10b981] focus-ring"
               >
-                <option value="classic">Classic (Original Clip Robin word-by-word)</option>
-                <option value="clean">Clean (Minimalist Montserrat Bold)</option>
-                <option value="robin">{isPro ? "Robin (Signature viral all-caps)" : "Robin (Signature viral all-caps) — PRO"}</option>
-                <option value="punch">{isPro ? "Punch (High-impact Anton all-caps)" : "Punch (High-impact Anton all-caps) — PRO"}</option>
-                <option value="pill">{isPro ? "Pill (Translucent dark box)" : "Pill (Translucent dark box) — PRO"}</option>
-                <option value="karaoke">{isPro ? "Karaoke (Smooth sweep fill)" : "Karaoke (Smooth sweep fill) — PRO"}</option>
+                {CAPTION_STYLE_OPTIONS.map((styleOpt) => {
+                  const lockedSuffix = !isPro && !isCaptionStyleAllowed(styleOpt.id) ? " — PRO" : "";
+                  return (
+                    <option key={styleOpt.id} value={styleOpt.id}>
+                      {`${styleOpt.name} (${styleOpt.fontFamily})${lockedSuffix}`}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 

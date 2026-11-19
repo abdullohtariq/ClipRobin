@@ -103,9 +103,9 @@ def test_all_25_combinations():
             assert "Dialogue:" in ass_text
 
             # Check style-specific formatting
-            if style_id in ("punch", "robin"):
+            if style_id in ("punch", "robin", "hormozi", "hype", "marker", "flame", "electric", "sunset"):
                 assert "BROWN" in ass_text
-            elif style_id == "clean":
+            elif style_id in ("clean", "sticker", "neon", "cinema", "podcast", "aesthetic", "dark_tag"):
                 assert "brown" in ass_text
 
 
@@ -210,3 +210,13 @@ def test_karaoke_colors_and_animations():
 
     ass_karaoke_pop = generate_ass_subtitles(segments, 0.0, 2.0, style="karaoke", animation="pop")
     assert r"\fscx116\fscy116\t(0,120,\fscx106\fscy106)" in ass_karaoke_pop
+
+    ass_sticker = generate_ass_subtitles(segments, 0.0, 2.0, style="sticker")
+    assert "&H0AFFFFFF&" in ass_sticker  # 96% opaque white BorderStyle=3 box
+    assert r"\1c&H00699605&" in ass_sticker
+
+    ass_hype = generate_ass_subtitles(segments, 0.0, 2.0, style="hype")
+    assert ",-1,-1,0,0,100,100,0,0,1,5,5," in ass_hype  # Bold + Italic Anton display style
+
+    ass_cinema = generate_ass_subtitles(segments, 0.0, 2.0, style="cinema")
+    assert ",100,100,2,0,1,2,3," in ass_cinema  # Letter-spaced editorial style

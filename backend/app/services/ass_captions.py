@@ -258,19 +258,25 @@ def generate_ass_subtitles(
     else:
         secondary_ass = hex_to_ass_color("#B8B8B8", alpha_fraction=0.0)
         accent_ass = hex_to_ass_color("#FFFFFF", alpha_fraction=0.0)
-    outline_ass = hex_to_ass_color("#000000", alpha_fraction=0.0)
-    back_ass = hex_to_ass_color("#000000", alpha_fraction=1.0 - style_def.box_opacity if style_def.border_style == 3 else 0.5)
+    outline_ass = (
+        hex_to_ass_color(style_def.box_color, alpha_fraction=1.0 - style_def.box_opacity)
+        if style_def.border_style == 3
+        else hex_to_ass_color(style_def.outline_color, alpha_fraction=0.0)
+    )
+    back_ass = hex_to_ass_color(style_def.shadow_color, alpha_fraction=0.5)
 
     is_karaoke = anim_id == "sweep"
     # For Karaoke/Sweep: PrimaryColour in ASS is the color AFTER sweep (accent_ass), SecondaryColour is BEFORE sweep (secondary_ass)
     style_primary = accent_ass if is_karaoke else primary_ass
     style_secondary = secondary_ass
 
-    # Header and V4+ Styles definition (font size 52 for high visibility with 2 words per line)
-    font_size = 52
+    # Header and V4+ Styles definition
+    font_size = style_def.font_size
     border_style = style_def.border_style
     outline_w = style_def.outline_width
     shadow_d = style_def.shadow_depth
+    italic_flag = -1 if style_def.italic else 0
+    letter_spacing = style_def.letter_spacing
 
     top_line_style_def = ""
     top_line_events: list[str] = []
@@ -336,7 +342,7 @@ def generate_ass_subtitles(
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_family},{font_size},{style_primary},{style_secondary},{outline_ass},{back_ass},"
-        f"-1,0,0,0,100,100,0,0,{border_style},{outline_w},{shadow_d},2,24,24,{margin_v},1\n"
+        f"-1,{italic_flag},0,0,100,100,{letter_spacing},0,{border_style},{outline_w},{shadow_d},2,24,24,{margin_v},1\n"
         f"{top_line_style_def}"
         "\n"
         "[Events]\n"

@@ -885,7 +885,9 @@ def test_create_clip_all_caption_styles_retain_audio(tmp_path: Path, monkeypatch
     monkeypatch.setattr("app.services.video_editor.has_audio_stream", lambda *args: True)
     monkeypatch.setattr("app.services.video_editor.has_ass_filter", lambda *args: True)
 
-    for style in ["classic", "clean", "punch", "robin", "pill", "karaoke"]:
+    from app.services.caption_styles import CAPTION_STYLES
+
+    for style in CAPTION_STYLES:
         for framing in ["true_9_16", "square_rounded", "standard"]:
             output = tmp_path / f"out_{style}_{framing}.mp4"
             captured = []
@@ -1037,6 +1039,15 @@ def test_build_subtitle_filters_all_six_styles(tmp_path: Path):
     assert any("fontcolor=0x34d399" in f for f in karaoke_filters)
     assert any("fontcolor=0x999999" in f for f in karaoke_filters)
     assert not any("box=1" in f for f in karaoke_filters)
+
+    marker_dir = tmp_path / "marker"
+    marker_dir.mkdir()
+    marker_filters = _build_subtitle_filters(
+        0.0, 2.0, subtitle_segments=segments, subtitle_directory=marker_dir, caption_style="marker"
+    )
+    assert any("box=1:boxcolor=0xfacc15@0.96" in f for f in marker_filters)
+    assert any("fontcolor=0xdc2626" in f for f in marker_filters)
+    assert (marker_dir / "subtitle-0.txt").read_text(encoding="utf-8") == "HELLO WORLD"
 
 
 def test_render_single_clip_respects_saved_watermark_false_when_not_overridden(

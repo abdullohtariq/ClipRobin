@@ -1,4 +1,15 @@
 project_id = "cliprobin"
 
+[auth]
+site_url = "https://cliprobin-accounts.thinarch8.chatgpt.site/subscription/"
+additional_redirect_urls = [
+  "http://127.0.0.1:3000/subscription",
+  "http://localhost:3000/subscription",
+  "https://abdullohtariq.github.io/cliprobin-web/subscription/",
+  "https://abdullohtariq.github.io/cliprobin-web/subscription",
+  "https://cliprobin-accounts.thinarch8.chatgpt.site/subscription/",
+  "https://cliprobin-accounts.thinarch8.chatgpt.site/subscription",
+]
+
 [functions.cliprobin-billing]
 verify_jwt = false # The function verifies user tokens and provider signatures separately.

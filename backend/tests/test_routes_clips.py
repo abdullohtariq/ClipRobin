@@ -292,10 +292,14 @@ def test_get_caption_styles_endpoint():
     assert response.status_code == 200
     styles = response.json()
     assert isinstance(styles, list)
-    assert len(styles) == 6
+    assert len(styles) == 18
 
     style_ids = [s["id"] for s in styles]
-    assert set(style_ids) == {"classic", "clean", "punch", "robin", "pill", "karaoke"}
+    assert {
+        "classic", "clean", "punch", "robin", "pill", "karaoke",
+        "hormozi", "hype", "sticker", "marker", "neon", "flame",
+        "cinema", "podcast", "electric", "aesthetic", "sunset", "dark_tag",
+    }.issubset(set(style_ids))
 
     classic = next(s for s in styles if s["id"] == "classic")
     assert classic["default_animation"] == "pop"

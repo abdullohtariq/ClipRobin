@@ -2,6 +2,11 @@
 
 import React, { useEffect, useState } from "react";
 import { CaptionAnimation, CaptionStyle } from "@/src/lib/api";
+import {
+  CAPTION_STYLE_VISUALS,
+  getCaptionStyleOption,
+  normalizeCaptionStyle,
+} from "@/src/lib/caption-styles";
 
 export interface LiveMovingCaptionsProps {
   captionStyle: CaptionStyle;
@@ -19,26 +24,14 @@ const STEP_MS = 380;
 const PAUSE_MS = 500;
 
 export function getDefaultAnimationForStyle(style: CaptionStyle): CaptionAnimation {
-  switch (style) {
-    case "robin":
-      return "grow";
-    case "clean":
-      return "fade";
-    case "karaoke":
-      return "sweep";
-    case "punch":
-    case "pill":
-    case "classic":
-    default:
-      return "pop";
-  }
+  return getCaptionStyleOption(style).defaultAnimation;
 }
 
 export function getEffectiveAnimation(
   style: CaptionStyle,
   animation?: CaptionAnimation | null
 ): CaptionAnimation {
-  if (style === "classic") {
+  if (normalizeCaptionStyle(style) === "classic") {
     return "pop";
   }
   return animation || getDefaultAnimationForStyle(style);
@@ -113,188 +106,42 @@ export function LiveMovingCaptions({
     return () => clearTimeout(timeoutId);
   }, [currentStep, prefersReducedMotion, isPageHidden]);
 
+  const canonicalStyle = normalizeCaptionStyle(captionStyle);
+  const tokens = CAPTION_STYLE_VISUALS[canonicalStyle] ?? CAPTION_STYLE_VISUALS.classic;
   const activeChunkIndex = currentStep < 2 ? 0 : currentStep < 4 ? 1 : 2;
   const chunk = CHUNKS[activeChunkIndex];
-  const effectiveAnim = getEffectiveAnimation(captionStyle, captionAnimation);
+  const effectiveAnim = getEffectiveAnimation(canonicalStyle, captionAnimation);
   const isSweep = effectiveAnim === "sweep";
+  const isClassic = canonicalStyle === "classic";
 
   return (
     <div className="flex items-center justify-center select-none pointer-events-none transition-all duration-150">
-      {captionStyle === "classic" && (
-        <div className="inline-block px-3 py-1.5 rounded bg-black/85 border border-black text-[14px] font-bold text-white shadow-lg">
-          {chunk.words.map((word, i) => {
-            const isWordActive = chunk.baseIndex + i === currentStep;
-            return (
-              <span
-                key={i}
-                className={`inline-block mx-0.5 transition-all duration-100 ${
-                  isWordActive
-                    ? "text-[#FFFF00] scale-110 underline underline-offset-2"
-                    : "text-white"
-                }`}
-              >
-                {word}
-              </span>
-            );
-          })}
-        </div>
-      )}
+      <div className={tokens.liveContainerClass}>
+        {chunk.words.map((rawWord, i) => {
+          const word = tokens.uppercase ? rawWord.toUpperCase() : rawWord;
+          const wordGlobalIndex = chunk.baseIndex + i;
+          const isWordActive = wordGlobalIndex === currentStep;
+          const isWordSung = isSweep && wordGlobalIndex <= currentStep;
+          const motionClass = isClassic
+            ? `mx-0.5 transition-all duration-100 ${isWordActive ? "scale-110" : ""}`
+            : `mx-1 transform ${tokens.liveTextClass} ${getMotionClass(effectiveAnim, isWordActive)}`;
+          const colorClass = isSweep
+            ? isWordActive
+              ? tokens.activeSweepClass
+              : isWordSung
+              ? tokens.sungClass
+              : tokens.inactiveClass
+            : isWordActive
+            ? tokens.activeClass
+            : tokens.inactiveClass;
 
-      {captionStyle === "robin" && (
-        <div className="inline-flex items-center justify-center px-1 text-[15px] font-black uppercase tracking-wide">
-          {chunk.words.map((word, i) => {
-            const wordGlobalIndex = chunk.baseIndex + i;
-            const isWordActive = wordGlobalIndex === currentStep;
-            const isWordSung = isSweep && wordGlobalIndex <= currentStep;
-            return (
-              <span
-                key={i}
-                className={`inline-block mx-1 transform drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] [text-shadow:_0_2px_4px_rgba(0,0,0,0.95),_0_0_2px_#000] ${getMotionClass(
-                  effectiveAnim,
-                  isWordActive
-                )} ${
-                  isSweep
-                    ? isWordActive
-                      ? "text-[#34D399] underline decoration-[#34D399] underline-offset-4"
-                      : isWordSung
-                      ? "text-[#34D399]"
-                      : "text-white"
-                    : isWordActive
-                    ? "text-[#34D399] font-black"
-                    : "text-white"
-                }`}
-              >
-                {word}
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {captionStyle === "punch" && (
-        <div className="inline-flex items-center justify-center px-1 text-[16px] font-extrabold uppercase tracking-tight">
-          {chunk.words.map((word, i) => {
-            const wordGlobalIndex = chunk.baseIndex + i;
-            const isWordActive = wordGlobalIndex === currentStep;
-            const isWordSung = isSweep && wordGlobalIndex <= currentStep;
-            return (
-              <span
-                key={i}
-                className={`inline-block mx-1 transform drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] [text-shadow:_0_2px_4px_rgba(0,0,0,0.95),_0_0_2px_#000] ${getMotionClass(
-                  effectiveAnim,
-                  isWordActive
-                )} ${
-                  isSweep
-                    ? isWordActive
-                      ? "text-[#F7C204] underline decoration-[#F7C204] underline-offset-4"
-                      : isWordSung
-                      ? "text-[#F7C204]"
-                      : "text-white"
-                    : isWordActive
-                    ? "text-[#F7C204]"
-                    : "text-white"
-                }`}
-              >
-                {word}
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {captionStyle === "pill" && (
-        <div className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/85 border border-white/15 text-[14px] font-semibold text-white shadow-lg">
-          {chunk.words.map((word, i) => {
-            const wordGlobalIndex = chunk.baseIndex + i;
-            const isWordActive = wordGlobalIndex === currentStep;
-            const isWordSung = isSweep && wordGlobalIndex <= currentStep;
-            return (
-              <span
-                key={i}
-                className={`inline-block ${getMotionClass(
-                  effectiveAnim,
-                  isWordActive
-                )} ${
-                  isSweep
-                    ? isWordActive
-                      ? "text-[#34D399] font-bold underline decoration-[#34D399] underline-offset-4"
-                      : isWordSung
-                      ? "text-[#34D399] font-bold"
-                      : "text-white"
-                    : isWordActive
-                    ? "text-[#34D399] font-bold"
-                    : "text-white"
-                }`}
-              >
-                {word}
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {captionStyle === "clean" && (
-        <div className="inline-flex items-center justify-center px-1 text-[15px] font-bold drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
-          {chunk.words.map((word, i) => {
-            const wordGlobalIndex = chunk.baseIndex + i;
-            const isWordActive = wordGlobalIndex === currentStep;
-            const isWordSung = isSweep && wordGlobalIndex <= currentStep;
-            return (
-              <span
-                key={i}
-                className={`inline-block mx-1 ${getMotionClass(
-                  effectiveAnim,
-                  isWordActive
-                )} ${
-                  isSweep
-                    ? isWordActive
-                      ? "text-white underline decoration-white/80 underline-offset-4"
-                      : isWordSung
-                      ? "text-white"
-                      : "text-zinc-400"
-                    : isWordActive
-                    ? "text-white"
-                    : "text-zinc-400"
-                }`}
-              >
-                {word}
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {captionStyle === "karaoke" && (
-        <div className="inline-flex items-center justify-center px-1 text-[15px] font-bold drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)]">
-          {chunk.words.map((word, i) => {
-            const wordGlobalIndex = chunk.baseIndex + i;
-            const isWordActive = wordGlobalIndex === currentStep;
-            const isWordSung = isSweep && wordGlobalIndex <= currentStep;
-
-            return (
-              <span
-                key={i}
-                className={`inline-block mx-1 ${getMotionClass(
-                  effectiveAnim,
-                  isWordActive
-                )} ${
-                  isSweep
-                    ? isWordActive
-                      ? "text-[#34D399] underline decoration-[#34D399] underline-offset-4 font-extrabold"
-                      : isWordSung
-                      ? "text-[#34D399] font-bold"
-                      : "text-white/90"
-                    : isWordActive
-                    ? "text-[#34D399] font-extrabold"
-                    : "text-white/90"
-                }`}
-              >
-                {word}
-              </span>
-            );
-          })}
-        </div>
-      )}
+          return (
+            <span key={i} className={`inline-block ${motionClass} ${colorClass}`}>
+              {word}
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }

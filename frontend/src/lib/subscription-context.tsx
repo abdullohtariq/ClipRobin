@@ -9,7 +9,7 @@ export const PLAN_FEATURES = [
   ["Output resolution & format", "720×1280, 30 fps MP4", "720×1280, 30 fps MP4"],
   ["MP4 and ZIP export", "Included", "Included"],
   ["Watermark", "Default Clip Robin mark", "Removable or custom logo"],
-  ["Caption styles", "Classic and Clean", "All styles"],
+  ["Caption styles", "Classic and Clean", "All 18 styles"],
   ["Gemini AI Hook Finder", "—", "20 included credits per billing cycle, or use your own Gemini key"],
 ] as const;
 
@@ -68,8 +68,13 @@ function useSubscriptionState() {
             const { data, error } = await auth.exchangeCodeForSession(callback.code);
             if (error || !data.session) throw error ?? new Error("No session returned");
             setSession(data.session);
-          } catch {
-            setCallbackError("This account link has expired or was opened in a different browser. Open it in the browser that requested it or request a new email.");
+          } catch (err) {
+            const detail = err instanceof Error ? err.message.trim() : "";
+            setCallbackError(
+              detail
+                ? `Could not finish sign-in: ${detail}`
+                : "This account link has expired or was opened in a different browser. Open it in the browser that requested it or request a new email."
+            );
           } finally {
             setCheckingCallback(false);
           }

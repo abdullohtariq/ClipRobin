@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef } from "react";
+import { CAPTION_STYLE_OPTIONS } from "@/src/lib/caption-styles";
 import { useSubscription } from "@/src/lib/subscription-context";
 
 export function UpgradeModal() {
@@ -56,7 +57,7 @@ export function UpgradeModal() {
         <div className="rounded-xl border border-amber-400/25 bg-[#0c0c0e] p-3.5 space-y-1">
           <div className="font-semibold text-amber-300">Added with Pro</div>
           <p className="text-zinc-300 leading-relaxed">
-            Gemini AI Hook Finder (20 credits/cycle or own key), all 6 caption styles, watermark removal, and custom brand logos.
+            Gemini AI Hook Finder (20 credits/cycle or own key), all {CAPTION_STYLE_OPTIONS.length} caption styles, watermark removal, and custom brand logos.
           </p>
         </div>
       </div>

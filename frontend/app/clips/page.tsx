@@ -38,15 +38,7 @@ import { TikTokUploadModal } from "@/src/components/tiktok-upload-modal";
 import { InstagramUploadModal } from "@/src/components/instagram-upload-modal";
 import { useAIDeveloperStatus } from "@/src/hooks/use-ai-developer-status";
 import { useSubscription } from "@/src/lib/subscription-context";
-
-const normalizeCaptionStyle = (raw: string | null | undefined): CaptionStyle => {
-  if (raw === "bold_emerald") return "robin";
-  if (raw === "clean_gold") return "clean";
-  if (raw && ["classic", "robin", "clean", "punch", "pill", "karaoke"].includes(raw)) {
-    return raw as CaptionStyle;
-  }
-  return "classic";
-};
+import { normalizeCaptionStyle } from "@/src/lib/caption-styles";
 
 interface AppliedProjectSettings {
   framingMode: FramingMode;
