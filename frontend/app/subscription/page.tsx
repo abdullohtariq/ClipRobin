@@ -15,7 +15,7 @@ const oauthProviders = [
   { id: "google", label: "Google", enabled: process.env.NEXT_PUBLIC_CLIPROBIN_GOOGLE_AUTH === "1" },
 ] as const;
 
-type AuthMode = "sign-in" | "sign-up" | "reset";
+type AuthMode = "sign-in" | "sign-up" | "reset" | "password";
 
 function AccountPanel() {
   const { authReady, session, recovering, setRecovering, emailCallback, setEmailCallback, callbackError,
@@ -23,6 +23,7 @@ function AccountPanel() {
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +31,8 @@ function AccountPanel() {
   const [billingLink, setBillingLink] = useState<{ accountId: string; url: string; action: "checkout" | "portal"; attemptId?: string } | null>(null);
   const [desktop] = useState(() => typeof window !== "undefined" && isTauri());
   const watchingCheckout = Boolean(plan?.checkoutState);
+  const settingPassword = Boolean(session && mode === "password");
+  const passwordForm = recovering || settingPassword;
 
   useEffect(() => {
     if (!watchingCheckout) return;
@@ -45,6 +48,7 @@ function AccountPanel() {
     setMessage(null);
     setCallbackError(null);
     setPassword("");
+    setConfirmPassword("");
   }
 
   async function run(action: () => Promise<void>) {
@@ -58,6 +62,8 @@ function AccountPanel() {
         setError("Too many account emails were sent. Check for the latest email or try again in a few minutes.");
       } else if (isAuthError(err) && err.code === "email_address_not_authorized") {
         setError("This email can’t receive account messages from this Supabase project. Ask the project owner to configure public email delivery.");
+      } else if (isAuthError(err) && err.code === "reauthentication_needed") {
+        setError("Sign out and sign in again, then set your Clip Robin password.");
       } else {
         setError(err instanceof Error ? err.message : "Try again shortly.");
       }
@@ -118,11 +124,15 @@ function AccountPanel() {
     if (!accountClient) return;
     const auth = accountClient.auth;
     void run(async () => {
-      if (recovering) {
+      if (passwordForm) {
+        if (settingPassword && password !== confirmPassword) throw new Error("The passwords do not match.");
         const response = await auth.updateUser({ password });
         if (response.error) throw response.error;
         setRecovering();
-        setMessage("Password updated.");
+        changeMode("sign-in");
+        setMessage(settingPassword
+          ? "Password saved. Sign in to the Windows app with your email and this password."
+          : "Password updated.");
       } else if (mode === "reset") {
         const response = await auth.resetPasswordForEmail(email.trim(), { redirectTo: confirmationRedirect() });
         if (response.error) throw response.error;
@@ -183,7 +193,7 @@ function AccountPanel() {
   if (!auth) return <p className="text-sm text-zinc-300">Account sign-in is unavailable in this build. You can still create and export clips on the Free plan.</p>;
   if (!authReady) return <p role="status" className="text-sm text-zinc-300">Checking sign-in…</p>;
 
-  const accountForm = !session || recovering || (!desktop && mode === "reset");
+  const accountForm = !session || passwordForm || (!desktop && mode === "reset");
   const credits = plan?.hookCredits;
   const usableCredits = credits?.availableNow ?? credits?.remaining;
   const showBillingLink = billingLink?.accountId === session?.user.id && (billingLink?.action === "portal"
@@ -212,8 +222,9 @@ function AccountPanel() {
       ) : accountForm ? (
         <>
           <form className="max-w-md space-y-4" onSubmit={submit}>
-            <h2 className="font-semibold">{recovering ? "Choose a new password" : mode === "sign-up" ? "Create a free account" : mode === "reset" ? "Reset your password" : "Sign in with email"}</h2>
-            {!recovering && (mode === "sign-in" || mode === "sign-up") && (
+            <h2 className="font-semibold">{recovering ? "Choose a new password" : settingPassword ? "Set a Clip Robin password" : mode === "sign-up" ? "Create a free account" : mode === "reset" ? "Reset your password" : "Sign in with email"}</h2>
+            {settingPassword && <p className="text-sm text-zinc-300">Use {session?.user.email} and this password to sign in to the Windows app.</p>}
+            {!passwordForm && (mode === "sign-in" || mode === "sign-up") && (
               <>
                 {!desktop && oauthProviders.some((provider) => provider.enabled) && (
                   <div className="space-y-3">
@@ -248,7 +259,7 @@ function AccountPanel() {
                 {desktop && accountPageUrl && oauthProviders.some((provider) => provider.enabled) && (
                   <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-3 space-y-2">
                     <p className="text-xs text-zinc-400">
-                      Create or manage your account with Google in your browser, then sign in here with your email and password.
+                      Continue with Google in your browser, choose Set app password, then return here to sign in with your email and that password.
                     </p>
                     <a
                       href={accountPageUrl}
@@ -263,15 +274,17 @@ function AccountPanel() {
                 )}
               </>
             )}
-            {!recovering && <label className="block text-sm">Email<input className={inputClass} required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
-            {(recovering || mode !== "reset") && (
-              <label className="block text-sm">Password<input className={inputClass} required minLength={recovering || mode === "sign-up" ? 8 : undefined} type="password" autoComplete={recovering || mode === "sign-up" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+            {!passwordForm && <label className="block text-sm">Email<input className={inputClass} required type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>}
+            {(passwordForm || mode !== "reset") && (
+              <label className="block text-sm">Password<input className={inputClass} required minLength={passwordForm || mode === "sign-up" ? 8 : undefined} type="password" autoComplete={passwordForm || mode === "sign-up" ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
             )}
+            {settingPassword && <label className="block text-sm">Confirm password<input className={inputClass} required minLength={8} type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} /></label>}
             <div className="flex flex-wrap gap-2">
               <button type="submit" disabled={busy} className={primaryClass}>
-                {busy ? "Please wait…" : recovering ? "Save password" : mode === "sign-up" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}
+                {busy ? "Please wait…" : passwordForm ? "Save password" : mode === "sign-up" ? "Create account" : mode === "reset" ? "Send reset link" : "Sign in"}
               </button>
-              {!recovering && (
+              {settingPassword && <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode("sign-in")}>Cancel</button>}
+              {!passwordForm && (
                 <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode(mode === "sign-in" ? "sign-up" : "sign-in")}>
                   {mode === "sign-in" ? "Create a free account" : "Back to sign-in"}
                 </button>
@@ -346,6 +359,7 @@ function AccountPanel() {
           <div className="flex flex-wrap gap-2">
             {plan?.portalAvailable && <button type="button" disabled={busy} className={secondaryClass} onClick={() => getBillingLink("portal")}>Manage billing</button>}
             <button type="button" disabled={busy} className={secondaryClass} onClick={() => void run(refreshPlan)}>Refresh plan</button>
+            {!desktop && <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode("password")}>Set app password</button>}
             {!desktop && <button type="button" disabled={busy} className={secondaryClass} onClick={() => changeMode("reset")}>Reset password</button>}
             <button type="button" disabled={busy} className={secondaryClass} onClick={() => void run(async () => {
               const response = await auth.signOut({ scope: "local" });

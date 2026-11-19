@@ -1,6 +1,6 @@
 "use client";
 
-import type { Session } from "@supabase/supabase-js";
+import { isAuthError, type Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { accountClient, billingRequest, recoveryIsOpen, saveRecovery, takeAuthCallback, type AccountPlan, type EmailCallback } from "@/src/lib/account";
 
@@ -70,10 +70,13 @@ function useSubscriptionState() {
             setSession(data.session);
           } catch (err) {
             const detail = err instanceof Error ? err.message.trim() : "";
+            const invalidLink = isAuthError(err) && [
+              "bad_code_verifier", "pkce_code_verifier_not_found", "flow_state_not_found", "flow_state_expired", "otp_expired",
+            ].includes(err.code ?? "");
             setCallbackError(
-              detail
-                ? `Could not finish sign-in: ${detail}`
-                : "This account link has expired or was opened in a different browser. Open it in the browser that requested it or request a new email."
+              invalidLink || !detail
+                ? "This account link has expired or was opened in a different browser. Start sign-in again in this browser, or request a new email link."
+                : `Could not finish sign-in: ${detail}`
             );
           } finally {
             setCheckingCallback(false);
