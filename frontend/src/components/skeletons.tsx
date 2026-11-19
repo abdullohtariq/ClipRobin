@@ -14,7 +14,7 @@ export function ClipSkeletonCard({
   return (
     <article
       aria-label="Loading clip placeholder"
-      className="relative flex flex-col justify-between rounded-xl border border-zinc-800 bg-[#111114] p-5 shadow-sm overflow-hidden"
+      className="relative flex flex-col justify-between rounded-2xl border border-zinc-800 bg-[#121215] p-3.5 shadow-sm overflow-hidden"
     >
       {/* 9:16 Video preview skeleton */}
       <div className="relative aspect-[9/16] w-full max-w-xs rounded-lg border border-zinc-800/60 bg-zinc-900/60 overflow-hidden flex flex-col items-center justify-center p-4">
@@ -86,7 +86,7 @@ export function ProjectSkeletonCard() {
   return (
     <article
       aria-label="Loading project placeholder"
-      className="rounded-xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4 overflow-hidden"
+      className="rounded-2xl border border-zinc-800 bg-[#121215] p-5 shadow-sm space-y-4 overflow-hidden"
     >
       {/* Header with Title and Status */}
       <div className="flex flex-wrap items-start justify-between gap-4">

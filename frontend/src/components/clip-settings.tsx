@@ -157,19 +157,20 @@ export function ClipSettings({
       value: "random" as const,
       label: "Fast Interval",
       sublabel: "Evenly spaced cuts",
+      badge: <Badge variant="emerald" size="sm">Free</Badge>,
     },
     {
       value: "ai" as const,
       label: "AI Hook Finder",
       sublabel: "Gemini moments",
       badge: isPro ? (
-        <Badge variant="purple" size="sm">{includedHookCredits !== undefined ? `${includedHookCredits} credits` : aiModeEnabled ? "Own key" : "Off"}</Badge>
+        <Badge variant="emerald" size="sm">{includedHookCredits !== undefined ? `${includedHookCredits} credits` : aiModeEnabled ? "Pro · Own key" : "Pro · Off"}</Badge>
       ) : (
-        <Badge variant="amber" size="sm">PRO ✦</Badge>
+        <Badge variant="amber" size="sm">Pro</Badge>
       ),
       disabled: isPro ? !aiModeEnabled : false,
       tooltip: !isPro
-        ? "Gemini AI Hook Finder is a Pro feature. Click to unlock."
+        ? "Gemini AI Hook Finder is a Pro feature. Click to view plans."
         : aiModeEnabled
         ? "Gemini analyzes the timestamped transcript to find hooks"
         : aiModeDisabledReason || "Add Gemini API Key in Settings to unlock AI Hook Finder",
@@ -208,12 +209,12 @@ export function ClipSettings({
                 <button
                   type="button"
                   onClick={() => openUpgradeModal("Gemini AI Hook Finder")}
-                  className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 transition-colors"
+                  className="text-xs font-medium text-amber-300 hover:text-amber-200 transition-colors cursor-pointer"
                 >
-                  ⚡ Unlock AI Hooks
+                  Unlock AI Hooks
                 </button>
               ) : !aiModeEnabled ? (
-                <span className="text-[11px] text-zinc-500">Local offline</span>
+                <span className="text-xs text-zinc-500">Local offline</span>
               ) : null}
             </div>
             <SegmentedControl
@@ -224,7 +225,7 @@ export function ClipSettings({
               ariaLabel="Moments selection mode"
             />
             {isPro && aiModeEnabled && generationMode === "ai" && (
-              <p className="mt-1.5 text-[11px] text-purple-300/90">
+              <p className="mt-1.5 text-xs text-zinc-400">
                 {includedHookCredits === undefined
                   ? "Sends timestamped transcript text to Gemini using your key."
                   : "Sends the timestamped transcript to Clip Robin’s hosted service and Gemini. Fresh analyses use 1 credit per started 30 minutes."}
@@ -342,14 +343,14 @@ export function ClipSettings({
             <OptionCard
               title="Full 9:16 Crop"
               subtitle="Fill 9:16 frame"
-              badge={<Badge variant="purple" size="sm">9:16</Badge>}
+              badge={<Badge variant="neutral" size="sm">9:16</Badge>}
               selected={framingMode === "true_9_16"}
               disabled={disabled}
               onClick={() => onFramingModeChange("true_9_16")}
               previewGraphic={
                 <div className="relative aspect-[9/16] w-12 rounded-[5px] border border-zinc-700/60 bg-[#0a0a0d] flex items-center justify-center overflow-hidden p-1 shadow-inner">
-                  <div className="size-full rounded-[3px] bg-zinc-700/80 border border-purple-500/40 flex items-center justify-center">
-                    <svg className="size-4 text-purple-300/90" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <div className="size-full rounded-[3px] bg-zinc-700/80 border border-emerald-500/40 flex items-center justify-center">
+                    <svg className="size-4 text-emerald-300/90" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                       <circle cx="12" cy="8" r="4" strokeWidth="2" />
                       <path d="M6 20v-2a6 6 0 0 1 12 0v2" strokeWidth="2" />
                     </svg>
@@ -361,7 +362,7 @@ export function ClipSettings({
 
           {/* 9:16 Crop Framing Follow Mode - Exclusively in Full 9:16 */}
           {framingMode === "true_9_16" ? (
-            <div className="rounded-xl border border-purple-500/30 bg-purple-950/15 p-3.5 space-y-3 animate-fade-in">
+            <div className="rounded-xl border border-zinc-800 bg-[#0c0c0e] p-4 space-y-3 animate-fade-in">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <span className="text-[13px] font-semibold text-zinc-100">9:16 Crop Framing Mode</span>
@@ -373,7 +374,7 @@ export function ClipSettings({
                       : "Smoothly tracks the active speaker inside the 9:16 window."}
                   </p>
                 </div>
-                <Badge variant="purple" size="sm">9:16 Crop</Badge>
+                <Badge variant="emerald" size="sm">9:16 Crop</Badge>
               </div>
 
               <div
@@ -385,7 +386,7 @@ export function ClipSettings({
                   {
                     value: "locked" as const,
                     title: "Locked Crop",
-                    desc: "Stationary • Zero scan",
+                    desc: "Stationary · Zero scan",
                   },
                   {
                     value: "cuts" as const,
@@ -409,24 +410,24 @@ export function ClipSettings({
                       onClick={() => handleTrackingModeChange(opt.value)}
                       className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left transition-all focus-ring ${
                         selected
-                          ? "border-purple-400 bg-purple-500/15 text-white ring-1 ring-purple-400/50"
-                          : "border-zinc-800 bg-[#0d0d10] text-zinc-300 hover:border-zinc-700 hover:text-white"
+                          ? "border-[#10b981] bg-[#10b981]/10 text-white ring-1 ring-[#10b981]/60"
+                          : "border-zinc-800 bg-[#121215] text-zinc-300 hover:border-zinc-700 hover:text-white"
                       } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       <span className="text-xs font-semibold">{opt.title}</span>
-                      <span className="text-[10px] text-zinc-400 mt-0.5">{opt.desc}</span>
+                      <span className="text-xs text-zinc-400 mt-0.5">{opt.desc}</span>
                     </button>
                   );
                 })}
               </div>
 
               {effectiveTrackingMode === "locked" && (
-                <div className="pt-2 border-t border-purple-500/20 space-y-2">
+                <div className="pt-2.5 border-t border-zinc-800 space-y-2">
                   <div className="flex items-center justify-between text-xs">
                     <label htmlFor="clip-crop-anchor-slider" className="font-medium text-zinc-200">
                       Horizontal crop anchor
                     </label>
-                    <span className="font-mono text-purple-300">
+                    <span className="font-mono text-emerald-400">
                       {Math.round(cropAnchorX * 100)}%
                     </span>
                   </div>
@@ -440,7 +441,7 @@ export function ClipSettings({
                       disabled={disabled}
                       value={Math.round(cropAnchorX * 100)}
                       onChange={(e) => onCropAnchorXChange?.(Number(e.target.value) / 100)}
-                      className="w-full accent-purple-400 cursor-pointer disabled:opacity-50"
+                      className="w-full accent-[#10b981] cursor-pointer disabled:opacity-50"
                     />
                     <div className="flex items-center gap-1 shrink-0">
                       {[
@@ -454,9 +455,9 @@ export function ClipSettings({
                           disabled={disabled}
                           title={preset.title}
                           onClick={() => onCropAnchorXChange?.(preset.val)}
-                          className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors cursor-pointer ${
+                          className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors cursor-pointer ${
                             Math.abs(cropAnchorX - preset.val) < 0.03
-                              ? "border-purple-400 bg-purple-500/20 text-white"
+                              ? "border-[#10b981] bg-[#10b981]/15 text-emerald-300"
                               : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-200"
                           }`}
                         >
@@ -469,11 +470,8 @@ export function ClipSettings({
               )}
             </div>
           ) : (
-            <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/30 p-2.5 px-3 flex items-center justify-between text-xs text-zinc-500">
-              <div className="flex items-center gap-2">
-                <span className="inline-block size-1.5 rounded-full bg-zinc-600" />
-                <span>Locked Crop &amp; Speaker Tracking options apply to <strong>Full 9:16 Crop</strong>.</span>
-              </div>
+            <div className="rounded-xl border border-zinc-800/80 bg-[#0c0c0e] p-2.5 px-3 flex items-center justify-between text-xs text-zinc-400">
+              <span>Locked Crop &amp; Speaker Tracking apply to Full 9:16 Crop.</span>
               <Badge variant="neutral" size="sm">9:16 Only</Badge>
             </div>
           )}
@@ -557,9 +555,7 @@ export function ClipSettings({
             {showCaptions && (
               <div className="pt-3 border-t border-zinc-800/80 space-y-4">
                 {/* 1. Live Animated Preview Stage */}
-                <div className="relative w-full h-24 rounded-xl overflow-hidden flex items-center justify-center border border-zinc-800 bg-[#0d0d11] bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:12px_12px] shadow-inner px-4">
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-black/35 pointer-events-none" />
-
+                <div className="relative w-full h-24 rounded-xl overflow-hidden flex items-center justify-center border border-zinc-800 bg-[#09090b] px-4">
                   {/* Live word-by-word animated preview */}
                   <div className="relative z-10 pt-3">
                     <LiveMovingCaptions
@@ -569,14 +565,14 @@ export function ClipSettings({
                   </div>
 
                   {/* Top-left live status badge */}
-                  <div className="absolute top-2 left-2.5 z-20 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/70 border border-white/10 backdrop-blur-xs">
-                    <span className="size-1.5 rounded-full bg-[#10b981] animate-pulse" />
-                    <span className="text-[11px] font-medium text-zinc-200">
+                  <div className="absolute top-2 left-2.5 z-20 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-zinc-900/90 border border-zinc-800">
+                    <span className="size-1.5 rounded-full bg-[#10b981]" />
+                    <span className="text-xs font-medium text-zinc-200">
                       {activeStyleOption.name}
                     </span>
-                    <span className="text-[10px] text-zinc-500">•</span>
-                    <span className="text-[10px] font-mono text-emerald-400">
-                      {activeAnimationOption.name} motion
+                    <span className="text-xs text-zinc-500">·</span>
+                    <span className="text-xs font-mono text-emerald-400">
+                      {activeAnimationOption.name}
                     </span>
                   </div>
 
@@ -585,7 +581,7 @@ export function ClipSettings({
                     type="button"
                     disabled={disabled}
                     onClick={() => setIsCaptionPickerOpen(true)}
-                    className="absolute top-2 right-2.5 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/80 hover:border-emerald-500/50 text-[11px] font-medium text-zinc-200 hover:text-white transition-all focus-ring cursor-pointer shadow-sm"
+                    className="absolute top-2 right-2.5 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/80 hover:border-emerald-500/50 text-xs font-medium text-zinc-200 hover:text-white transition-all focus-ring cursor-pointer"
                   >
                     <svg className="size-3 text-emerald-400" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M8 5v14l11-7z" />
@@ -596,11 +592,11 @@ export function ClipSettings({
 
                 {/* 2. Direct 1-Click Caption Style Grid */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <label className="text-xs font-semibold text-zinc-200">
-                      Subtitle style
+                      Subtitle style <span className="font-normal text-zinc-400">· 2 Free, 4 Pro</span>
                     </label>
-                    <span className="text-[11px] text-zinc-400 font-mono">
+                    <span className="text-xs text-zinc-400 font-mono">
                       {activeStyleOption.fontFamily}
                     </span>
                   </div>
@@ -612,6 +608,7 @@ export function ClipSettings({
                   >
                     {CAPTION_STYLE_OPTIONS.map((styleOpt) => {
                       const isSelected = captionStyle === styleOpt.id;
+                      const isProStyle = !["classic", "clean"].includes(styleOpt.id);
                       const isLocked = !isCaptionStyleAllowed(styleOpt.id);
                       return (
                         <button
@@ -628,15 +625,10 @@ export function ClipSettings({
                           } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                         >
                           {/* Mini visual sample */}
-                          <div className="relative w-full h-11 rounded-lg overflow-hidden flex items-center justify-center border border-zinc-800/80 bg-[#141418] px-1">
+                          <div className="relative w-full h-11 rounded-lg overflow-hidden flex items-center justify-center bg-[#09090b] px-1">
                             <div className="scale-75 origin-center pointer-events-none">
                               <CaptionVisualSample styleId={styleOpt.id} />
                             </div>
-                            {isLocked && (
-                              <span className="absolute top-1 left-1 px-1 py-0.2 rounded bg-amber-500/20 border border-amber-500/40 text-[9px] font-bold text-amber-300">
-                                PRO
-                              </span>
-                            )}
                             {isSelected && (
                               <span className="absolute top-1 right-1 flex size-4 items-center justify-center rounded-full bg-[#10b981] text-zinc-950">
                                 <svg className="size-2.5 stroke-[3]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -646,13 +638,19 @@ export function ClipSettings({
                             )}
                           </div>
 
-                          <div className="mt-1.5 flex items-center justify-between gap-1 w-full">
+                          <div className="mt-1.5 flex items-center justify-between gap-1.5 w-full">
                             <span className="text-xs font-semibold text-white truncate">
                               {styleOpt.name}
                             </span>
-                            <span className="text-[10px] text-zinc-400 font-medium shrink-0">
-                              {styleOpt.animationName}
-                            </span>
+                            {isProStyle ? (
+                              <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/35 text-[11px] font-semibold leading-none text-amber-300 shrink-0">
+                                {isLocked ? "🔒 Pro" : "Pro"}
+                              </span>
+                            ) : (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-semibold leading-none text-emerald-300 shrink-0">
+                                Free
+                              </span>
+                            )}
                           </div>
                         </button>
                       );
@@ -742,8 +740,8 @@ export function ClipSettings({
               {isPro ? (
                 <>
                   <ToggleRow
-                    label="Show Brand Watermark"
-                    description="Burn your logo or Clip Robin branding into the video safe zone"
+                    label="Show Brand Watermark (Pro)"
+                    description="Turn off watermark or upload a custom logo in settings"
                     checked={showWatermark}
                     onChange={handleWatermarkToggle}
                     disabled={disabled}
@@ -753,12 +751,12 @@ export function ClipSettings({
                     <div className="pt-2">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-semibold text-zinc-300">
-                          Watermark Options
+                          Custom Logo (Pro)
                         </span>
                         <button
                           type="button"
                           onClick={() => setShowCustomWatermarkPanel(!showCustomWatermarkPanel)}
-                          className="text-xs text-emerald-400 hover:text-emerald-300 underline font-medium"
+                          className="text-xs text-emerald-400 hover:text-emerald-300 underline font-medium cursor-pointer"
                         >
                           {showCustomWatermarkPanel ? "Hide custom logo settings" : "Custom logo settings"}
                         </button>
@@ -771,28 +769,27 @@ export function ClipSettings({
                   )}
                 </>
               ) : (
-                <div className="p-3.5 rounded-xl border border-zinc-800 bg-[#0d0d10] space-y-2">
-                  <div className="flex items-center justify-between">
+                <div className="p-3.5 rounded-xl border border-zinc-800 bg-[#0c0c0e] space-y-2">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[13px] font-semibold text-zinc-200">
                           Watermark: Made with Clip Robin
                         </span>
-                        <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
-                          LOCKED ON FREE
-                        </span>
+                        <Badge variant="emerald" size="sm">Free</Badge>
+                        <Badge variant="amber" size="sm">Removal: Pro</Badge>
                       </div>
-                      <p className="text-xs text-zinc-400 mt-0.5">
-                        Free tier includes default branding mark. Upgrade to Pro to remove branding or upload your own custom logo.
+                      <p className="text-xs text-zinc-400 mt-1">
+                        Free exports include the Clip Robin mark. Pro lets you remove it or upload your own logo.
                       </p>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => openUpgradeModal("Custom Watermark & Removal")}
-                      className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-zinc-950 font-bold text-xs shadow transition-all duration-150 shrink-0"
+                      onClick={() => openUpgradeModal("Watermark Removal & Custom Logo")}
+                      className="px-3 py-1.5 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-semibold text-xs transition-colors shrink-0 cursor-pointer focus-ring"
                     >
-                      Unlock Pro
+                      View plans
                     </button>
                   </div>
                 </div>

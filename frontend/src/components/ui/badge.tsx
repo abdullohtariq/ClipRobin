@@ -21,7 +21,7 @@ export function Badge({
     default: "bg-zinc-800/80 text-zinc-300 border-zinc-700/60",
     emerald: "bg-emerald-500/10 text-emerald-400 border-emerald-500/25",
     amber: "bg-amber-400/10 text-amber-300 border-amber-400/25",
-    purple: "bg-purple-500/10 text-purple-300 border-purple-500/25",
+    purple: "bg-zinc-800/90 text-zinc-200 border-zinc-700/80",
     danger: "bg-red-500/10 text-red-300 border-red-500/25",
     neutral: "bg-zinc-900 text-zinc-400 border-zinc-800",
   };

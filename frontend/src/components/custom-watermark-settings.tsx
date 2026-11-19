@@ -11,6 +11,7 @@ import {
   WatermarkStatus,
 } from "@/src/lib/api";
 import { useSubscription } from "@/src/lib/subscription-context";
+import { ConfirmDialog } from "./ui/confirm-dialog";
 
 export interface CustomWatermarkSettingsProps {
   onSettingsChange?: () => void;
@@ -32,6 +33,7 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
   const [error, setError] = useState<string | null>(null);
   const [position, setPosition] = useState<WatermarkPosition>("top_right");
   const [opacity, setOpacity] = useState(100);
+  const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const opacitySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -138,8 +140,8 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm("Remove custom watermark and restore default branding?")) return;
+  const executeDelete = async () => {
+    setConfirmResetOpen(false);
     try {
       setLoading(true);
       setError(null);
@@ -155,44 +157,42 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
 
   if (!isPro) {
     return (
-      <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-2.5">
-        <div className="flex items-center justify-between">
+      <div className="p-4 rounded-xl border border-zinc-800 bg-[#0c0c0e] space-y-2.5">
+        <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm">🏷️</span>
-            <span className="text-xs font-bold text-amber-200">Custom Brand Watermark</span>
-            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40">
-              PRO
+            <span className="text-xs font-semibold text-[#f4f4f5]">Custom Brand Watermark</span>
+            <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-xs font-semibold border border-amber-500/30">
+              Pro
             </span>
           </div>
           <button
             type="button"
             onClick={() => openUpgradeModal("Custom Brand Watermarks")}
-            className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs transition-colors"
+            className="px-3 py-1.5 rounded-xl bg-[#10b981] hover:bg-[#059669] text-zinc-950 font-bold text-xs transition-colors focus-ring cursor-pointer"
           >
-            Upgrade to Unlock
+            Upgrade to unlock
           </button>
         </div>
-        <p className="text-[11px] text-zinc-400">
-          Upload your own PNG, JPG, or WebP transparent logo to replace the Clip Robin watermark on all your exported clips.
+        <p className="text-xs text-zinc-400">
+          Upload your own PNG, JPG, or WebP transparent logo to replace the Clip Robin watermark on exported clips.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4 p-4 rounded-xl border border-zinc-800 bg-[#0d0d10]">
+    <div className="space-y-4 p-4 rounded-xl border border-zinc-800 bg-[#0c0c0e]">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm">🏷️</span>
-          <span className="text-xs font-bold text-white">Custom Brand Watermark</span>
-          <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40">
-            PRO ACTIVE
+          <span className="text-xs font-semibold text-white">Custom Brand Watermark</span>
+          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-xs font-semibold border border-emerald-500/30">
+            Active
           </span>
         </div>
       </div>
 
       {/* Uploaded image status */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg border border-zinc-800/80 bg-zinc-900/40">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl border border-zinc-800 bg-[#121215]">
         <div className="flex items-center gap-3">
           {status?.has_custom_watermark && imageUrl ? (
             <div className="size-12 rounded-lg bg-zinc-950 border border-emerald-500/30 p-1 flex items-center justify-center overflow-hidden">
@@ -218,10 +218,10 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
                 ? `Custom Logo: ${status.custom_filename}`
                 : "Default Clip Robin Brandmark"}
             </div>
-            <p className="text-[11px] text-zinc-400">
+            <p className="text-xs text-zinc-400">
               {status?.has_custom_watermark
                 ? "Active on newly generated clips"
-                : "Upload transparent PNG, JPG, or WebP logo for your personal brand"}
+                : "Upload a transparent PNG, JPG, or WebP logo"}
             </p>
           </div>
         </div>
@@ -238,17 +238,17 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
             type="button"
             disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
-            className="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-xs font-semibold text-zinc-200 transition-colors"
+            className="px-3 py-1.5 rounded-xl border border-zinc-700 bg-[#18181c] hover:bg-[#202026] text-xs font-semibold text-zinc-200 transition-colors focus-ring cursor-pointer"
           >
-            {uploading ? "Uploading..." : status?.has_custom_watermark ? "Replace Logo" : "Upload Logo"}
+            {uploading ? "Uploading…" : status?.has_custom_watermark ? "Replace Logo" : "Upload Logo"}
           </button>
 
           {status?.has_custom_watermark && (
             <button
               type="button"
               disabled={loading}
-              onClick={handleDelete}
-              className="px-2.5 py-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-xs font-semibold transition-colors"
+              onClick={() => setConfirmResetOpen(true)}
+              className="px-2.5 py-1.5 rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 text-xs font-semibold transition-colors focus-ring cursor-pointer"
               title="Reset to default branding"
             >
               Reset
@@ -257,18 +257,18 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
         </div>
       </div>
 
-      {error && <p className="text-xs text-rose-400">{error}</p>}
+      {error && <p className="text-xs text-red-400">{error}</p>}
 
       {/* Position and Opacity Controls */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
         <div>
-          <label className="block text-[11px] font-semibold text-zinc-300 mb-1.5">
+          <label className="block text-xs font-semibold text-zinc-300 mb-1.5">
             Logo Position
           </label>
           <div className="grid grid-cols-2 gap-1.5 text-xs">
             {(
               [
-                { id: "top_right", label: "Top Right (Recommended)" },
+                { id: "top_right", label: "Top Right" },
                 { id: "top_left", label: "Top Left" },
                 { id: "bottom_right", label: "Bottom Right" },
                 { id: "bottom_left", label: "Bottom Left" },
@@ -278,10 +278,10 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
                 key={p.id}
                 type="button"
                 onClick={() => handlePositionChange(p.id)}
-                className={`px-2.5 py-1.5 rounded-lg border text-left truncate transition-colors ${
+                className={`px-2.5 py-1.5 rounded-lg border text-left truncate transition-colors focus-ring cursor-pointer ${
                   position === p.id
-                    ? "border-emerald-500 bg-emerald-500/15 text-emerald-300 font-semibold"
-                    : "border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-white"
+                    ? "border-[#10b981] bg-[#10b981]/15 text-emerald-300 font-semibold"
+                    : "border-zinc-800 bg-[#121215] text-zinc-400 hover:text-white"
                 }`}
               >
                 {p.label}
@@ -292,10 +292,10 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
 
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className="block text-[11px] font-semibold text-zinc-300">
+            <label className="block text-xs font-semibold text-zinc-300">
               Logo Opacity
             </label>
-            <span className="text-[11px] font-mono text-zinc-400">{opacity}%</span>
+            <span className="text-xs font-mono text-zinc-400">{opacity}%</span>
           </div>
           <input
             type="range"
@@ -304,14 +304,24 @@ export function CustomWatermarkSettings({ onSettingsChange }: CustomWatermarkSet
             step={5}
             value={opacity}
             onChange={(e) => handleOpacityChange(Number(e.target.value))}
-            className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+            className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-[#10b981]"
           />
-          <div className="flex justify-between text-[10px] text-zinc-500 mt-1 font-mono">
-            <span>20% (Subtle)</span>
-            <span>100% (Solid)</span>
+          <div className="flex justify-between text-xs text-zinc-500 mt-1 font-mono">
+            <span>20%</span>
+            <span>100%</span>
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmResetOpen}
+        title="Remove custom watermark?"
+        description="Remove your custom brand logo and restore the default Clip Robin watermark?"
+        confirmLabel="Remove logo"
+        variant="danger"
+        onConfirm={() => void executeDelete()}
+        onCancel={() => setConfirmResetOpen(false)}
+      />
     </div>
   );
 }

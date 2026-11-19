@@ -21,7 +21,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.className} bg-[#0a0a0a] text-white antialiased selection:bg-[#10b981]/20 selection:text-emerald-300`}>
+      <body className={`${inter.className} bg-[#09090b] text-[#f4f4f5] antialiased selection:bg-[#10b981]/20 selection:text-emerald-300`}>
         <SubscriptionProvider>
           <AppFrame>{children}</AppFrame>
         </SubscriptionProvider>

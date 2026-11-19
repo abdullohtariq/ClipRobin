@@ -72,10 +72,10 @@ export default function SidebarNav() {
             title={label}
             aria-label={label}
             aria-current={isActive ? "page" : undefined}
-            className={`flex items-center justify-center xl:justify-start gap-2.5 xl:gap-3 rounded-[10px] px-2.5 xl:px-3 py-2.5 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-[#10b981]/50 ${
+            className={`flex items-center justify-center xl:justify-start gap-2.5 xl:gap-3 rounded-xl px-2.5 xl:px-3 py-2.5 text-sm font-medium transition-all duration-150 focus-ring ${
               isActive
-                ? "bg-[#10b981]/10 text-emerald-400 font-semibold"
-                : "text-zinc-400 hover:bg-[#111113] hover:text-white"
+                ? "bg-[#10b981]/10 text-emerald-400 font-semibold border border-[#10b981]/20"
+                : "text-zinc-400 hover:bg-[#121215] hover:text-[#f4f4f5] border border-transparent"
             }`}
           >
             <span className={isActive ? "text-emerald-400" : "text-zinc-400"}>
