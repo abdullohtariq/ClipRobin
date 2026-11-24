@@ -2,7 +2,7 @@
 
 > Open-source, local-first video clipping for creators who want automation without surrendering their media workflow to the cloud.
 
-Clip Robin (**v0.1.32**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). Video processing runs locally. Cloud AI for hook suggestions is optional.
+Clip Robin (**v0.1.33**) is a Windows desktop and web application for discovering, reframing, captioning, and exporting viral short-form video clips (YouTube Shorts, TikTok, and Instagram Reels). Video processing runs locally. Cloud AI for hook suggestions is optional.
 
 Local clipping and exports have no monthly video quota. Pro includes a separate allowance for hosted Gemini Hook Finder.
 
@@ -66,7 +66,7 @@ flowchart TD
 | Semantic hook & virality scoring | Hosted Gemini or your configured API | Optional (transcript text only) |
 | Direct YouTube Shorts publishing | YouTube Data API v3 | Optional (explicit user action) |
 
-## Key Features (v0.1.32)
+## Key Features (v0.1.33)
 
 - **Dual Intake & Multi-Video Batch Queue:** Import local files (`.mp4`, `.mov`, `.mkv`, `.webm`, `.avi`) or download YouTube links (`yt-dlp`), queue multiple videos sequentially, and cancel or retry items cleanly at any stage.
 - **Three 9:16 Vertical Framing Modes:**
@@ -75,7 +75,7 @@ flowchart TD
   - **True 9:16 Smart Framing:** Defaults to stationary **Locked Crop** (configurable horizontal anchor, zero face scan) with optional **Speaker Cuts** and **Follow Speaker** active-speaker tracking powered by OpenCV YuNet ONNX + Whisper VAD, plus real vertical divider detection and per-clip **Reframe** controls (`720×1280`, 30 fps MP4).
     Speaker tracking resets at camera cuts and suppresses brief reactions that would pull the crop off the current speaker. [YuNet model license](backend/app/models/YUNET-LICENSE.txt)
 - **Flexible Clip Durations & Counter:** Generate **12s, 15s, 30s, 60s, or 90s** clips with a dynamic clip-count stepper bounded by source duration, early-exit Whisper transcription, and time-only slicing for silent media.
-- **6 High-Impact Caption Styles & Previews:** Choose **Classic**, **Robin**, **Clean**, **Punch**, **Pill**, or **Karaoke** (2 words per line, gap bridging, bundled OFL + RTL Arabic & Devanagari fonts) inside an accessible native `<dialog>` 2-pane live preview picker with platform safe-zone guides.
+- **18 High-Impact Caption Styles & Previews:** Choose **Classic**, **Clean** (Free), plus **Robin**, **Punch**, **Pill**, **Karaoke**, **Hormozi**, **Hype**, **Sticker**, **Marker**, **Neon**, **Flame**, **Cinema**, **Podcast**, **Electric**, **Aesthetic**, **Sunset**, and **Night Box** (2 words per line, gap bridging, bundled OFL + RTL Arabic & Devanagari fonts) inside an accessible native `<dialog>` 2-pane live preview picker with platform safe-zone guides.
 - **Custom Top-Line Hooks & Brand Watermarks:** Burn custom `<=15`-word headline hooks onto individual clips without re-rendering the whole project, and overlay default or validated PNG/JPG/WebP brand logos with adjustable position and opacity (`20%–100%`).
 - **AI Developer Mode (BYOK):** Configure your own Gemini API key directly in **Settings** (`gemini-3.8-flash` with automatic fallback to `gemini-3.1-flash-lite`), or configure OpenAI / DeepSeek via `.env`; requested vs. applied selection mode and any fallback reasons are tracked transparently without hiding failed AI runs in cache.
 - **Native Export & Social Publishing:** Export single clips or full project `.zip` archives through native Windows File Explorer Save As dialogs (`POST` staging preserves committed clips if cancelled or interrupted), publish directly to **YouTube Shorts** via Google OAuth2 resumable upload, or prepare clips with **Prepare for TikTok** and **Prepare for Instagram** helpers.
@@ -157,16 +157,16 @@ npm.cmd run build
 `frontend/package.json`, `frontend/src-tauri/Cargo.toml`, and `frontend/src-tauri/tauri.conf.json` share a synchronized version. Run the version script with the next release number from `frontend/`:
 
 ```powershell
-npm.cmd run version:set -- 0.1.32
+npm.cmd run version:set -- 0.1.33
 npm.cmd run version:check
 ```
 
 Pushing a matching `v*` tag triggers `.github/workflows/release-tauri.yml` to build the PyInstaller sidecar, bundle the signed NSIS Windows installer, and publish Tauri updater metadata to GitHub Releases:
 
 ```powershell
-git tag v0.1.32
+git tag v0.1.33
 git push origin main
-git push origin v0.1.32
+git push origin v0.1.33
 ```
 
 Production desktop builds (`com.cliprobin.desktop`) store projects, Whisper models, logs (`backend.log`), and local credentials inside `%APPDATA%\com.cliprobin.desktop` and check for signed updates automatically on startup and every 6 hours.

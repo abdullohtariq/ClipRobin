@@ -55,7 +55,7 @@ npm.cmd run lint
 npm.cmd run version:check
 
 # Bump version across all 3 manifests simultaneously
-npm.cmd run version:set -- 0.1.32
+npm.cmd run version:set -- 0.1.33
 
 # Build static production export into frontend/out/
 npm.cmd run build

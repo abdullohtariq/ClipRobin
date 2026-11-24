@@ -153,9 +153,9 @@ jobs:
           releaseBody: |
             [Download the Windows installer (.exe)](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/Clip.Robin_${{ steps.app-version.outputs.version }}_x64-setup.exe)
 
-            - Improved 9:16 speaker tracking handles camera cuts, filters false detections, and reduces brief jumps to listeners. Locked Crop keeps a fixed position without scanning faces.
-            - Clip generation restores interrupted queue entries and improves handling of silent videos.
-            - Account & Plans has clearer email recovery errors and support for Polar checkout, refunds, and Gemini credit balances. Public email delivery and paid upgrades require the hosted setup to be completed.
+            - Redesigned the studio UI (`taste`) with clearer Free vs Pro badges, compact modal sizing, and browser-based Google account sign-in plus desktop password setup support.
+            - Added 12 new viral Reels & YouTube Shorts subtitle styles (**Hormozi**, **Hype**, **Sticker**, **Marker**, **Neon**, **Flame**, **Cinema**, **Podcast**, **Electric**, **Aesthetic**, **Sunset**, and **Night Box**) alongside pre-rendered FFmpeg previews (`18` total styles).
+            - Updated Account & Plans with the public account page link, clearer callback/PKCE error messages, and Google-to-desktop password setup.
 
             Use the Windows installer above to install or update Clip Robin. Local editing and exports are available without an account.
           releaseDraft: false
