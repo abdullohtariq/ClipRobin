@@ -11,5 +11,13 @@ additional_redirect_urls = [
   "https://cliprobin-accounts.thinarch8.chatgpt.site/subscription",
 ]
 
+[auth.email.template.confirmation]
+subject = "Confirm your Clip Robin email"
+content_path = "./supabase/templates/confirm-signup.html"
+
+[auth.email.template.recovery]
+subject = "Reset your Clip Robin password"
+content_path = "./supabase/templates/reset-password.html"
+
 [functions.cliprobin-billing]
 verify_jwt = false # The function verifies user tokens and provider signatures separately.
